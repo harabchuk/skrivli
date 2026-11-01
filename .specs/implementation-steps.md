@@ -381,9 +381,11 @@ Replace the placeholder page:
 **Spec:** §8.2, §4.
 
 `src/ui/LevelMeter` — owner-drawn peak meter on the Record page, one for Mic and one for System.
+`src/audio/LevelMonitor` — idle mic + loopback capture that publishes peaks without writing to disk.
 
-- A UI timer at about 30 Hz reads the atomics. The capture and mixer threads do not touch the control.
+- A UI timer at about 30 Hz reads the atomics (monitor while idle, mixer while recording). The capture and mixer threads do not touch the control.
 - Peaks decay smoothly so speech is visible.
+- The monitor stops before recording starts and restarts when recording ends or the device selection changes.
 
 ### M3.6 M3 check
 

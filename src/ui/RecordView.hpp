@@ -3,6 +3,7 @@
 #include "pch.hpp"
 #include "Ids.hpp"
 #include "audio/DeviceManager.hpp"
+#include "audio/LevelMonitor.hpp"
 #include "audio/RecordingSession.hpp"
 #include "ui/LevelMeter.hpp"
 #include "ui/RecordButton.hpp"
@@ -48,7 +49,10 @@ public:
     END_DLGRESIZE_MAP()
 
     void SetSession(RecordingSession* session) { m_session = session; }
-    void SetDeviceManager(DeviceManager* devices) { m_devices = devices; }
+    void SetDeviceManager(DeviceManager* devices) {
+        m_devices = devices;
+        m_levelMonitor.SetDeviceManager(devices);
+    }
 
     void RefreshDevices();
     void OnRecordingStarted();
@@ -83,6 +87,8 @@ private:
     void UpdateElapsed();
     void UpdateMeters();
     void UpdateRecIndicator();
+    void StartMeterPreview();
+    void StopMeterPreview();
     void RebuildSpecialFonts(UINT dpi);
     void ApplyControlFonts();
     void ApplyComboStyle(WTL::CComboBox& combo);
@@ -103,6 +109,7 @@ private:
 
     RecordingSession* m_session = nullptr;
     DeviceManager* m_devices = nullptr;
+    LevelMonitor m_levelMonitor;
 
     WTL::CComboBox m_micCombo;
     WTL::CComboBox m_systemCombo;

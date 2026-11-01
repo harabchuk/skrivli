@@ -60,7 +60,7 @@ src/
   ui/            MainWindow, RecordView, RecordingsView, TranscriptWindow,
                  SettingsDialog, TrayIcon, LevelMeter, RecordButton
   audio/         DeviceManager, CaptureStream, SilentRenderKeepAlive, RingBuffer,
-                 Mixer, WavWriter, M4aEncoder, RecordingSession
+                 Mixer, WavWriter, M4aEncoder, RecordingSession, LevelMonitor
   transcription/ AudioFileReader, Resampler, WhisperEngine, ModelManager,
                  MarkdownFormatter, TranscriptionService
   storage/       Settings, RecordingLibrary

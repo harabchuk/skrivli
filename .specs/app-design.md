@@ -121,6 +121,7 @@ src/
     WavWriter.{hpp,cpp}
     M4aEncoder.{hpp,cpp}          # optional, Media Foundation
     RecordingSession.{hpp,cpp}    # owns all of the above for one recording
+    LevelMonitor.{hpp,cpp}        # idle mic/system peak metering (no disk I/O)
   transcription/
     AudioFileReader.{hpp,cpp}     # WAV / M4A → float PCM (MF Source Reader for M4A)
     Resampler.{hpp,cpp}           # 48k → 16k (FIR low-pass + decimate by 3), stereo → mono
@@ -271,7 +272,7 @@ Saved next to the audio as `<name>.md`:
 - The page uses a solid `COLOR_WINDOW` background. Input and Output are owner-drawn section headers: accent semibold text with a light separator line. Device combos use the flat file-dialog (`CFD`) theme with a taller selection field and drop-down rows; the Save to edit and Browse button match that height.
 - The folder picker uses `IFileOpenDialog` with `FOS_PICKFOLDERS`. The path edit is read-only; Browse… validates writability. Default folder: `%USERPROFILE%\Documents\MeetingBuddy`.
 - Device combos and folder are disabled while recording.
-- Level meters map linear peak to a −60…0 dB scale, use a green→amber→red segmented fill, double-buffer painting, and hold a peak tick for about 1 s.
+- Level meters map linear peak to a −60…0 dB scale, use a green→amber→red segmented fill, double-buffer painting, and hold a peak tick for about 1 s. They run continuously: while idle, `LevelMonitor` opens the selected mic + loopback (with keep-alive) and publishes peaks to atomics; while recording, peaks come from the mixer. The monitor stops before a recording starts and restarts when it ends or when the device selection changes.
 - Inline warning label covers missing devices / unwritable folder; hard failures use `TaskDialogIndirect`.
 - Hotkey: global `Ctrl+Alt+R` (`RegisterHotKey`, configurable or disableable) toggles recording.
 

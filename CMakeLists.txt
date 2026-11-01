@@ -47,6 +47,7 @@ set(MEETINGBUDDY_AUDIO_SOURCES
     src/audio/WavWriter.cpp
     src/audio/M4aEncoder.cpp
     src/audio/RecordingSession.cpp
+    src/audio/LevelMonitor.cpp
 )
 
 set(MEETINGBUDDY_TRANSCRIPTION_SOURCES

@@ -88,6 +88,7 @@ BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_recIndicator.ShowWindow(SW_HIDE);
     m_micDbLabel.SetWindowText(L"-inf dB");
     m_systemDbLabel.SetWindowText(L"-inf dB");
+    SetTimer(IDT_RECORD_METERS, 33);
 
     // Snapshot after the combo and folder rows have their final heights.
     DlgResize_Init(false, false);
@@ -251,6 +252,7 @@ void RecordView::ClearComboItemData(WTL::CComboBox& combo) {
 void RecordView::OnDestroy() {
     KillTimer(IDT_RECORD_ELAPSED);
     KillTimer(IDT_RECORD_METERS);
+    StopMeterPreview();
     if (m_micCombo.IsWindow()) {
         ClearComboItemData(m_micCombo);
     }
@@ -468,6 +470,7 @@ void RecordView::RefreshDevices() {
             warning = L"No system audio device — microphone-only recording is available.";
         }
         SetWarning(warning);
+        StartMeterPreview();
     }
     UpdateDeviceTooltips();
 }
@@ -515,10 +518,16 @@ void RecordView::PersistFolder() {
 
 void RecordView::OnMicSelChange(UINT /*code*/, int /*id*/, HWND /*control*/) {
     PersistDeviceSelection();
+    if (!IsRecording()) {
+        StartMeterPreview();
+    }
 }
 
 void RecordView::OnSystemSelChange(UINT /*code*/, int /*id*/, HWND /*control*/) {
     PersistDeviceSelection();
+    if (!IsRecording()) {
+        StartMeterPreview();
+    }
 }
 
 void RecordView::OnDevicesChanged() {
@@ -529,6 +538,21 @@ void RecordView::OnDevicesChanged() {
         return;
     }
     RefreshDevices();
+}
+
+void RecordView::StartMeterPreview() {
+    if (m_devices == nullptr || IsRecording()) {
+        return;
+    }
+    const auto& settings = Settings::Instance().Data();
+    m_levelMonitor.Start(
+        settings.micDeviceId,
+        settings.systemDeviceId,
+        settings.communicationsProcessing);
+}
+
+void RecordView::StopMeterPreview() {
+    m_levelMonitor.Stop();
 }
 
 bool RecordView::FolderIsWritable(const std::wstring& folder) const {
@@ -690,6 +714,9 @@ bool RecordView::ToggleRecording() {
     PersistDeviceSelection();
     SetWarning({});
 
+    // Release WASAPI clients so the recording session can open them.
+    StopMeterPreview();
+
     const auto& settings = Settings::Instance().Data();
     const RecordingStartResult result = m_session->Start(
         folder,
@@ -702,12 +729,14 @@ bool RecordView::ToggleRecording() {
 
     if (result.privacyDenied) {
         ShowPrivacyDeniedDialog();
+        StartMeterPreview();
         return false;
     }
     if (!result.started) {
         if (!result.error.empty()) {
             ShowErrorDialog(result.error);
         }
+        StartMeterPreview();
         return false;
     }
     if (!result.warning.empty()) {
@@ -721,6 +750,7 @@ void RecordView::OnRecordClicked(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void RecordView::OnRecordingStarted() {
+    StopMeterPreview();
     m_startedQpc = m_session != nullptr ? m_session->StartQpc() : 0;
     SetInputsEnabled(false);
     UpdateRecordButton();
@@ -728,35 +758,29 @@ void RecordView::OnRecordingStarted() {
     m_recBlinkOn = true;
     UpdateRecIndicator();
     SetTimer(IDT_RECORD_ELAPSED, 250);
-    SetTimer(IDT_RECORD_METERS, 33);
     UpdateElapsed();
     m_elapsedLabel.Invalidate(FALSE);
 }
 
 void RecordView::OnRecordingFinished(const std::wstring& /*path*/) {
     KillTimer(IDT_RECORD_ELAPSED);
-    KillTimer(IDT_RECORD_METERS);
     SetInputsEnabled(true);
     UpdateRecordButton();
     m_elapsedLabel.SetWindowText(L"00:00:00");
     m_elapsedLabel.Invalidate(FALSE);
     m_recBlinkOn = false;
     m_recIndicator.ShowWindow(SW_HIDE);
-    m_micMeter.SetLevel(0.0f);
-    m_systemMeter.SetLevel(0.0f);
-    m_micDbLabel.SetWindowText(L"-inf dB");
-    m_systemDbLabel.SetWindowText(L"-inf dB");
     RefreshDevices();
 }
 
 void RecordView::OnRecordingError(const std::wstring& message) {
     KillTimer(IDT_RECORD_ELAPSED);
-    KillTimer(IDT_RECORD_METERS);
     SetInputsEnabled(true);
     UpdateRecordButton();
     m_recBlinkOn = false;
     m_recIndicator.ShowWindow(SW_HIDE);
     m_elapsedLabel.Invalidate(FALSE);
+    StartMeterPreview();
     if (!message.empty()) {
         ShowErrorDialog(message);
     }
@@ -785,11 +809,17 @@ void RecordView::UpdateRecIndicator() {
 }
 
 void RecordView::UpdateMeters() {
-    if (m_session == nullptr) {
-        return;
+    float micPeak = 0.0f;
+    float sysPeak = 0.0f;
+    if (IsRecording() && m_session != nullptr) {
+        micPeak = m_session->PeakMic();
+        sysPeak = m_session->PeakSys();
+    } else {
+        micPeak = m_levelMonitor.PeakMic();
+        sysPeak = m_levelMonitor.PeakSys();
     }
-    m_micMeter.SetLevel(m_session->PeakMic());
-    m_systemMeter.SetLevel(m_session->PeakSys());
+    m_micMeter.SetLevel(micPeak);
+    m_systemMeter.SetLevel(sysPeak);
     if (m_micDbLabel.IsWindow()) {
         m_micDbLabel.SetWindowText(FormatDb(m_micMeter.DisplayDb()).c_str());
     }
