@@ -122,7 +122,7 @@ private:
     void RegisterConfiguredHotkey();
     void UnregisterConfiguredHotkey();
     void StartM4aCompression(const std::wstring& wavPath);
-    void FinishRecordingUi(const std::wstring& audioPath, bool showPrompt);
+    void FinishRecordingUi(const std::wstring& audioPath);
     // Returns true if the caller should continue exiting.
     bool ConfirmStopRecordingForExit();
     void FinishExit();

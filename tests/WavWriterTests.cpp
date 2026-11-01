@@ -21,19 +21,21 @@ std::wstring TempDir() {
 }  // namespace
 
 TEST(WavWriter, WritesHeaderAndPatchesSizes) {
+    // Arrange
     const std::wstring folder = TempDir();
     WavWriter writer;
     ASSERT_TRUE(writer.Open(folder));
     ASSERT_TRUE(writer.IsOpen());
-
     std::vector<float> frames(480 * 2, 0.25f);
+
+    // Act
     ASSERT_TRUE(writer.WriteFloatFrames(frames.data(), 480));
     ASSERT_TRUE(writer.PatchHeader());
-
     std::wstring finalPath;
     ASSERT_TRUE(writer.Finalize(finalPath));
-    ASSERT_TRUE(std::filesystem::exists(finalPath));
 
+    // Assert
+    ASSERT_TRUE(std::filesystem::exists(finalPath));
     {
         std::ifstream file(finalPath, std::ios::binary);
         ASSERT_TRUE(file.good());
@@ -51,8 +53,8 @@ TEST(WavWriter, WritesHeaderAndPatchesSizes) {
 }
 
 TEST(WavWriter, RepairPartialHeader) {
+    // Arrange
     const std::wstring folder = TempDir();
-
     WavWriter writer;
     ASSERT_TRUE(writer.Open(folder));
     const std::wstring partialPath = writer.PartialPath();
@@ -61,8 +63,10 @@ TEST(WavWriter, RepairPartialHeader) {
     writer.Abandon(); // closes without rename; partial remains on disk
     ASSERT_TRUE(std::filesystem::exists(partialPath));
 
+    // Act
     ASSERT_TRUE(WavWriter::RepairPartialHeader(partialPath));
 
+    // Assert
     {
         std::ifstream file(partialPath, std::ios::binary);
         ASSERT_TRUE(file.good());
@@ -81,9 +85,9 @@ TEST(WavWriter, RepairPartialHeader) {
 }
 
 TEST(WavWriter, RecoverPartialsInFolder) {
+    // Arrange
     const std::wstring folder = TempDir() + L"\\Recover";
     std::filesystem::create_directories(folder);
-
     WavWriter writer;
     ASSERT_TRUE(writer.Open(folder));
     const std::wstring partialPath = writer.PartialPath();
@@ -92,7 +96,10 @@ TEST(WavWriter, RecoverPartialsInFolder) {
     writer.Abandon();
     ASSERT_TRUE(std::filesystem::exists(partialPath));
 
+    // Act
     const auto recovered = WavWriter::RecoverPartialsInFolder(folder);
+
+    // Assert
     ASSERT_EQ(recovered.size(), 1u);
     EXPECT_TRUE(std::filesystem::exists(recovered[0]));
     EXPECT_FALSE(std::filesystem::exists(partialPath));

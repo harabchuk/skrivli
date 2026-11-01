@@ -91,6 +91,9 @@ Never use magic numbers.
 - COM: `CComPtr`/`CComQIPtr`, and check every `HRESULT` (log + propagate). No naked `Release()`.
 - No exceptions crossing COM, window-procedure, or thread boundaries.
 - Write comments only for constraints the code can't express.
+- Unit tests: mark distinct phases with `// Arrange`, `// Act`, and `// Assert` only when
+  those phases are separable. Do not add other comments next to those markers. Skip AAA when
+  arrange/act/assert are interleaved (e.g. a push/pop loop) or the body is a trivial one-liner.
 
 ---
 
@@ -155,8 +158,7 @@ hallucinated lines. Save as UTF-8 without BOM.
 status bar. Per-monitor DPI aware.
 - **Record tab**: INPUT/OUTPUT sections, mic and system device combos, a read-only "Save to" path with Browse…
 (`IFileOpenDialog` + `FOS_PICKFOLDERS`), an owner-drawn Record/Stop pill button, a large elapsed timer with blinking
-REC indicator, and dB-scaled level meters (segmented fill + peak hold). After stop, a "Transcribe now / Open folder"
-prompt appears. Inputs are disabled while recording.
+REC indicator, and dB-scaled level meters (segmented fill + peak hold). Inputs are disabled while recording.
 - **Recordings tab**: report-view `CListViewCtrl` with columns Name | Date | Duration | Size | Transcript, newest first. Actions:
 Play, Transcribe, View transcript, Open folder, Rename, Delete, Refresh. Kept in sync via `ReadDirectoryChangesW`.
 - **Transcript window**: read-only RichEdit showing the Markdown **source** with light styling. Toolbar has Copy all
@@ -178,7 +180,7 @@ recording, Open folder, Settings, Exit. Minimize and close hide to the tray (con
 5. Robustness: device changes, low disk, crash recovery, privacy denied, exit while recording.
 6. Recordings tab + `RecordingLibrary` + sidecar JSON.
 7. whisper.cpp integration, resampler, model manager, transcription queue, Markdown formatter.
-8. Transcript window, Transcribe prompt, transcript status column, completion balloon.
+8. Transcript window, transcript status column, completion balloon.
 9. Settings dialog, hotkey (`Ctrl+Alt+R`), start with Windows, DPI, optional M4A.
 10. Release packaging and manual test pass (spec §11).
 

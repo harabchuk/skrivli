@@ -5,15 +5,19 @@
 #include <vector>
 
 TEST(RingBuffer, PushPopRoundTrip) {
+    // Arrange
     RingBuffer ring(1024);
     const float input[] = {0.1f, -0.2f, 0.3f, -0.4f};
-    ASSERT_TRUE(ring.Push(input, 2, 12345, false));
 
+    // Act
+    ASSERT_TRUE(ring.Push(input, 2, 12345, false));
     float output[4]{};
     uint32_t frames = 0;
     uint64_t qpc = 0;
     uint32_t flags = 0;
     ASSERT_TRUE(ring.Pop(output, 8, frames, qpc, flags));
+
+    // Assert
     EXPECT_EQ(frames, 2u);
     EXPECT_EQ(qpc, 12345u);
     EXPECT_EQ(flags, 0u);
@@ -41,9 +45,11 @@ TEST(RingBuffer, Wraparound) {
 }
 
 TEST(RingBuffer, OverrunDropsWithoutBlocking) {
+    // Arrange
     RingBuffer ring(32);
     std::vector<float> packet(16, 1.0f); // 8 frames
 
+    // Act
     int pushed = 0;
     int dropped = 0;
     for (int i = 0; i < 20; ++i) {
@@ -53,6 +59,8 @@ TEST(RingBuffer, OverrunDropsWithoutBlocking) {
             ++dropped;
         }
     }
+
+    // Assert
     EXPECT_EQ(pushed, 4); // 32-frame capacity / 8-frame packets
     EXPECT_GT(dropped, 0);
     EXPECT_TRUE(ring.ConsumeOverrun());

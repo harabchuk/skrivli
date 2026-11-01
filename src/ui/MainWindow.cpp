@@ -53,14 +53,6 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     m_session.SetDeviceManager(&m_devices);
     m_recordView.SetSession(&m_session);
     m_recordView.SetDeviceManager(&m_devices);
-    m_recordView.SetTranscribeHandler(
-        [](void* context, const std::wstring& audioPath) {
-            auto* self = static_cast<MainWindow*>(context);
-            if (self != nullptr) {
-                self->EnqueueTranscription(audioPath);
-            }
-        },
-        this);
     TranscriptionService::Instance().SetNotifyHwnd(m_hWnd);
     TranscriptionService::Instance().Start();
 
@@ -507,13 +499,11 @@ void MainWindow::StartM4aCompression(const std::wstring& wavPath) {
     }).detach();
 }
 
-void MainWindow::FinishRecordingUi(const std::wstring& audioPath, bool showPrompt) {
+void MainWindow::FinishRecordingUi(const std::wstring& audioPath) {
     if (Settings::Instance().Data().autoTranscribe && !audioPath.empty()) {
         EnqueueTranscription(audioPath);
-        m_recordView.OnRecordingFinished(audioPath, false);
-    } else {
-        m_recordView.OnRecordingFinished(audioPath, showPrompt);
     }
+    m_recordView.OnRecordingFinished(audioPath);
     SetStatusIdle();
     m_tray.SetRecording(false);
     RefreshRecordingsList();
@@ -668,14 +658,14 @@ LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM 
         WriteSidecarForPath(*path);
         Log::Info(L"Recording saved: " + *path);
         if (Settings::Instance().Data().compressToM4a) {
-            m_recordView.OnRecordingFinished(*path, false);
+            m_recordView.OnRecordingFinished(*path);
             SetStatusIdle();
             m_tray.SetRecording(false);
             StartM4aCompression(*path);
             return 0;
         }
     }
-    FinishRecordingUi(path ? *path : std::wstring{}, true);
+    FinishRecordingUi(path ? *path : std::wstring{});
     return 0;
 }
 
@@ -688,9 +678,9 @@ LRESULT MainWindow::OnM4aFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam
     if (path && !path->empty()) {
         // Sidecar stays on the shared stem; point the UI at the M4A.
         Log::Info(L"Recording compressed: " + *path);
-        FinishRecordingUi(*path, true);
+        FinishRecordingUi(*path);
     } else {
-        FinishRecordingUi({}, true);
+        FinishRecordingUi({});
     }
     return 0;
 }
@@ -706,7 +696,7 @@ LRESULT MainWindow::OnM4aFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, 
         m_tray.ShowBalloon(L"MeetingBuddy", message->c_str());
         ::MessageBoxW(m_hWnd, message->c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
     }
-    FinishRecordingUi(wav, true);
+    FinishRecordingUi(wav);
     return 0;
 }
 

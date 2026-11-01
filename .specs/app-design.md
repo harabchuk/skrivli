@@ -237,7 +237,7 @@ Saved next to the audio as `<name>.md`:
 - FIFO job queue; one job runs at a time. Job states: `Queued → Preparing → Transcribing (n%) → Done | Failed | Cancelled`.
 - The state is reflected in the Recordings list and in the sidecar JSON.
 - When a job finishes, show a tray balloon ("Transcript ready — click to open") and open the TranscriptWindow automatically if the main window is visible.
-- **Optional by design**: nothing transcribes automatically unless the user enables "Transcribe automatically after recording" in settings (off by default). After each recording, a non-blocking prompt on the Record tab offers **Transcribe now / Not now**.
+- **Optional by design**: nothing transcribes automatically unless the user enables "Transcribe automatically after recording" in settings (off by default). Otherwise the user starts transcription from the Recordings tab.
 
 ---
 
@@ -246,7 +246,7 @@ Saved next to the audio as `<name>.md`:
 ### 8.1 Main window
 - Resizable `CFrameWindowImpl` (allow resizing and maximizing, unlike the current fixed style). Minimum size about 560×420; position and size are saved.
 - Menu bar: **File** (Open recordings folder, Settings…, Exit), **Help** (About).
-- Client area: `CTabCtrl` filling the client area. Each tab page is a child `CDialogImpl` (resource dialog, `DS_CONTROL | WS_CHILD`) so layout uses `CDialogResize`. Switching tabs shows/hides the pages.
+- Client area: `CTabCtrl` filling the client area, with the Record / Recordings labels centered in the strip. Each tab page is a child `CDialogImpl` (resource dialog, `DS_CONTROL | WS_CHILD`) so layout uses `CDialogResize`. Switching tabs shows/hides the pages.
 - Status bar (`CMultiPaneStatusBarCtrl`): recording state, elapsed time, transcription progress.
 - Per-monitor DPI: handle `WM_DPICHANGED`, and scale fonts and the meter control.
 
@@ -266,8 +266,6 @@ Saved next to the audio as `<name>.md`:
 │  System  ▕████░░░░░░░░░░░░░░▏  -24 dB        │   with peak-hold tick
 │                                              │
 │  ! warning / device status (inline)          │
-│  Last recording: MeetingBuddy_…wav           │
-│  [ Transcribe now ]  [ Open folder ]         │   shown after stop
 └──────────────────────────────────────────────┘
 ```
 - The page uses a solid `COLOR_WINDOW` background. Input and Output are owner-drawn section headers: accent semibold text with a light separator line. Device combos use the flat file-dialog (`CFD`) theme with a taller selection field and drop-down rows; the Save to edit and Browse button match that height.
@@ -370,7 +368,7 @@ Each milestone ends with a working, runnable app.
 7. **M6 — Transcription engine** (≈3 days)
    whisper.cpp integration in CMake, `AudioFileReader`, `Resampler`, `WhisperEngine`, `ModelManager` (download + browse), `TranscriptionService` queue with progress/cancel, `MarkdownFormatter`.
 8. **M7 — Transcript UI** (≈2 days)
-   `TranscriptWindow` with styled RichEdit, Copy all / Save as / Open in editor / Find. "Transcribe now" prompt after a recording, Transcript column states, tray balloon on completion.
+   `TranscriptWindow` with styled RichEdit, Copy all / Save as / Open in editor / Find. Transcript column states, tray balloon on completion.
 9. **M8 — Settings and polish** (≈2 days)
    Settings dialog, global hotkey, start with Windows, DPI polish, optional M4A compression, keyboard accessibility (tab order, mnemonics), About dialog.
 10. **M9 — Release** (≈1–2 days)

@@ -37,7 +37,7 @@ There is no audio, tray, settings, logging, resources, or tests yet.
 | M4 | Robustness | §6.2, §6.5–§6.6, §9 | Device loss, disk, crash recovery, exit while recording |
 | M5 | Recordings | §6.5, §8.3 | Library, list, play/rename/delete, watcher |
 | M6 | Transcription engine | §7, §10 | whisper.cpp, resample, models, Markdown, queue |
-| M7 | Transcript UI | §7.5, §8.2, §8.4 | Viewer, prompt, status column, balloon |
+| M7 | Transcript UI | §7.5, §8.2, §8.4 | Viewer, status column, balloon |
 | M8 | Settings and polish | §8.2, §8.5, §8.7, §6.5 | Dialog, hotkey, startup, DPI, optional M4A |
 | M9 | Release | §10, §11 | Portable zip, README, manual test pass |
 
@@ -324,7 +324,7 @@ Replace the placeholder page:
 - Status-bar panes show "Recording" and the elapsed time.
 - Disable the combo and folder controls while `Starting`, `Recording`, or `Stopping`.
 - Tray Start/Stop calls the same session commands. Swap in `tray_recording.ico` and set the tooltip to "Recording hh:mm:ss" while recording.
-- System-audio combo, meters, and the post-stop prompt are not in this milestone. A missing microphone shows the error from the session and does not create a file.
+- System-audio combo and meters are not in this milestone. A missing microphone shows the error from the session and does not create a file.
 
 ### M2.8 M2 check
 
@@ -622,7 +622,7 @@ No UI polish in this milestone beyond enough of a control to enqueue a job and s
 - Post `WM_APP_TRANSCRIBE_QUEUED`, `WM_APP_TRANSCRIBE_PROGRESS` (percent), `WM_APP_TRANSCRIBE_FINISHED`, `WM_APP_TRANSCRIBE_FAILED`. Add the ids in `Ids.hpp`.
 - Status-bar transcription pane shows the percent for the active job.
 - Enable **Transcribe** on the Recordings tab. It enqueues the selected file. A second click while that file is queued or running requests cancel.
-- Do **not** auto-start a job when recording stops. `AutoTranscribe` stays off and is honored only once M7 adds the prompt (and M8 the checkbox). If the setting is already on, M6 may enqueue at stop so the worker is testable; the visible prompt is still M7.
+- Do **not** auto-start a job when recording stops. `AutoTranscribe` stays off and is honored once M7/M8 wire the setting (and M8 the checkbox). If the setting is already on, M6 may enqueue at stop so the worker is testable.
 
 ### M6.8 M6 check
 
@@ -656,13 +656,11 @@ No UI polish in this milestone beyond enough of a control to enqueue a job and s
 - **Find** — `Ctrl+F`, `FINDMSGSTRING` dialog, search inside the control.
 - Ctrl+A / Ctrl+C work. Status bar shows the word count.
 
-### M7.3 After-recording prompt
+### M7.3 Auto-transcribe after recording
 
 **Spec:** §7.5, §8.2.
 
-When `WM_APP_RECORDING_FINISHED` arrives and `AutoTranscribe` is off, the Record tab shows the last file name plus **Transcribe now** and **Open folder**. Not now is dismissing the prompt (hiding the transcribe button is enough). The prompt is non-modal and does not block the next recording.
-
-When `AutoTranscribe` is on, enqueue immediately and skip the prompt.
+When `WM_APP_RECORDING_FINISHED` arrives and `AutoTranscribe` is on, enqueue the new file immediately. Otherwise leave transcription to the Recordings tab (or a later manual action). There is no post-stop prompt on the Record tab.
 
 ### M7.4 List, balloon, and double-click
 
@@ -675,7 +673,7 @@ When `AutoTranscribe` is on, enqueue immediately and skip the prompt.
 
 ### M7.5 M7 check
 
-- Transcribe now, the Recordings action, and auto-transcribe (flip the ini key by hand until M8) all produce the same Markdown and the same column states.
+- The Recordings action and auto-transcribe (flip the ini key by hand until M8) produce the same Markdown and the same column states.
 - Copy all and a selection both paste as Markdown source, including the `#` heading and `**[timestamp]**` markers.
 - Find, Save as, and Open in editor work. A completion balloon opens the transcript.
 - A failed job (bad model path) sets Failed, shows the reason, and does not alter the WAV.
@@ -795,9 +793,9 @@ Run the integration list and fix defects before calling M9 done:
 | §6.6 Session lifecycle | M2, M4 exit and end-session |
 | §7.1–§7.3 Engine, resample, models | M6 |
 | §7.4 Markdown | M6 formatter, M7 viewer |
-| §7.5 Queue, prompt, balloon | M6 queue, M7 prompt and balloon |
+| §7.5 Queue, balloon | M6 queue, M7 balloon |
 | §8.1 Main window | M1, M8 DPI and About |
-| §8.2 Record tab | M2, M3 meters, M7 prompt, M8 hotkey |
+| §8.2 Record tab | M2, M3 meters, M8 hotkey |
 | §8.3 Recordings tab | M5, M7 transcript column and double-click |
 | §8.4 Transcript window | M7 |
 | §8.5 Tray | M1, M4 balloons, M7 transcript balloon, M8 startup |

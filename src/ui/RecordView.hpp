@@ -25,8 +25,6 @@ public:
         MSG_WM_DRAWITEM(OnDrawItem)
         COMMAND_HANDLER_EX(IDC_RECORD_BUTTON, BN_CLICKED, OnRecordClicked)
         COMMAND_HANDLER_EX(IDC_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
-        COMMAND_HANDLER_EX(IDC_TRANSCRIBE_NOW, BN_CLICKED, OnTranscribeNow)
-        COMMAND_HANDLER_EX(IDC_OPEN_LAST_FOLDER, BN_CLICKED, OnOpenLastFolder)
         COMMAND_HANDLER_EX(IDC_MIC_DEVICE, CBN_SELCHANGE, OnMicSelChange)
         COMMAND_HANDLER_EX(IDC_SYSTEM_DEVICE, CBN_SELCHANGE, OnSystemSelChange)
         CHAIN_MSG_MAP(WTL::CDialogResize<RecordView>)
@@ -47,26 +45,17 @@ public:
         DLGRESIZE_CONTROL(IDC_MIC_DB, DLSZ_MOVE_X)
         DLGRESIZE_CONTROL(IDC_SYSTEM_DB, DLSZ_MOVE_X)
         DLGRESIZE_CONTROL(IDC_DEVICE_WARNING, DLSZ_SIZE_X)
-        DLGRESIZE_CONTROL(IDC_LAST_RECORDING, DLSZ_SIZE_X)
     END_DLGRESIZE_MAP()
-
-    using TranscribeRequestFn = void (*)(void* context, const std::wstring& audioPath);
 
     void SetSession(RecordingSession* session) { m_session = session; }
     void SetDeviceManager(DeviceManager* devices) { m_devices = devices; }
-    void SetTranscribeHandler(TranscribeRequestFn fn, void* context) {
-        m_transcribeFn = fn;
-        m_transcribeContext = context;
-    }
 
     void RefreshDevices();
     void OnRecordingStarted();
-    void OnRecordingFinished(const std::wstring& path, bool showPrompt = true);
+    void OnRecordingFinished(const std::wstring& path);
     void OnRecordingError(const std::wstring& message);
     void OnDevicesChanged();
     void SetWarning(const std::wstring& text);
-    void HidePostRecordPrompt();
-    void ShowPostRecordPrompt(const std::wstring& path);
     void ApplyUiFont(HFONT font);
     void OnDpiChanged(UINT dpi);
     void SyncControlsToSettings();
@@ -84,8 +73,6 @@ private:
     void OnDrawItem(int id, LPDRAWITEMSTRUCT drawItem);
     void OnRecordClicked(UINT code, int id, HWND control);
     void OnBrowseFolder(UINT code, int id, HWND control);
-    void OnTranscribeNow(UINT code, int id, HWND control);
-    void OnOpenLastFolder(UINT code, int id, HWND control);
     void OnMicSelChange(UINT code, int id, HWND control);
     void OnSystemSelChange(UINT code, int id, HWND control);
 
@@ -116,8 +103,6 @@ private:
 
     RecordingSession* m_session = nullptr;
     DeviceManager* m_devices = nullptr;
-    TranscribeRequestFn m_transcribeFn = nullptr;
-    void* m_transcribeContext = nullptr;
 
     WTL::CComboBox m_micCombo;
     WTL::CComboBox m_systemCombo;
@@ -126,7 +111,6 @@ private:
     WTL::CStatic m_elapsedLabel;
     WTL::CStatic m_recIndicator;
     WTL::CStatic m_warningLabel;
-    WTL::CStatic m_lastRecordingLabel;
     WTL::CStatic m_micDbLabel;
     WTL::CStatic m_systemDbLabel;
     WTL::CStatic m_inputSection;
@@ -144,5 +128,4 @@ private:
     UINT m_dpi = USER_DEFAULT_SCREEN_DPI;
     int m_recBlinkTicks = 0;
     bool m_recBlinkOn = false;
-    std::wstring m_lastRecordingPath;
 };

@@ -34,19 +34,28 @@ double Rms(const std::vector<float>& samples) {
 }  // namespace
 
 TEST(Resampler, OneKHzSineKeepsEnergy) {
+    // Arrange
     const auto stereo = MakeStereoSine(1000.0, 0.25, 0.5f);
+
+    // Act
     const auto mono = Resampler::Stereo48kToMono16k(stereo.data(), stereo.size() / 2);
+
+    // Assert
     ASSERT_FALSE(mono.empty());
     EXPECT_NEAR(static_cast<double>(mono.size()), 0.25 * 16000.0, 2.0);
-
     const double inRms = 0.5 / std::sqrt(2.0);
     const double outRms = Rms(mono);
     EXPECT_NEAR(outRms, inRms, 0.08);
 }
 
 TEST(Resampler, TenKHzToneIsAttenuated) {
+    // Arrange
     const auto stereo = MakeStereoSine(10000.0, 0.25, 0.5f);
+
+    // Act
     const auto mono = Resampler::Stereo48kToMono16k(stereo.data(), stereo.size() / 2);
+
+    // Assert
     ASSERT_FALSE(mono.empty());
     const double outRms = Rms(mono);
     EXPECT_LT(outRms, 0.08);
