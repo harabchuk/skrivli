@@ -46,6 +46,8 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     m_session.SetDeviceManager(&m_devices);
     m_recordView.SetSession(&m_session);
     m_recordView.SetDeviceManager(&m_devices);
+    TranscriptionService::Instance().SetNotifyHwnd(m_hWnd);
+    TranscriptionService::Instance().Start();
 
     if (!m_devices.Initialize(m_hWnd)) {
         Log::Warn(L"DeviceManager failed to initialize");
@@ -376,9 +378,21 @@ void MainWindow::OnDestroy() {
     if (m_session.IsActive()) {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
+    TranscriptionService::Instance().Stop();
     m_devices.Shutdown();
     m_tray.Remove();
     PostQuitMessage(0);
+}
+
+void MainWindow::SetTranscribeStatusText(const std::wstring& text) {
+    m_status.SetPaneText(IDC_STATUS_PANE_TRANSCRIBE, text.c_str());
+}
+
+bool MainWindow::EnqueueTranscription(const std::wstring& audioPath) {
+    if (audioPath.empty()) {
+        return false;
+    }
+    return TranscriptionService::Instance().Enqueue(m_hWnd, audioPath);
 }
 
 void MainWindow::RequestExit() {
@@ -510,6 +524,9 @@ LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM 
     if (path && !path->empty()) {
         WriteSidecarForPath(*path);
         Log::Info(L"Recording saved: " + *path);
+        if (Settings::Instance().Data().autoTranscribe) {
+            EnqueueTranscription(*path);
+        }
     }
     m_recordView.OnRecordingFinished(path ? *path : std::wstring{});
     SetStatusIdle();
@@ -644,5 +661,49 @@ void MainWindow::OnTrayStartStop(UINT /*code*/, int /*id*/, HWND /*control*/) {
 
 LRESULT MainWindow::OnTabSelChange(LPNMHDR /*header*/) {
     ShowSelectedTab();
+    return 0;
+}
+
+LRESULT MainWindow::OnTranscribeQueued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
+    SetTranscribeStatusText(L"Queued");
+    RefreshRecordingsList();
+    (void)notify;
+    return 0;
+}
+
+LRESULT MainWindow::OnTranscribeProgress(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
+    if (notify) {
+        wchar_t buf[64]{};
+        std::swprintf(buf, 64, L"Transcribing %d%%", notify->percent);
+        SetTranscribeStatusText(buf);
+        if (m_recordingsView.IsWindow()) {
+            m_recordingsView.SetTranscriptProgress(notify->audioPath, notify->percent);
+        }
+    }
+    return 0;
+}
+
+LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
+    SetTranscribeStatusText(L"Ready");
+    RefreshRecordingsList();
+    (void)notify;
+    return 0;
+}
+
+LRESULT MainWindow::OnTranscribeFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
+    if (notify && !notify->message.empty()) {
+        SetTranscribeStatusText(notify->message);
+    } else {
+        SetTranscribeStatusText(L"Failed");
+    }
+    RefreshRecordingsList();
     return 0;
 }

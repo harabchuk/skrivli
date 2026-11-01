@@ -1,6 +1,7 @@
 #include "ui/RecordingsView.hpp"
 
 #include "storage/Settings.hpp"
+#include "transcription/TranscriptionService.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
@@ -66,12 +67,30 @@ BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_list.InsertColumn(ColSize, L"Size", LVCFMT_RIGHT, 70);
     m_list.InsertColumn(ColTranscript, L"Transcript", LVCFMT_LEFT, 80);
 
-    ::EnableWindow(GetDlgItem(IDC_REC_TRANSCRIBE), FALSE);
     ::EnableWindow(GetDlgItem(IDC_REC_VIEW), FALSE);
 
     EnsureWatching();
     Refresh();
     return TRUE;
+}
+
+void RecordingsView::SetTranscriptProgress(const std::wstring& audioPath, int percent) {
+    m_progressPath = audioPath;
+    m_progressPercent = percent;
+    for (size_t i = 0; i < m_entries.size(); ++i) {
+        if (_wcsicmp(m_entries[i].audioPath.c_str(), audioPath.c_str()) != 0) {
+            continue;
+        }
+        m_entries[i].transcriptStatus = TranscriptStatus::Transcribing;
+        m_entries[i].transcriptPercent = percent;
+        for (int row = 0; row < m_list.GetItemCount(); ++row) {
+            if (static_cast<size_t>(m_list.GetItemData(row)) == i) {
+                m_list.SetItemText(row, ColTranscript, TranscriptLabel(m_entries[i]).c_str());
+                break;
+            }
+        }
+        break;
+    }
 }
 
 void RecordingsView::OnDestroy() {
@@ -93,6 +112,24 @@ void RecordingsView::EnsureWatching() {
 void RecordingsView::Refresh() {
     EnsureWatching();
     m_entries = RecordingLibrary::Scan(Settings::Instance().RecordingsFolder());
+    if (!m_progressPath.empty()) {
+        bool stillActive = false;
+        for (auto& entry : m_entries) {
+            if (_wcsicmp(entry.audioPath.c_str(), m_progressPath.c_str()) != 0) {
+                continue;
+            }
+            if (entry.transcriptStatus == TranscriptStatus::Transcribing
+                || entry.transcriptStatus == TranscriptStatus::Preparing
+                || entry.transcriptStatus == TranscriptStatus::Queued) {
+                entry.transcriptPercent = m_progressPercent;
+                stillActive = true;
+            }
+        }
+        if (!stillActive) {
+            m_progressPath.clear();
+            m_progressPercent = -1;
+        }
+    }
     ApplySort();
     PopulateList();
     UpdateActionEnabled();
@@ -121,7 +158,7 @@ void RecordingsView::UpdateActionEnabled() {
     ::EnableWindow(GetDlgItem(IDC_REC_OPENFOLDER), hasSel ? TRUE : FALSE);
     ::EnableWindow(GetDlgItem(IDC_REC_RENAME), hasSel ? TRUE : FALSE);
     ::EnableWindow(GetDlgItem(IDC_REC_DELETE), hasSel ? TRUE : FALSE);
-    ::EnableWindow(GetDlgItem(IDC_REC_TRANSCRIBE), FALSE);
+    ::EnableWindow(GetDlgItem(IDC_REC_TRANSCRIBE), hasSel ? TRUE : FALSE);
     const bool canView = entry != nullptr && entry->hasMarkdown;
     ::EnableWindow(GetDlgItem(IDC_REC_VIEW), canView ? TRUE : FALSE);
 }
@@ -182,10 +219,32 @@ std::wstring RecordingsView::FormatDate(const std::wstring& startLocal) {
 }
 
 std::wstring RecordingsView::TranscriptLabel(const RecordingEntry& entry) {
-    if (entry.hasMarkdown || entry.transcriptStatus == TranscriptStatus::Ready) {
-        return L"Ready";
+    switch (entry.transcriptStatus) {
+    case TranscriptStatus::Queued:
+        return L"Queued";
+    case TranscriptStatus::Preparing:
+        return L"Preparing";
+    case TranscriptStatus::Transcribing: {
+        if (entry.transcriptPercent >= 0) {
+            wchar_t buf[32]{};
+            std::swprintf(buf, 32, L"%d %%", entry.transcriptPercent);
+            return buf;
+        }
+        return L"Transcribing";
     }
-    return L"—";
+    case TranscriptStatus::Ready:
+        return L"Ready";
+    case TranscriptStatus::Failed:
+        return L"Failed";
+    case TranscriptStatus::Cancelled:
+        return L"Cancelled";
+    case TranscriptStatus::None:
+    default:
+        if (entry.hasMarkdown) {
+            return L"Ready";
+        }
+        return L"—";
+    }
 }
 
 void RecordingsView::ToggleSort(Column column) {
@@ -228,7 +287,19 @@ void RecordingsView::OnPlay(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void RecordingsView::OnTranscribe(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    // Enabled in M6.
+    const RecordingEntry* entry = SelectedEntry();
+    if (entry == nullptr) {
+        return;
+    }
+    auto& service = TranscriptionService::Instance();
+    if (service.IsQueuedOrActive(entry->audioPath)) {
+        service.Cancel(entry->audioPath);
+        return;
+    }
+    if (!service.Enqueue(GetParent(), entry->audioPath)) {
+        return;
+    }
+    Refresh();
 }
 
 void RecordingsView::OnView(UINT /*code*/, int /*id*/, HWND /*control*/) {
@@ -314,7 +385,7 @@ LRESULT RecordingsView::OnRightClick(LPNMHDR /*header*/) {
 
     const RecordingEntry* entry = SelectedEntry();
     popup.EnableMenuItem(IDC_REC_PLAY, MF_BYCOMMAND | (entry ? MF_ENABLED : MF_GRAYED));
-    popup.EnableMenuItem(IDC_REC_TRANSCRIBE, MF_BYCOMMAND | MF_GRAYED);
+    popup.EnableMenuItem(IDC_REC_TRANSCRIBE, MF_BYCOMMAND | (entry ? MF_ENABLED : MF_GRAYED));
     popup.EnableMenuItem(
         IDC_REC_VIEW,
         MF_BYCOMMAND | ((entry && entry->hasMarkdown) ? MF_ENABLED : MF_GRAYED));

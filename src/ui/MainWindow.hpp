@@ -5,6 +5,7 @@
 #include "audio/DeviceManager.hpp"
 #include "audio/RecordingSession.hpp"
 #include "storage/Settings.hpp"
+#include "transcription/TranscriptionService.hpp"
 #include "ui/RecordView.hpp"
 #include "ui/RecordingsView.hpp"
 #include "ui/TrayIcon.hpp"
@@ -34,6 +35,10 @@ public:
         MESSAGE_HANDLER(WM_APP_DEVICE_SWITCHED, OnDeviceSwitched)
         MESSAGE_HANDLER(WM_APP_LOW_DISK, OnLowDisk)
         MESSAGE_HANDLER(WM_APP_RECORDING_RESCUED, OnRecordingRescued)
+        MESSAGE_HANDLER(WM_APP_TRANSCRIBE_QUEUED, OnTranscribeQueued)
+        MESSAGE_HANDLER(WM_APP_TRANSCRIBE_PROGRESS, OnTranscribeProgress)
+        MESSAGE_HANDLER(WM_APP_TRANSCRIBE_FINISHED, OnTranscribeFinished)
+        MESSAGE_HANDLER(WM_APP_TRANSCRIBE_FAILED, OnTranscribeFailed)
         COMMAND_ID_HANDLER_EX(ID_APP_EXIT, OnFileExit)
         COMMAND_ID_HANDLER_EX(ID_FILE_OPENFOLDER, OnOpenRecordingsFolder)
         COMMAND_ID_HANDLER_EX(ID_FILE_SETTINGS, OnSettings)
@@ -77,6 +82,10 @@ private:
     LRESULT OnDeviceSwitched(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnLowDisk(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnRecordingRescued(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnTranscribeQueued(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnTranscribeProgress(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnTranscribeFinished(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnTranscribeFailed(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     void OnFileExit(UINT code, int id, HWND control);
     void OnOpenRecordingsFolder(UINT code, int id, HWND control);
     void OnSettings(UINT code, int id, HWND control);
@@ -100,6 +109,8 @@ private:
     void RecoverPartialRecordings();
     void WriteSidecarForPath(const std::wstring& audioPath);
     void RefreshRecordingsList();
+    void SetTranscribeStatusText(const std::wstring& text);
+    bool EnqueueTranscription(const std::wstring& audioPath);
     // Returns true if the caller should continue exiting.
     bool ConfirmStopRecordingForExit();
     void FinishExit();

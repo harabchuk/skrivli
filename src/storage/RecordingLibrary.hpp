@@ -17,6 +17,8 @@ struct RecordingEntry {
     double durationSeconds = 0.0;
     uint64_t sizeBytes = 0;
     TranscriptStatus transcriptStatus = TranscriptStatus::None;
+    std::wstring transcriptError;
+    int transcriptPercent = -1; // -1 = n/a; set by UI for active job
     bool hasMarkdown = false;
 };
 

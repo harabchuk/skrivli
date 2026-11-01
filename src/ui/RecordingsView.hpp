@@ -46,6 +46,7 @@ public:
 
     void Refresh();
     void EnsureWatching();
+    void SetTranscriptProgress(const std::wstring& audioPath, int percent);
 
 private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
@@ -80,4 +81,6 @@ private:
     DirectoryWatcher m_watcher;
     Column m_sortColumn = ColDate;
     bool m_sortAscending = false;
+    std::wstring m_progressPath;
+    int m_progressPercent = -1;
 };

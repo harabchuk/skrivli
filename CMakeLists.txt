@@ -16,6 +16,28 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(wtl)
 
+# whisper.cpp v1.9.5 — CPU only, static, portable AVX2 (no native host tuning).
+set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(GGML_AVX ON CACHE BOOL "" FORCE)
+set(GGML_AVX2 ON CACHE BOOL "" FORCE)
+set(GGML_FMA ON CACHE BOOL "" FORCE)
+set(GGML_F16C ON CACHE BOOL "" FORCE)
+set(GGML_CUDA OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_BLAS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    whisper
+    GIT_REPOSITORY https://github.com/ggml-org/whisper.cpp.git
+    GIT_TAG        v1.9.5
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(whisper)
+
 set(MEETINGBUDDY_AUDIO_SOURCES
     src/audio/DeviceManager.cpp
     src/audio/CaptureStream.cpp
@@ -24,6 +46,15 @@ set(MEETINGBUDDY_AUDIO_SOURCES
     src/audio/Mixer.cpp
     src/audio/WavWriter.cpp
     src/audio/RecordingSession.cpp
+)
+
+set(MEETINGBUDDY_TRANSCRIPTION_SOURCES
+    src/transcription/AudioFileReader.cpp
+    src/transcription/Resampler.cpp
+    src/transcription/MarkdownFormatter.cpp
+    src/transcription/WhisperEngine.cpp
+    src/transcription/ModelManager.cpp
+    src/transcription/TranscriptionService.cpp
 )
 
 set(MEETINGBUDDY_UTIL_SOURCES
@@ -45,6 +76,7 @@ add_executable(MeetingBuddy WIN32
     src/ui/TrayIcon.cpp
     src/ui/LevelMeter.cpp
     ${MEETINGBUDDY_AUDIO_SOURCES}
+    ${MEETINGBUDDY_TRANSCRIPTION_SOURCES}
     ${MEETINGBUDDY_UTIL_SOURCES}
     resources/MeetingBuddy.rc
 )
@@ -64,6 +96,7 @@ target_compile_definitions(MeetingBuddy PRIVATE
 )
 
 target_link_libraries(MeetingBuddy PRIVATE
+    whisper
     ole32
     uuid
     shell32
@@ -75,8 +108,12 @@ target_link_libraries(MeetingBuddy PRIVATE
     winmm
     mfplat
     mf
+    mfreadwrite
     mfuuid
     wmcodecdspuuid
+    winhttp
+    bcrypt
+    crypt32
 )
 
 if(MSVC)
@@ -102,10 +139,14 @@ if(MEETINGBUDDY_BUILD_TESTS)
         tests/WavWriterTests.cpp
         tests/MixerTests.cpp
         tests/RecordingLibraryTests.cpp
+        tests/ResamplerTests.cpp
+        tests/MarkdownFormatterTests.cpp
         src/audio/Mixer.cpp
         src/audio/WavWriter.cpp
         src/storage/RecordingSidecar.cpp
         src/storage/RecordingLibrary.cpp
+        src/transcription/Resampler.cpp
+        src/transcription/MarkdownFormatter.cpp
         src/util/Paths.cpp
         src/util/Log.cpp
         src/util/HResult.cpp

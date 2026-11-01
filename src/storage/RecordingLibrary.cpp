@@ -214,6 +214,7 @@ std::vector<RecordingEntry> RecordingLibrary::Scan(const std::wstring& folder) {
             entry.startLocal = Sidecar::Utf8ToWide(side.startLocal);
             entry.durationSeconds = side.durationSeconds;
             entry.transcriptStatus = side.transcriptStatus;
+            entry.transcriptError = Sidecar::Utf8ToWide(side.transcriptError);
             if (entry.hasMarkdown && entry.transcriptStatus == TranscriptStatus::None) {
                 entry.transcriptStatus = TranscriptStatus::Ready;
             }
