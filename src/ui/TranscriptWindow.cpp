@@ -361,7 +361,8 @@ void TranscriptWindow::OnDestroy() {
     if (m_toolbar.IsWindow()) {
         m_toolbar.Detach();
     }
-    SetMsgHandled(FALSE);
+    // Do not chain to CFrameWindowImplBase::OnDestroy — it PostQuitMessage()s for
+    // top-level frames, which would exit the whole app when closing a transcript.
 }
 
 void TranscriptWindow::OnSetFocus(CWindow /*oldFocus*/) {
