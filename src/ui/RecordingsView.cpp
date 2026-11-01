@@ -81,6 +81,13 @@ BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     return TRUE;
 }
 
+void RecordingsView::OnSize(UINT type, CSize size) {
+    if (type != SIZE_MINIMIZED) {
+        DlgResize_UpdateLayout(size.cx, size.cy);
+        FitColumns();
+    }
+}
+
 HBRUSH RecordingsView::OnCtlColorDlg(CDCHandle dc, CWindow /*wnd*/) {
     // Match the Record page: pure window white instead of the dialog default.
     dc.SetBkColor(ui::WindowColor());
@@ -181,6 +188,42 @@ void RecordingsView::PopulateList() {
     }
     m_list.SetRedraw(TRUE);
     m_list.Invalidate();
+    FitColumns();
+}
+
+void RecordingsView::FitColumns() {
+    if (!m_list.IsWindow()) {
+        return;
+    }
+    const HWND header = m_list.GetHeader();
+    if (header == nullptr || Header_GetItemCount(header) < 5) {
+        return;
+    }
+
+    static constexpr int kWeights[] = {180, 130, 70, 70, 80};
+    static constexpr int kColumnCount = 5;
+    static constexpr int kWeightSum = 180 + 130 + 70 + 70 + 80;
+
+    // A second pass picks up the vertical scrollbar appearing or disappearing.
+    for (int pass = 0; pass < 2; ++pass) {
+        RECT client{};
+        m_list.GetClientRect(&client);
+        const int width = client.right - client.left;
+        if (width <= 0) {
+            return;
+        }
+
+        int used = 0;
+        for (int column = 0; column < kColumnCount; ++column) {
+            const int columnWidth = (column == kColumnCount - 1)
+                ? (width - used)
+                : (width * kWeights[column] / kWeightSum);
+            if (m_list.GetColumnWidth(column) != columnWidth) {
+                m_list.SetColumnWidth(column, columnWidth);
+            }
+            used += columnWidth;
+        }
+    }
 }
 
 void RecordingsView::UpdateActionEnabled() {

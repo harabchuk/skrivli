@@ -39,7 +39,7 @@ std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
 
 std::wstring FormatDb(float db) {
     if (db <= -59.5f) {
-        return L"-inf dB";
+        return L"--- dB";
     }
     wchar_t buffer[32]{};
     std::swprintf(buffer, 32, L"%+.0f dB", db);

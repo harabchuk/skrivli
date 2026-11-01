@@ -103,6 +103,7 @@ private:
     LRESULT OnTabSelChange(LPNMHDR header);
 
     void CreateStatusBar();
+    void ApplyStatusPaneWidths();
     void CreateTabs();
     void ApplyDpiFonts(UINT dpi);
     void LayoutChildren();

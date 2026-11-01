@@ -23,6 +23,7 @@ public:
 
     BEGIN_MSG_MAP_EX(RecordingsView)
         MSG_WM_INITDIALOG(OnInitDialog)
+        MSG_WM_SIZE(OnSize)
         MSG_WM_DESTROY(OnDestroy)
         MSG_WM_CTLCOLORDLG(OnCtlColorDlg)
         MSG_WM_CTLCOLORSTATIC(OnCtlColorStatic)
@@ -54,6 +55,7 @@ public:
 
 private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
+    void OnSize(UINT type, CSize size);
     void OnDestroy();
     HBRUSH OnCtlColorDlg(CDCHandle dc, CWindow wnd);
     HBRUSH OnCtlColorStatic(CDCHandle dc, CStatic wndStatic);
@@ -72,6 +74,7 @@ private:
     LRESULT OnLibraryChanged(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
 
     void PopulateList();
+    void FitColumns();
     void UpdateActionEnabled();
     int SelectedIndex() const;
     const RecordingEntry* SelectedEntry() const;

@@ -315,7 +315,7 @@ bool TranscriptWindow::CopyPlainMarkdown(bool selectionOnly) {
 }
 
 void TranscriptWindow::LayoutChildren() {
-    UpdateLayout(FALSE);
+    UpdateLayout();
     CRect client;
     GetClientRect(&client);
 
@@ -330,7 +330,6 @@ void TranscriptWindow::LayoutChildren() {
         CRect statusRect;
         ::GetWindowRect(m_hWndStatusBar, &statusRect);
         bottom -= statusRect.Height();
-        m_status.UpdatePanesLayout();
     }
     if (m_edit.IsWindow()) {
         m_edit.SetWindowPos(nullptr, 0, top, client.Width(), (std::max)(0, bottom - top), SWP_NOZORDER);

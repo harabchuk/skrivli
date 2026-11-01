@@ -133,11 +133,33 @@ void MainWindow::CreateStatusBar() {
     m_status.Create(m_hWnd);
     m_hWndStatusBar = m_status.m_hWnd;
 
+    // Left→right: state, elapsed, then stretching transcription progress.
     int panes[] = {
         IDC_STATUS_PANE_STATE,
         IDC_STATUS_PANE_TIME,
         IDC_STATUS_PANE_TRANSCRIBE};
-    m_status.SetPanes(panes, static_cast<int>(std::size(panes)), true);
+    m_status.SetPanes(panes, static_cast<int>(std::size(panes)), false);
+    ApplyStatusPaneWidths();
+}
+
+void MainWindow::ApplyStatusPaneWidths() {
+    if (!m_status.IsWindow()) {
+        return;
+    }
+
+    const UINT dpi = ::GetDpiForWindow(m_hWnd);
+    auto measure = [&](const wchar_t* text) -> int {
+        CClientDC dc(m_status.m_hWnd);
+        HFONT old = dc.SelectFont(m_status.GetFont());
+        SIZE size{};
+        dc.GetTextExtent(text, static_cast<int>(wcslen(text)), &size);
+        dc.SelectFont(old);
+        // Borders + padding so labels are not tight against pane edges.
+        return size.cx + ::MulDiv(24, static_cast<int>(dpi), 96);
+    };
+
+    m_status.SetPaneWidth(IDC_STATUS_PANE_STATE, measure(L"Recording"));
+    m_status.SetPaneWidth(IDC_STATUS_PANE_TIME, measure(L"00:00:00"));
 }
 
 void MainWindow::CreateTabs() {
@@ -193,6 +215,7 @@ void MainWindow::ApplyDpiFonts(UINT dpi) {
     }
     if (m_status.IsWindow()) {
         m_status.SetFont(font);
+        ApplyStatusPaneWidths();
     }
     if (m_recordView.IsWindow()) {
         m_recordView.ApplyUiFont(font);
@@ -235,7 +258,7 @@ void MainWindow::LayoutChildren() {
         return;
     }
 
-    UpdateLayout(FALSE);
+    UpdateLayout();
 
     CRect client;
     GetClientRect(&client);
@@ -244,7 +267,6 @@ void MainWindow::LayoutChildren() {
         CRect statusRect;
         ::GetWindowRect(m_hWndStatusBar, &statusRect);
         client.bottom -= statusRect.Height();
-        m_status.UpdatePanesLayout();
     }
 
     if (m_tabs.IsWindow()) {

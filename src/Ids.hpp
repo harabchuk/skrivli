@@ -21,9 +21,10 @@ enum : UINT {
 };
 
 enum {
-    IDC_STATUS_PANE_STATE = 0,
-    IDC_STATUS_PANE_TIME = 1,
-    IDC_STATUS_PANE_TRANSCRIBE = 2,
+    // ID_DEFAULT_PANE (0) stretches; keep fixed panes on non-zero IDs.
+    IDC_STATUS_PANE_TRANSCRIBE = 0,  // ID_DEFAULT_PANE
+    IDC_STATUS_PANE_STATE = 1,
+    IDC_STATUS_PANE_TIME = 2,
 };
 
 enum {
