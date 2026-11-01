@@ -73,11 +73,13 @@ add_executable(MeetingBuddy WIN32
     src/ui/MainWindow.cpp
     src/ui/RecordView.cpp
     src/ui/RecordingsView.cpp
+    src/ui/TranscriptWindow.cpp
     src/ui/TrayIcon.cpp
     src/ui/LevelMeter.cpp
     ${MEETINGBUDDY_AUDIO_SOURCES}
     ${MEETINGBUDDY_TRANSCRIPTION_SOURCES}
     ${MEETINGBUDDY_UTIL_SOURCES}
+    src/util/Clipboard.cpp
     resources/MeetingBuddy.rc
 )
 

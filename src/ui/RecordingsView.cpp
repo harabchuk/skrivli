@@ -2,6 +2,7 @@
 
 #include "storage/Settings.hpp"
 #include "transcription/TranscriptionService.hpp"
+#include "ui/TranscriptWindow.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
@@ -59,7 +60,8 @@ BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     DlgResize_Init(false, false);
 
     m_list.Attach(GetDlgItem(IDC_RECORDINGS_LIST));
-    m_list.SetExtendedListViewStyle(LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_DOUBLEBUFFER);
+    m_list.SetExtendedListViewStyle(
+        LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_INFOTIP | LVS_EX_DOUBLEBUFFER);
 
     m_list.InsertColumn(ColName, L"Name", LVCFMT_LEFT, 180);
     m_list.InsertColumn(ColDate, L"Date", LVCFMT_LEFT, 130);
@@ -307,7 +309,7 @@ void RecordingsView::OnView(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (entry == nullptr || !entry->hasMarkdown) {
         return;
     }
-    ::ShellExecuteW(m_hWnd, L"open", entry->mdPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    TranscriptWindow::OpenOrActivate(entry->mdPath);
 }
 
 void RecordingsView::OnOpenFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
@@ -371,7 +373,28 @@ LRESULT RecordingsView::OnColumnClick(LPNMHDR header) {
 }
 
 LRESULT RecordingsView::OnDoubleClick(LPNMHDR /*header*/) {
-    OnPlay(0, 0, nullptr);
+    const RecordingEntry* entry = SelectedEntry();
+    if (entry != nullptr && entry->hasMarkdown) {
+        OnView(0, 0, nullptr);
+    } else {
+        OnPlay(0, 0, nullptr);
+    }
+    return 0;
+}
+
+LRESULT RecordingsView::OnGetInfoTip(LPNMHDR header) {
+    auto* tip = reinterpret_cast<NMLVGETINFOTIPW*>(header);
+    if (tip == nullptr || tip->iItem < 0) {
+        return 0;
+    }
+    const size_t index = static_cast<size_t>(m_list.GetItemData(tip->iItem));
+    if (index >= m_entries.size()) {
+        return 0;
+    }
+    const auto& entry = m_entries[index];
+    if (entry.transcriptStatus == TranscriptStatus::Failed && !entry.transcriptError.empty()) {
+        wcsncpy_s(tip->pszText, tip->cchTextMax, entry.transcriptError.c_str(), _TRUNCATE);
+    }
     return 0;
 }
 

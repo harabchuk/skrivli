@@ -5,12 +5,14 @@
 #include "util/Paths.hpp"
 
 #include <commctrl.h>
+#include <shellapi.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
 
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <filesystem>
 
 namespace {
 
@@ -38,6 +40,7 @@ BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_recordButton.Attach(GetDlgItem(IDC_RECORD_BUTTON));
     m_elapsedLabel.Attach(GetDlgItem(IDC_ELAPSED));
     m_warningLabel.Attach(GetDlgItem(IDC_DEVICE_WARNING));
+    m_lastRecordingLabel.Attach(GetDlgItem(IDC_LAST_RECORDING));
 
     m_micMeter.SubclassWindow(GetDlgItem(IDC_METER_MIC));
     m_systemMeter.SubclassWindow(GetDlgItem(IDC_METER_SYSTEM));
@@ -50,6 +53,7 @@ BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     RefreshDevices();
     UpdateRecordButton();
     SetWarning({});
+    HidePostRecordPrompt();
     return TRUE;
 }
 
@@ -370,7 +374,7 @@ void RecordView::OnRecordingStarted() {
     UpdateElapsed();
 }
 
-void RecordView::OnRecordingFinished(const std::wstring& /*path*/) {
+void RecordView::OnRecordingFinished(const std::wstring& path) {
     KillTimer(IDT_RECORD_ELAPSED);
     KillTimer(IDT_RECORD_METERS);
     SetInputsEnabled(true);
@@ -379,6 +383,56 @@ void RecordView::OnRecordingFinished(const std::wstring& /*path*/) {
     m_micMeter.SetLevel(0.0f);
     m_systemMeter.SetLevel(0.0f);
     RefreshDevices();
+    if (!path.empty() && !Settings::Instance().Data().autoTranscribe) {
+        ShowPostRecordPrompt(path);
+    } else {
+        HidePostRecordPrompt();
+        if (!path.empty()) {
+            m_lastRecordingPath = path;
+        }
+    }
+}
+
+void RecordView::ShowPostRecordPrompt(const std::wstring& path) {
+    m_lastRecordingPath = path;
+    const std::wstring leaf = std::filesystem::path(path).filename().wstring();
+    m_lastRecordingLabel.SetWindowText((L"Last recording: " + leaf).c_str());
+    m_lastRecordingLabel.ShowWindow(SW_SHOW);
+    ::EnableWindow(GetDlgItem(IDC_TRANSCRIBE_NOW), TRUE);
+    ::EnableWindow(GetDlgItem(IDC_OPEN_LAST_FOLDER), TRUE);
+    ::ShowWindow(GetDlgItem(IDC_TRANSCRIBE_NOW), SW_SHOW);
+    ::ShowWindow(GetDlgItem(IDC_OPEN_LAST_FOLDER), SW_SHOW);
+}
+
+void RecordView::HidePostRecordPrompt() {
+    if (m_lastRecordingLabel.IsWindow()) {
+        m_lastRecordingLabel.SetWindowText(L"");
+        m_lastRecordingLabel.ShowWindow(SW_HIDE);
+    }
+    ::EnableWindow(GetDlgItem(IDC_TRANSCRIBE_NOW), FALSE);
+    ::EnableWindow(GetDlgItem(IDC_OPEN_LAST_FOLDER), FALSE);
+    ::ShowWindow(GetDlgItem(IDC_TRANSCRIBE_NOW), SW_HIDE);
+    ::ShowWindow(GetDlgItem(IDC_OPEN_LAST_FOLDER), SW_HIDE);
+}
+
+void RecordView::OnTranscribeNow(UINT /*code*/, int /*id*/, HWND /*control*/) {
+    if (m_lastRecordingPath.empty()) {
+        return;
+    }
+    // Hide the prompt (Not now is the same as dismissing).
+    ::ShowWindow(GetDlgItem(IDC_TRANSCRIBE_NOW), SW_HIDE);
+    ::EnableWindow(GetDlgItem(IDC_TRANSCRIBE_NOW), FALSE);
+    if (m_transcribeFn != nullptr) {
+        m_transcribeFn(m_transcribeContext, m_lastRecordingPath);
+    }
+}
+
+void RecordView::OnOpenLastFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
+    if (m_lastRecordingPath.empty()) {
+        return;
+    }
+    const std::wstring params = L"/select,\"" + m_lastRecordingPath + L"\"";
+    ::ShellExecuteW(m_hWnd, L"open", L"explorer.exe", params.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
 void RecordView::OnRecordingError(const std::wstring& message) {

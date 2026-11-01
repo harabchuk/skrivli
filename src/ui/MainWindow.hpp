@@ -129,4 +129,5 @@ private:
     bool m_endSessionSaving = false;
     UINT m_taskbarCreatedMsg = 0;
     UINT m_showYourselfMsg = 0;
+    std::wstring m_balloonTranscriptPath;
 };

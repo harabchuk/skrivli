@@ -3,6 +3,7 @@
 #include "audio/WavWriter.hpp"
 #include "storage/RecordingLibrary.hpp"
 #include "storage/RecordingSidecar.hpp"
+#include "ui/TranscriptWindow.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
@@ -46,6 +47,14 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     m_session.SetDeviceManager(&m_devices);
     m_recordView.SetSession(&m_session);
     m_recordView.SetDeviceManager(&m_devices);
+    m_recordView.SetTranscribeHandler(
+        [](void* context, const std::wstring& audioPath) {
+            auto* self = static_cast<MainWindow*>(context);
+            if (self != nullptr) {
+                self->EnqueueTranscription(audioPath);
+            }
+        },
+        this);
     TranscriptionService::Instance().SetNotifyHwnd(m_hWnd);
     TranscriptionService::Instance().Start();
 
@@ -379,6 +388,7 @@ void MainWindow::OnDestroy() {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
     TranscriptionService::Instance().Stop();
+    TranscriptWindow::CloseAll();
     m_devices.Shutdown();
     m_tray.Remove();
     PostQuitMessage(0);
@@ -493,6 +503,14 @@ LRESULT MainWindow::OnTrayIcon(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, B
     case WM_LBUTTONUP:
         if (IsWindowVisible()) {
             HideToTray(false);
+        } else {
+            ShowFromTray();
+        }
+        break;
+    case NIN_BALLOONUSERCLICK:
+        if (!m_balloonTranscriptPath.empty()) {
+            TranscriptWindow::OpenOrActivate(m_balloonTranscriptPath);
+            m_balloonTranscriptPath.clear();
         } else {
             ShowFromTray();
         }
@@ -692,7 +710,14 @@ LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
     std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
     SetTranscribeStatusText(L"Ready");
     RefreshRecordingsList();
-    (void)notify;
+    if (notify && !notify->audioPath.empty()) {
+        const std::wstring mdPath = RecordingLibrary::MdPathForAudio(notify->audioPath);
+        m_balloonTranscriptPath = mdPath;
+        m_tray.ShowBalloon(L"MeetingBuddy", L"Transcript ready — click to open");
+        if (IsWindowVisible() && !IsIconic()) {
+            TranscriptWindow::OpenOrActivate(mdPath);
+        }
+    }
     return 0;
 }
 

@@ -35,6 +35,7 @@ public:
         NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, NM_DBLCLK, OnDoubleClick)
         NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, NM_RCLICK, OnRightClick)
         NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, LVN_ITEMCHANGED, OnItemChanged)
+        NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, LVN_GETINFOTIP, OnGetInfoTip)
         MESSAGE_HANDLER(WM_APP_LIBRARY_CHANGED, OnLibraryChanged)
         CHAIN_MSG_MAP(WTL::CDialogResize<RecordingsView>)
     END_MSG_MAP()
@@ -62,6 +63,7 @@ private:
     LRESULT OnDoubleClick(LPNMHDR header);
     LRESULT OnRightClick(LPNMHDR header);
     LRESULT OnItemChanged(LPNMHDR header);
+    LRESULT OnGetInfoTip(LPNMHDR header);
     LRESULT OnLibraryChanged(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
 
     void PopulateList();
