@@ -3,14 +3,14 @@
 WTL::CAppModule _Module;
 
 int main() {
-    const HRESULT comResult = ::CoInitialize(nullptr);
+    const HRESULT comResult = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(comResult)) {
         return 1;
     }
 
-    AtlInitCommonControls(ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES);
+    AtlInitCommonControls(ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES | ICC_TAB_CLASSES | ICC_BAR_CLASSES);
 
-    const HINSTANCE instance = ::GetModuleHandle(nullptr);
+    const HINSTANCE instance = ::GetModuleHandleW(nullptr);
     _Module.Init(nullptr, instance);
 
     Application app;

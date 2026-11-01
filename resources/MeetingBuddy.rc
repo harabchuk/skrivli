@@ -1,0 +1,56 @@
+#include "resource.h"
+#include <windows.h>
+#include <winres.h>
+#include <atlres.h>
+
+IDI_TRAY_IDLE      ICON "tray_idle.ico"
+IDI_TRAY_RECORDING ICON "tray_recording.ico"
+
+IDR_MAINFRAME ICON "app.ico"
+
+IDR_MAINFRAME MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "Open &recordings folder", ID_FILE_OPENFOLDER
+        MENUITEM "Se&ttings...",            ID_FILE_SETTINGS
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                   ID_APP_EXIT
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About MeetingBuddy...",  ID_APP_ABOUT
+    END
+END
+
+IDR_TRAY_MENU MENU
+BEGIN
+    POPUP "Tray"
+    BEGIN
+        MENUITEM "&Show MeetingBuddy",      ID_TRAY_SHOW
+        MENUITEM "&Start recording",        ID_TRAY_STARTSTOP
+        MENUITEM SEPARATOR
+        MENUITEM "Open &recordings folder", ID_TRAY_OPENFOLDER
+        MENUITEM "Se&ttings...",            ID_TRAY_SETTINGS
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                   ID_TRAY_EXIT
+    END
+END
+
+IDD_RECORD_PAGE DIALOGEX 0, 0, 360, 220
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Record — microphone and system-audio controls arrive in a later milestone.",
+          IDC_RECORD_HINT, 12, 12, 336, 40
+END
+
+IDD_RECORDINGS_PAGE DIALOGEX 0, 0, 360, 220
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Recordings — the library list arrives in a later milestone.",
+          IDC_RECORDINGS_HINT, 12, 12, 336, 40
+END
+
+1 24 "MeetingBuddy.manifest"
