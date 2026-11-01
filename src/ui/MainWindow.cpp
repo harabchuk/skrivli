@@ -21,6 +21,7 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     SetWindowText(L"MeetingBuddy");
     CreateStatusBar();
     CreateTabs();
+    ApplyDpiFonts(::GetDpiForWindow(m_hWnd));
     SetStatusIdle();
 
     if (!m_tray.Add(m_hWnd)) {
@@ -61,6 +62,38 @@ void MainWindow::CreateTabs() {
     m_recordingsView.Create(m_hWnd);
     m_tabs.SetCurSel(0);
     ShowSelectedTab();
+}
+
+void MainWindow::ApplyDpiFonts(UINT dpi) {
+    if (dpi == 0) {
+        dpi = USER_DEFAULT_SCREEN_DPI;
+    }
+
+    NONCLIENTMETRICSW metrics{};
+    metrics.cbSize = sizeof(metrics);
+    if (!::SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi) &&
+        !::SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0)) {
+        return;
+    }
+
+    WTL::CFont newFont;
+    if (newFont.CreateFontIndirect(&metrics.lfMessageFont) == nullptr) {
+        return;
+    }
+
+    const HFONT previous = m_uiFont.Detach();
+    m_uiFont.Attach(newFont.Detach());
+    if (previous != nullptr) {
+        ::DeleteObject(previous);
+    }
+
+    const HFONT font = m_uiFont;
+    if (m_tabs.IsWindow()) {
+        m_tabs.SetFont(font);
+    }
+    if (m_status.IsWindow()) {
+        m_status.SetFont(font);
+    }
 }
 
 void MainWindow::SetStatusIdle() {
@@ -142,7 +175,8 @@ void MainWindow::OnSysCommand(UINT id, CPoint point) {
     (void)point;
 }
 
-void MainWindow::OnDpiChanged(UINT /*dpiX*/, UINT /*dpiY*/, PRECT suggested) {
+void MainWindow::OnDpiChanged(UINT dpiX, UINT /*dpiY*/, PRECT suggested) {
+    ApplyDpiFonts(dpiX);
     if (suggested != nullptr) {
         SetWindowPos(
             nullptr,
@@ -151,8 +185,8 @@ void MainWindow::OnDpiChanged(UINT /*dpiX*/, UINT /*dpiY*/, PRECT suggested) {
             suggested->right - suggested->left,
             suggested->bottom - suggested->top,
             SWP_NOZORDER | SWP_NOACTIVATE);
-        LayoutChildren();
     }
+    LayoutChildren();
 }
 
 void MainWindow::OnExitSizeMove() {

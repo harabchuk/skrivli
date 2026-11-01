@@ -65,6 +65,7 @@ private:
 
     void CreateStatusBar();
     void CreateTabs();
+    void ApplyDpiFonts(UINT dpi);
     void LayoutChildren();
     void ShowSelectedTab();
     void HideToTray(bool fromClose);
@@ -75,6 +76,7 @@ private:
 
     WTL::CTabCtrl m_tabs;
     WTL::CMultiPaneStatusBarCtrl m_status;
+    WTL::CFont m_uiFont;
     RecordView m_recordView;
     RecordingsView m_recordingsView;
     TrayIcon m_tray;
