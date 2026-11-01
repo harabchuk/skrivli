@@ -54,7 +54,8 @@ public:
         const std::wstring& systemDeviceId,
         float micGain,
         float systemGain,
-        bool communicationsProcessing);
+        bool communicationsProcessing,
+        bool saveStems = false);
 
     void Stop(StopMode mode = StopMode::Save);
 
@@ -112,6 +113,9 @@ private:
     SilentRenderKeepAlive m_keepAlive;
     Mixer m_mixer;
     WavWriter m_writer;
+    WavWriter m_micStemWriter;
+    WavWriter m_sysStemWriter;
+    bool m_saveStems = false;
 
     std::thread m_writerThread;
     std::mutex m_startStopMutex;
@@ -125,6 +129,7 @@ private:
     bool m_micEnabled = false;
     bool m_systemEnabled = false;
     bool m_communicationsProcessing = false;
+    bool m_stemWritersOpen = false;
     float m_micGain = 1.0f;
     float m_systemGain = 0.8f;
 

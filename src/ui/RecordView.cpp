@@ -343,7 +343,8 @@ bool RecordView::ToggleRecording() {
         settings.systemDeviceId,
         settings.micGain,
         settings.systemGain,
-        settings.communicationsProcessing);
+        settings.communicationsProcessing,
+        settings.saveStems);
 
     if (result.privacyDenied) {
         ShowPrivacyDeniedDialog();
@@ -374,7 +375,7 @@ void RecordView::OnRecordingStarted() {
     UpdateElapsed();
 }
 
-void RecordView::OnRecordingFinished(const std::wstring& path) {
+void RecordView::OnRecordingFinished(const std::wstring& path, bool showPrompt) {
     KillTimer(IDT_RECORD_ELAPSED);
     KillTimer(IDT_RECORD_METERS);
     SetInputsEnabled(true);
@@ -383,13 +384,29 @@ void RecordView::OnRecordingFinished(const std::wstring& path) {
     m_micMeter.SetLevel(0.0f);
     m_systemMeter.SetLevel(0.0f);
     RefreshDevices();
-    if (!path.empty() && !Settings::Instance().Data().autoTranscribe) {
+    if (!path.empty() && showPrompt && !Settings::Instance().Data().autoTranscribe) {
         ShowPostRecordPrompt(path);
     } else {
         HidePostRecordPrompt();
         if (!path.empty()) {
             m_lastRecordingPath = path;
         }
+    }
+}
+
+void RecordView::ApplyUiFont(HFONT font) {
+    if (font == nullptr || !IsWindow()) {
+        return;
+    }
+    SetFont(font);
+    for (HWND child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr; child = ::GetWindow(child, GW_HWNDNEXT)) {
+        ::SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    }
+    if (m_micMeter.IsWindow()) {
+        m_micMeter.Invalidate(FALSE);
+    }
+    if (m_systemMeter.IsWindow()) {
+        m_systemMeter.Invalidate(FALSE);
     }
 }
 

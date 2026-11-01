@@ -19,10 +19,22 @@ public:
     void Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain);
 
     // Pull from rings, emit one 10 ms stereo block when ready. Returns true if outBlock filled.
-    bool Process(RingBuffer& micRing, RingBuffer& sysRing, uint64_t nowQpc, float* outInterleavedStereo);
+    // Optional stem buffers receive aligned pre-gain mic (mono→stereo) and system audio.
+    bool Process(
+        RingBuffer& micRing,
+        RingBuffer& sysRing,
+        uint64_t nowQpc,
+        float* outInterleavedStereo,
+        float* outMicStem = nullptr,
+        float* outSysStem = nullptr);
 
     // After capture stops: emit remaining covered/stale blocks until rings and timelines are drained.
-    bool Flush(RingBuffer& micRing, RingBuffer& sysRing, float* outInterleavedStereo);
+    bool Flush(
+        RingBuffer& micRing,
+        RingBuffer& sysRing,
+        float* outInterleavedStereo,
+        float* outMicStem = nullptr,
+        float* outSysStem = nullptr);
 
     bool HasPending() const;
 

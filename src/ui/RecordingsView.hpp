@@ -48,6 +48,7 @@ public:
     void Refresh();
     void EnsureWatching();
     void SetTranscriptProgress(const std::wstring& audioPath, int percent);
+    void ApplyUiFont(HFONT font);
 
 private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);

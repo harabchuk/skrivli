@@ -1,8 +1,11 @@
 #include "Application.hpp"
 
 #include "storage/Settings.hpp"
+#include "util/Autostart.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+
+#include <shellapi.h>
 
 namespace {
 
@@ -11,6 +14,23 @@ constexpr wchar_t kMainWindowClass[] = L"MeetingBuddy.MainWindow";
 constexpr wchar_t kShowYourselfMessage[] = L"MeetingBuddy.ShowYourself";
 
 }  // namespace
+
+bool Application::HasTrayArgument() {
+    int argc = 0;
+    LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
+    if (argv == nullptr) {
+        return false;
+    }
+    bool tray = false;
+    for (int i = 1; i < argc; ++i) {
+        if (_wcsicmp(argv[i], L"--tray") == 0) {
+            tray = true;
+            break;
+        }
+    }
+    ::LocalFree(argv);
+    return tray;
+}
 
 bool Application::ClaimSingleInstance() {
     m_instanceMutex = ::CreateMutexW(nullptr, TRUE, kMutexName);
@@ -53,6 +73,11 @@ int Application::Run(HINSTANCE /*instance*/, int showCommand) {
     Settings::Instance().Load();
     Log::Info(L"MeetingBuddy starting");
 
+    // Keep the Run key in sync with saved settings (repairs path after moves).
+    Autostart::Apply(
+        Settings::Instance().Data().startWithWindows,
+        Settings::Instance().Data().startMinimized);
+
     WTL::CMessageLoop messageLoop;
     _Module.AddMessageLoop(&messageLoop);
 
@@ -64,12 +89,13 @@ int Application::Run(HINSTANCE /*instance*/, int showCommand) {
 
     m_mainWindow.RestoreWindowPlacement();
 
-    int show = showCommand;
-    if (Settings::Instance().Data().startMinimized) {
-        show = SW_HIDE;
+    const bool startHidden = Settings::Instance().Data().startMinimized || HasTrayArgument();
+    if (startHidden) {
+        m_mainWindow.ApplyStartupVisibility(true);
+    } else {
+        m_mainWindow.ShowWindow(showCommand);
+        m_mainWindow.UpdateWindow();
     }
-    m_mainWindow.ShowWindow(show);
-    m_mainWindow.UpdateWindow();
 
     const int result = messageLoop.Run();
     _Module.RemoveMessageLoop();

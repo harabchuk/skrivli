@@ -136,6 +136,9 @@ double RecordingSession::ElapsedSeconds() const {
 void RecordingSession::FailStart(RecordingStartResult& result, const std::wstring& message) {
     Log::Error(message);
     TeardownCapture();
+    m_micStemWriter.Discard();
+    m_sysStemWriter.Discard();
+    m_stemWritersOpen = false;
     m_writer.Discard();
     SetState(State::Error);
     result.started = false;
@@ -161,7 +164,8 @@ RecordingStartResult RecordingSession::Start(
     const std::wstring& systemDeviceId,
     float micGain,
     float systemGain,
-    bool communicationsProcessing) {
+    bool communicationsProcessing,
+    bool saveStems) {
     std::lock_guard<std::mutex> lock(m_startStopMutex);
     RecordingStartResult result{};
 
@@ -193,6 +197,8 @@ RecordingStartResult RecordingSession::Start(
     m_micUsesDefault = micDeviceId.empty();
     m_systemUsesDefault = systemDeviceId.empty();
     m_communicationsProcessing = communicationsProcessing;
+    m_saveStems = saveStems;
+    m_stemWritersOpen = false;
     m_micGain = micGain;
     m_systemGain = systemGain;
     m_micEnabled = false;
@@ -212,6 +218,22 @@ RecordingStartResult RecordingSession::Start(
     if (!m_writer.Open(folder)) {
         FailStart(result, L"Could not create a recording file in the chosen folder.");
         return result;
+    }
+
+    if (m_saveStems) {
+        const std::wstring mixFinal = m_writer.FinalPath();
+        std::wstring stemBase = mixFinal;
+        const std::wstring wavExt = L".wav";
+        if (stemBase.size() >= wavExt.size()
+            && _wcsicmp(stemBase.c_str() + stemBase.size() - wavExt.size(), wavExt.c_str()) == 0) {
+            stemBase.erase(stemBase.size() - wavExt.size());
+        }
+        if (!m_micStemWriter.OpenFinalPath(stemBase + L".mic.wav")
+            || !m_sysStemWriter.OpenFinalPath(stemBase + L".system.wav")) {
+            FailStart(result, L"Could not create stem recording files.");
+            return result;
+        }
+        m_stemWritersOpen = true;
     }
 
     auto micDevice = m_devices->ResolveCaptureDevice(micDeviceId);
@@ -275,6 +297,9 @@ RecordingStartResult RecordingSession::Start(
             const HRESULT hr = m_micCapture.FatalError();
             if (IsPrivacyDenied(hr)) {
                 TeardownCapture();
+                m_micStemWriter.Discard();
+                m_sysStemWriter.Discard();
+                m_stemWritersOpen = false;
                 m_writer.Discard();
                 SetState(State::Idle);
                 result.privacyDenied = true;
@@ -341,6 +366,9 @@ void RecordingSession::Stop(StopMode mode) {
             m_writerThread.join();
         }
         if (mode == StopMode::Discard) {
+            m_micStemWriter.Discard();
+            m_sysStemWriter.Discard();
+            m_stemWritersOpen = false;
             m_writer.Discard();
         }
         return;
@@ -355,13 +383,35 @@ void RecordingSession::Stop(StopMode mode) {
     }
 
     if (mode == StopMode::Discard) {
+        m_micStemWriter.Discard();
+        m_sysStemWriter.Discard();
+        m_stemWritersOpen = false;
         m_writer.Discard();
         SetState(State::Idle);
         return;
     }
 
+    if (m_stemWritersOpen) {
+        std::wstring micPath;
+        std::wstring sysPath;
+        if (!m_micStemWriter.Finalize(micPath)) {
+            m_micStemWriter.Abandon();
+            Log::Warn(L"Failed to finalize mic stem");
+        }
+        if (!m_sysStemWriter.Finalize(sysPath)) {
+            m_sysStemWriter.Abandon();
+            Log::Warn(L"Failed to finalize system stem");
+        }
+        m_stemWritersOpen = false;
+    }
+
     // Prefer rescue if the writer already moved the file.
     if (!m_writer.IsOpen()) {
+        if (m_stemWritersOpen) {
+            m_micStemWriter.Discard();
+            m_sysStemWriter.Discard();
+            m_stemWritersOpen = false;
+        }
         SetState(State::Idle);
         return;
     }
@@ -461,6 +511,8 @@ void RecordingSession::WriterMain() {
     const bool comInitialized = SUCCEEDED(comHr) || comHr == S_FALSE || comHr == RPC_E_CHANGED_MODE;
 
     float block[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
+    float micStem[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
+    float sysStem[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
     ULONGLONG lastDiskCheck = ::GetTickCount64();
     bool rescued = false;
     bool notedMicSilent = false;
@@ -517,7 +569,15 @@ void RecordingSession::WriterMain() {
 
         LARGE_INTEGER now{};
         ::QueryPerformanceCounter(&now);
-        if (m_mixer.Process(m_micRing, m_sysRing, static_cast<uint64_t>(now.QuadPart), block)) {
+        float* micOut = m_stemWritersOpen ? micStem : nullptr;
+        float* sysOut = m_stemWritersOpen ? sysStem : nullptr;
+        if (m_mixer.Process(
+                m_micRing,
+                m_sysRing,
+                static_cast<uint64_t>(now.QuadPart),
+                block,
+                micOut,
+                sysOut)) {
             if (!m_writer.WriteFloatFrames(block, AudioFormat::kBlockFrames)) {
                 m_writeFailed.store(true, std::memory_order_release);
                 std::wstring rescuedPath;
@@ -530,12 +590,26 @@ void RecordingSession::WriterMain() {
                 m_stopWriter.store(true, std::memory_order_release);
                 break;
             }
+            if (m_stemWritersOpen) {
+                if (!m_micStemWriter.WriteFloatFrames(micStem, AudioFormat::kBlockFrames)
+                    || !m_sysStemWriter.WriteFloatFrames(sysStem, AudioFormat::kBlockFrames)) {
+                    Log::Warn(L"Stem write failed; continuing with mix only");
+                    m_micStemWriter.Discard();
+                    m_sysStemWriter.Discard();
+                    m_stemWritersOpen = false;
+                }
+            }
         } else {
             ::Sleep(2);
         }
     }
 
-    while (m_mixer.Flush(m_micRing, m_sysRing, block)) {
+    while (m_mixer.Flush(
+        m_micRing,
+        m_sysRing,
+        block,
+        m_stemWritersOpen ? micStem : nullptr,
+        m_stemWritersOpen ? sysStem : nullptr)) {
         if (!m_writer.IsOpen()) {
             break;
         }
@@ -548,6 +622,15 @@ void RecordingSession::WriterMain() {
                 }
             }
             break;
+        }
+        if (m_stemWritersOpen) {
+            if (!m_micStemWriter.WriteFloatFrames(micStem, AudioFormat::kBlockFrames)
+                || !m_sysStemWriter.WriteFloatFrames(sysStem, AudioFormat::kBlockFrames)) {
+                Log::Warn(L"Stem flush write failed");
+                m_micStemWriter.Discard();
+                m_sysStemWriter.Discard();
+                m_stemWritersOpen = false;
+            }
         }
     }
 

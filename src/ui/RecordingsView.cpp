@@ -111,6 +111,19 @@ void RecordingsView::EnsureWatching() {
     }
 }
 
+void RecordingsView::ApplyUiFont(HFONT font) {
+    if (font == nullptr || !IsWindow()) {
+        return;
+    }
+    SetFont(font);
+    for (HWND child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr; child = ::GetWindow(child, GW_HWNDNEXT)) {
+        ::SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    }
+    if (m_list.IsWindow()) {
+        m_list.SetFont(font);
+    }
+}
+
 void RecordingsView::Refresh() {
     EnsureWatching();
     m_entries = RecordingLibrary::Scan(Settings::Instance().RecordingsFolder());

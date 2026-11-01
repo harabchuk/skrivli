@@ -12,6 +12,7 @@ private:
     bool ClaimSingleInstance();
     void ActivateExistingInstance() const;
     void ReleaseSingleInstance();
+    static bool HasTrayArgument();
 
     MainWindow m_mainWindow;
     HANDLE m_instanceMutex = nullptr;

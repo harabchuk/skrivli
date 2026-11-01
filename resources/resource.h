@@ -41,6 +41,34 @@
 #define IDD_RENAME_DIALOG       202
 #define IDC_RENAME_EDIT         1300
 
+#define IDD_SETTINGS            203
+
+#define IDC_SET_FOLDER          1400
+#define IDC_SET_BROWSE_FOLDER   1401
+#define IDC_SET_MIC_DEVICE      1402
+#define IDC_SET_SYS_DEVICE      1403
+#define IDC_SET_MIC_GAIN        1404
+#define IDC_SET_SYS_GAIN        1405
+#define IDC_SET_SAVE_STEMS      1406
+#define IDC_SET_COMPRESS_M4A    1407
+#define IDC_SET_KEEP_WAV        1408
+#define IDC_SET_COMMS           1409
+#define IDC_SET_COMMS_NOTE      1410
+
+#define IDC_SET_MODEL           1420
+#define IDC_SET_MODEL_DOWNLOAD  1421
+#define IDC_SET_MODEL_BROWSE    1422
+#define IDC_SET_LANGUAGE        1423
+#define IDC_SET_AUTO_TRANSCRIBE 1424
+#define IDC_SET_THREADS         1425
+#define IDC_SET_USE_VAD         1426
+
+#define IDC_SET_CLOSE_TRAY      1440
+#define IDC_SET_START_WINDOWS   1441
+#define IDC_SET_START_MINIMIZED 1442
+#define IDC_SET_HOTKEY_ENABLE   1443
+#define IDC_SET_HOTKEY          1444
+
 #define IDR_RECORDINGS_MENU     104
 
 #define ID_FILE_OPENFOLDER      40001
@@ -59,3 +87,4 @@
 #define IDC_TRANSCRIPT_TOOLBAR   40211
 
 #define IDS_APP_TITLE           50000
+#define ID_HOTKEY_TOGGLE_RECORD 1

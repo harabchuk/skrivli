@@ -49,11 +49,14 @@ public:
 
     void RefreshDevices();
     void OnRecordingStarted();
-    void OnRecordingFinished(const std::wstring& path);
+    void OnRecordingFinished(const std::wstring& path, bool showPrompt = true);
     void OnRecordingError(const std::wstring& message);
     void OnDevicesChanged();
     void SetWarning(const std::wstring& text);
     void HidePostRecordPrompt();
+    void ShowPostRecordPrompt(const std::wstring& path);
+    void ApplyUiFont(HFONT font);
+    void SyncControlsToSettings();
 
     bool ToggleRecording();
     bool IsRecording() const;
@@ -68,9 +71,7 @@ private:
     void OnOpenLastFolder(UINT code, int id, HWND control);
     void OnMicSelChange(UINT code, int id, HWND control);
     void OnSystemSelChange(UINT code, int id, HWND control);
-    void ShowPostRecordPrompt(const std::wstring& path);
 
-    void SyncControlsToSettings();
     void PersistDeviceSelection();
     void PersistFolder();
     void SetInputsEnabled(bool enabled);

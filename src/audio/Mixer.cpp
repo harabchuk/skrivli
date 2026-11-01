@@ -229,7 +229,13 @@ bool Mixer::HasPending() const {
     return micPending || sysPending;
 }
 
-bool Mixer::Process(RingBuffer& micRing, RingBuffer& sysRing, uint64_t nowQpc, float* outInterleavedStereo) {
+bool Mixer::Process(
+    RingBuffer& micRing,
+    RingBuffer& sysRing,
+    uint64_t nowQpc,
+    float* outInterleavedStereo,
+    float* outMicStem,
+    float* outSysStem) {
     if (outInterleavedStereo == nullptr) {
         return false;
     }
@@ -264,6 +270,15 @@ bool Mixer::Process(RingBuffer& micRing, RingBuffer& sysRing, uint64_t nowQpc, f
         micPeak = (std::max)(micPeak, std::fabs(micMono));
         sysPeak = (std::max)(sysPeak, (std::max)(std::fabs(sysL), std::fabs(sysR)));
 
+        if (outMicStem != nullptr) {
+            outMicStem[i * 2] = SoftLimit(micMono);
+            outMicStem[i * 2 + 1] = SoftLimit(micMono);
+        }
+        if (outSysStem != nullptr) {
+            outSysStem[i * 2] = SoftLimit(sysL);
+            outSysStem[i * 2 + 1] = SoftLimit(sysR);
+        }
+
         float outL = m_micGain * micMono + m_systemGain * sysL;
         float outR = m_micGain * micMono + m_systemGain * sysR;
         outL = SoftLimit(outL);
@@ -284,7 +299,12 @@ bool Mixer::Process(RingBuffer& micRing, RingBuffer& sysRing, uint64_t nowQpc, f
     return true;
 }
 
-bool Mixer::Flush(RingBuffer& micRing, RingBuffer& sysRing, float* outInterleavedStereo) {
+bool Mixer::Flush(
+    RingBuffer& micRing,
+    RingBuffer& sysRing,
+    float* outInterleavedStereo,
+    float* outMicStem,
+    float* outSysStem) {
     DrainRing(micRing, m_mic);
     DrainRing(sysRing, m_sys);
 
@@ -295,5 +315,5 @@ bool Mixer::Flush(RingBuffer& micRing, RingBuffer& sysRing, float* outInterleave
     // Force emission of the next block (treat as stale).
     const uint64_t forceNow = m_startQpc
         + AudioFormat::FramesToQpc(m_nextBlockFrame + kStaleFrames + AudioFormat::kBlockFrames, m_qpcFrequency);
-    return Process(micRing, sysRing, forceNow, outInterleavedStereo);
+    return Process(micRing, sysRing, forceNow, outInterleavedStereo, outMicStem, outSysStem);
 }

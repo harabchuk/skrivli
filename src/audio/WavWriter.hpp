@@ -19,6 +19,8 @@ public:
 
     // Opens `<folder>\MeetingBuddy_YYYY-MM-DD_HH-MM-SS.wav.partial`.
     bool Open(const std::wstring& folder);
+    // Opens `<finalWavPath>.partial` (e.g. stems: `… .mic.wav.partial`).
+    bool OpenFinalPath(const std::wstring& finalWavPath);
     bool WriteFloatFrames(const float* interleavedStereo, uint32_t frameCount);
     bool PatchHeader();
     // Flush, patch, close, rename to `.wav`. On failure leaves the partial.
@@ -31,6 +33,7 @@ public:
 
     bool IsOpen() const { return m_file != nullptr; }
     const std::wstring& PartialPath() const { return m_partialPath; }
+    const std::wstring& FinalPath() const { return m_finalPath; }
     const std::wstring& Folder() const { return m_folder; }
     uint64_t FramesWritten() const { return m_framesWritten; }
 

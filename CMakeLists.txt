@@ -45,6 +45,7 @@ set(MEETINGBUDDY_AUDIO_SOURCES
     src/audio/SilentRenderKeepAlive.cpp
     src/audio/Mixer.cpp
     src/audio/WavWriter.cpp
+    src/audio/M4aEncoder.cpp
     src/audio/RecordingSession.cpp
 )
 
@@ -65,6 +66,8 @@ set(MEETINGBUDDY_UTIL_SOURCES
     src/util/Paths.cpp
     src/util/Log.cpp
     src/util/HResult.cpp
+    src/util/Autostart.cpp
+    src/util/Hotkey.cpp
 )
 
 add_executable(MeetingBuddy WIN32
@@ -73,6 +76,7 @@ add_executable(MeetingBuddy WIN32
     src/ui/MainWindow.cpp
     src/ui/RecordView.cpp
     src/ui/RecordingsView.cpp
+    src/ui/SettingsDialog.cpp
     src/ui/TranscriptWindow.cpp
     src/ui/TrayIcon.cpp
     src/ui/LevelMeter.cpp

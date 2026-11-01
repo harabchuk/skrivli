@@ -1,15 +1,21 @@
 #include "ui/MainWindow.hpp"
 
+#include "Version.hpp"
+#include "audio/M4aEncoder.hpp"
 #include "audio/WavWriter.hpp"
 #include "storage/RecordingLibrary.hpp"
 #include "storage/RecordingSidecar.hpp"
+#include "ui/SettingsDialog.hpp"
 #include "ui/TranscriptWindow.hpp"
+#include "util/Autostart.hpp"
+#include "util/Hotkey.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
 #include <iterator>
 #include <cstdio>
 #include <memory>
+#include <thread>
 
 namespace {
 
@@ -68,6 +74,8 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     if (!m_tray.Add(m_hWnd)) {
         Log::Warn(L"Tray icon was not added");
     }
+
+    RegisterConfiguredHotkey();
 
     m_created = true;
     LayoutChildren();
@@ -189,6 +197,12 @@ void MainWindow::ApplyDpiFonts(UINT dpi) {
     }
     if (m_status.IsWindow()) {
         m_status.SetFont(font);
+    }
+    if (m_recordView.IsWindow()) {
+        m_recordView.ApplyUiFont(font);
+    }
+    if (m_recordingsView.IsWindow()) {
+        m_recordingsView.ApplyUiFont(font);
     }
 }
 
@@ -384,6 +398,7 @@ void MainWindow::OnClose() {
 
 void MainWindow::OnDestroy() {
     KillTimer(IDT_RECORD_ELAPSED);
+    UnregisterConfiguredHotkey();
     if (m_session.IsActive()) {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
@@ -392,6 +407,109 @@ void MainWindow::OnDestroy() {
     m_devices.Shutdown();
     m_tray.Remove();
     PostQuitMessage(0);
+}
+
+void MainWindow::ApplyStartupVisibility(bool startHidden) {
+    m_startHidden = startHidden;
+    if (startHidden) {
+        ShowWindow(SW_HIDE);
+    }
+}
+
+void MainWindow::RegisterConfiguredHotkey() {
+    UnregisterConfiguredHotkey();
+    const auto& settings = Settings::Instance().Data();
+    if (!settings.hotkeyEnabled) {
+        return;
+    }
+    const HotkeyChord chord = Hotkey::Parse(settings.hotkey);
+    if (!chord.valid) {
+        if (!m_hotkeyWarned) {
+            m_hotkeyWarned = true;
+            ::MessageBoxW(
+                m_hWnd,
+                L"The configured hotkey is invalid. Recording remains available from the window and tray.",
+                L"MeetingBuddy",
+                MB_OK | MB_ICONWARNING);
+        }
+        return;
+    }
+    if (!Hotkey::Register(m_hWnd, ID_HOTKEY_TOGGLE_RECORD, chord)) {
+        if (!m_hotkeyWarned) {
+            m_hotkeyWarned = true;
+            ::MessageBoxW(
+                m_hWnd,
+                L"Could not register the global hotkey (it may already be in use). "
+                L"Recording remains available from the window and tray.",
+                L"MeetingBuddy",
+                MB_OK | MB_ICONWARNING);
+        }
+        return;
+    }
+    m_hotkeyRegistered = true;
+    m_hotkeyWarned = false;
+}
+
+void MainWindow::UnregisterConfiguredHotkey() {
+    if (m_hotkeyRegistered) {
+        Hotkey::Unregister(m_hWnd, ID_HOTKEY_TOGGLE_RECORD);
+        m_hotkeyRegistered = false;
+    }
+}
+
+void MainWindow::OnHotKey(int id, UINT /*modifiers*/, UINT /*vk*/) {
+    if (id == ID_HOTKEY_TOGGLE_RECORD) {
+        m_recordView.ToggleRecording();
+    }
+}
+
+void MainWindow::StartM4aCompression(const std::wstring& wavPath) {
+    if (wavPath.empty() || m_compressingM4a) {
+        return;
+    }
+    m_compressingM4a = true;
+    m_pendingCompressWav = wavPath;
+    SetTranscribeStatusText(L"Compressing…");
+    const HWND hwnd = m_hWnd;
+    const bool keepWav = Settings::Instance().Data().keepWav;
+    std::thread([hwnd, wavPath, keepWav]() {
+        const HRESULT comHr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        const bool comOk = SUCCEEDED(comHr) || comHr == S_FALSE || comHr == RPC_E_CHANGED_MODE;
+
+        std::wstring m4aPath;
+        std::wstring error;
+        const bool ok = M4aEncoder::EncodeWavToM4a(wavPath, m4aPath, error);
+        if (ok) {
+            if (!keepWav) {
+                ::DeleteFileW(wavPath.c_str());
+            }
+            auto* heap = new std::wstring(m4aPath);
+            if (!::PostMessageW(hwnd, WM_APP_M4A_FINISHED, 0, reinterpret_cast<LPARAM>(heap))) {
+                delete heap;
+            }
+        } else {
+            auto* heap = new std::wstring(error.empty() ? L"M4A compression failed." : error);
+            if (!::PostMessageW(hwnd, WM_APP_M4A_FAILED, 0, reinterpret_cast<LPARAM>(heap))) {
+                delete heap;
+            }
+        }
+
+        if (comOk && comHr != RPC_E_CHANGED_MODE) {
+            ::CoUninitialize();
+        }
+    }).detach();
+}
+
+void MainWindow::FinishRecordingUi(const std::wstring& audioPath, bool showPrompt) {
+    if (Settings::Instance().Data().autoTranscribe && !audioPath.empty()) {
+        EnqueueTranscription(audioPath);
+        m_recordView.OnRecordingFinished(audioPath, false);
+    } else {
+        m_recordView.OnRecordingFinished(audioPath, showPrompt);
+    }
+    SetStatusIdle();
+    m_tray.SetRecording(false);
+    RefreshRecordingsList();
 }
 
 void MainWindow::SetTranscribeStatusText(const std::wstring& text) {
@@ -542,14 +660,46 @@ LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM 
     if (path && !path->empty()) {
         WriteSidecarForPath(*path);
         Log::Info(L"Recording saved: " + *path);
-        if (Settings::Instance().Data().autoTranscribe) {
-            EnqueueTranscription(*path);
+        if (Settings::Instance().Data().compressToM4a) {
+            m_recordView.OnRecordingFinished(*path, false);
+            SetStatusIdle();
+            m_tray.SetRecording(false);
+            StartM4aCompression(*path);
+            return 0;
         }
     }
-    m_recordView.OnRecordingFinished(path ? *path : std::wstring{});
-    SetStatusIdle();
-    m_tray.SetRecording(false);
-    RefreshRecordingsList();
+    FinishRecordingUi(path ? *path : std::wstring{}, true);
+    return 0;
+}
+
+LRESULT MainWindow::OnM4aFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    m_compressingM4a = false;
+    std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+    m_pendingCompressWav.clear();
+    SetTranscribeStatusText(L"");
+    if (path && !path->empty()) {
+        // Sidecar stays on the shared stem; point the UI at the M4A.
+        Log::Info(L"Recording compressed: " + *path);
+        FinishRecordingUi(*path, true);
+    } else {
+        FinishRecordingUi({}, true);
+    }
+    return 0;
+}
+
+LRESULT MainWindow::OnM4aFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    m_compressingM4a = false;
+    std::unique_ptr<std::wstring> message(reinterpret_cast<std::wstring*>(lParam));
+    SetTranscribeStatusText(L"Compress failed");
+    const std::wstring wav = m_pendingCompressWav;
+    m_pendingCompressWav.clear();
+    if (message && !message->empty()) {
+        m_tray.ShowBalloon(L"MeetingBuddy", message->c_str());
+        ::MessageBoxW(m_hWnd, message->c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+    }
+    FinishRecordingUi(wav, true);
     return 0;
 }
 
@@ -653,20 +803,31 @@ void MainWindow::OnOpenRecordingsFolder(UINT /*code*/, int /*id*/, HWND /*contro
 }
 
 void MainWindow::OnSettings(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    ::MessageBoxW(
-        m_hWnd,
-        L"Settings will be available in a later milestone.",
-        L"MeetingBuddy",
-        MB_OK | MB_ICONINFORMATION);
+    SettingsDialog dialog(&m_devices);
+    if (dialog.DoModal(m_hWnd) != IDOK) {
+        return;
+    }
+
+    Autostart::Apply(
+        Settings::Instance().Data().startWithWindows,
+        Settings::Instance().Data().startMinimized);
+    RegisterConfiguredHotkey();
+
+    if (m_recordView.IsWindow() && !m_session.IsActive()) {
+        m_recordView.SyncControlsToSettings();
+        m_recordView.RefreshDevices();
+    }
+    if (dialog.FolderChanged() || m_recordingsView.IsWindow()) {
+        m_recordingsView.EnsureWatching();
+        RefreshRecordingsList();
+    }
 }
 
 void MainWindow::OnAbout(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    ::MessageBoxW(
-        m_hWnd,
-        L"MeetingBuddy\nLocal meeting recorder and optional transcription.\n\n"
-        L"Transcription is local. The only network use is a model download you start.",
-        L"About MeetingBuddy",
-        MB_OK | MB_ICONINFORMATION);
+    std::wstring text = std::wstring(kAppName) + L" " + kAppVersion + L"\n\n"
+        + L"Local meeting recorder and optional transcription.\n\n"
+        + L"Transcription is local. The only network use is a model download you start.";
+    ::MessageBoxW(m_hWnd, text.c_str(), L"About MeetingBuddy", MB_OK | MB_ICONINFORMATION);
 }
 
 void MainWindow::OnTrayShow(UINT /*code*/, int /*id*/, HWND /*control*/) {

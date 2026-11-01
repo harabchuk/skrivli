@@ -23,6 +23,17 @@ bool EndsWithIgnoreCase(const std::wstring& value, const wchar_t* suffix) {
     return _wcsicmp(value.c_str() + (value.size() - len), suffix) == 0;
 }
 
+bool IsStemAudioFile(const std::wstring& fileName) {
+    return EndsWithIgnoreCase(fileName, L".mic.wav")
+        || EndsWithIgnoreCase(fileName, L".system.wav")
+        || EndsWithIgnoreCase(fileName, L".mic.recovered.wav")
+        || EndsWithIgnoreCase(fileName, L".system.recovered.wav");
+}
+
+std::wstring StemAudioPath(const std::wstring& stem, const wchar_t* suffix) {
+    return stem + suffix;
+}
+
 std::wstring StemPath(const std::filesystem::path& audioPath) {
     auto path = audioPath;
     // Handle .recovered.wav → stem without .recovered
@@ -198,10 +209,21 @@ std::vector<RecordingEntry> RecordingLibrary::Scan(const std::wstring& folder) {
         if (_wcsicmp(ext.c_str(), L".wav") != 0 && _wcsicmp(ext.c_str(), L".m4a") != 0) {
             continue;
         }
+        const std::wstring fileName = path.filename().wstring();
+        if (IsStemAudioFile(fileName)) {
+            continue;
+        }
+        // Prefer M4A when a compressed sibling exists alongside the WAV.
+        if (_wcsicmp(ext.c_str(), L".wav") == 0) {
+            const std::wstring m4aSibling = StemPath(path) + L".m4a";
+            if (std::filesystem::exists(m4aSibling)) {
+                continue;
+            }
+        }
 
         RecordingEntry entry{};
         entry.audioPath = path.wstring();
-        entry.fileName = path.filename().wstring();
+        entry.fileName = fileName;
         entry.displayName = entry.fileName;
         entry.stem = StemPath(path);
         entry.jsonPath = entry.stem + L".json";
@@ -266,6 +288,17 @@ bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& n
         return false;
     }
 
+    const std::wstring oldMic = StemAudioPath(entry.stem, L".mic.wav");
+    const std::wstring oldSys = StemAudioPath(entry.stem, L".system.wav");
+    const std::wstring newMic = (dir / (newStemName + L".mic.wav")).wstring();
+    const std::wstring newSys = (dir / (newStemName + L".system.wav")).wstring();
+    const bool hasMic = std::filesystem::exists(oldMic);
+    const bool hasSys = std::filesystem::exists(oldSys);
+    if ((hasMic && std::filesystem::exists(newMic)) || (hasSys && std::filesystem::exists(newSys))) {
+        error = L"A recording with that name already exists.";
+        return false;
+    }
+
     if (!::MoveFileW(entry.audioPath.c_str(), newAudio.c_str())) {
         error = L"Could not rename the audio file.";
         return false;
@@ -288,6 +321,12 @@ bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& n
             return false;
         }
     }
+    if (hasMic && !::MoveFileW(oldMic.c_str(), newMic.c_str())) {
+        Log::Warn(L"Could not rename mic stem with recording");
+    }
+    if (hasSys && !::MoveFileW(oldSys.c_str(), newSys.c_str())) {
+        Log::Warn(L"Could not rename system stem with recording");
+    }
     return true;
 }
 
@@ -300,6 +339,14 @@ bool RecordingLibrary::DeleteToRecycleBin(const RecordingEntry& entry, std::wstr
     }
     if (std::filesystem::exists(entry.mdPath)) {
         paths.push_back(entry.mdPath);
+    }
+    const std::wstring micStem = StemAudioPath(entry.stem, L".mic.wav");
+    const std::wstring sysStem = StemAudioPath(entry.stem, L".system.wav");
+    if (std::filesystem::exists(micStem)) {
+        paths.push_back(micStem);
+    }
+    if (std::filesystem::exists(sysStem)) {
+        paths.push_back(sysStem);
     }
     if (!ShellDelete(paths)) {
         error = L"Could not move the recording to the Recycle Bin.";

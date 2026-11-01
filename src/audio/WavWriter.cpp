@@ -104,17 +104,23 @@ std::wstring WavWriter::MakeBasePath(const std::wstring& folder) {
         local.wMinute,
         local.wSecond);
 
+    auto isFree = [](const std::wstring& stem) {
+        return !std::filesystem::exists(stem + L".wav")
+            && !std::filesystem::exists(stem + L".wav.partial")
+            && !std::filesystem::exists(stem + L".m4a")
+            && !std::filesystem::exists(stem + L".mic.wav")
+            && !std::filesystem::exists(stem + L".system.wav");
+    };
+
     std::filesystem::path base = std::filesystem::path(folder) / stamp;
     std::wstring candidate = base.wstring();
-    if (!std::filesystem::exists(candidate + L".wav")
-        && !std::filesystem::exists(candidate + L".wav.partial")) {
+    if (isFree(candidate)) {
         return candidate;
     }
 
     for (int suffix = 2; suffix < 1000; ++suffix) {
         const std::wstring withSuffix = candidate + L"-" + std::to_wstring(suffix);
-        if (!std::filesystem::exists(withSuffix + L".wav")
-            && !std::filesystem::exists(withSuffix + L".wav.partial")) {
+        if (isFree(withSuffix)) {
             return withSuffix;
         }
     }
@@ -132,8 +138,14 @@ std::wstring WavWriter::RecoveredPathFromPartial(const std::wstring& partialPath
     return path + L".recovered.wav";
 }
 
-bool WavWriter::Open(const std::wstring& folder) {
+bool WavWriter::OpenFinalPath(const std::wstring& finalWavPath) {
     Abandon();
+    if (finalWavPath.empty()) {
+        return false;
+    }
+
+    const std::filesystem::path finalPath(finalWavPath);
+    const std::wstring folder = finalPath.parent_path().wstring();
     if (!IsWritableDirectory(folder)) {
         Log::Error(L"Recordings folder is not writable");
         return false;
@@ -143,10 +155,9 @@ bool WavWriter::Open(const std::wstring& folder) {
         return false;
     }
 
-    const std::wstring base = MakeBasePath(folder);
     m_folder = folder;
-    m_finalPath = base + L".wav";
-    m_partialPath = base + L".wav.partial";
+    m_finalPath = finalWavPath;
+    m_partialPath = finalWavPath + L".partial";
     m_framesWritten = 0;
     m_bytesSincePatch = 0;
 
@@ -172,6 +183,21 @@ bool WavWriter::Open(const std::wstring& folder) {
         return false;
     }
     return true;
+}
+
+bool WavWriter::Open(const std::wstring& folder) {
+    Abandon();
+    if (!IsWritableDirectory(folder)) {
+        Log::Error(L"Recordings folder is not writable");
+        return false;
+    }
+    if (!FolderHasFreeSpace(folder)) {
+        Log::Error(L"Recordings folder has insufficient free disk space");
+        return false;
+    }
+
+    const std::wstring base = MakeBasePath(folder);
+    return OpenFinalPath(base + L".wav");
 }
 
 bool WavWriter::WriteHeader() {
