@@ -4,12 +4,27 @@
 #include "util/Paths.hpp"
 
 #include <iterator>
+#include <cstdio>
+#include <memory>
 
 namespace {
 
 RECT MakeRect(int x, int y, int width, int height) {
     RECT rect{x, y, x + width, y + height};
     return rect;
+}
+
+std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
+    if (frequency == 0) {
+        frequency = 1;
+    }
+    const uint64_t totalSeconds = elapsedQpc / frequency;
+    const uint64_t hours = totalSeconds / 3600;
+    const uint64_t minutes = (totalSeconds / 60) % 60;
+    const uint64_t seconds = totalSeconds % 60;
+    wchar_t buffer[32]{};
+    std::swprintf(buffer, 32, L"%02llu:%02llu:%02llu", hours, minutes, seconds);
+    return buffer;
 }
 
 }  // namespace
@@ -23,6 +38,16 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     CreateTabs();
     ApplyDpiFonts(::GetDpiForWindow(m_hWnd));
     SetStatusIdle();
+
+    m_session.SetNotifyHwnd(m_hWnd);
+    m_session.SetDeviceManager(&m_devices);
+    m_recordView.SetSession(&m_session);
+    m_recordView.SetDeviceManager(&m_devices);
+
+    if (!m_devices.Initialize(m_hWnd)) {
+        Log::Warn(L"DeviceManager failed to initialize");
+    }
+    m_recordView.RefreshDevices();
 
     if (!m_tray.Add(m_hWnd)) {
         Log::Warn(L"Tray icon was not added");
@@ -100,6 +125,28 @@ void MainWindow::SetStatusIdle() {
     m_status.SetPaneText(IDC_STATUS_PANE_STATE, L"Idle");
     m_status.SetPaneText(IDC_STATUS_PANE_TIME, L"00:00:00");
     m_status.SetPaneText(IDC_STATUS_PANE_TRANSCRIBE, L"");
+}
+
+void MainWindow::SetStatusRecording() {
+    m_status.SetPaneText(IDC_STATUS_PANE_STATE, L"Recording");
+}
+
+void MainWindow::UpdateTrayRecordingTip() {
+    const uint64_t start = m_session.StartQpc();
+    if (start == 0) {
+        return;
+    }
+    LARGE_INTEGER now{};
+    LARGE_INTEGER freq{};
+    ::QueryPerformanceCounter(&now);
+    ::QueryPerformanceFrequency(&freq);
+    const std::wstring tip =
+        L"Recording " + FormatElapsed(static_cast<uint64_t>(now.QuadPart) - start, static_cast<uint64_t>(freq.QuadPart));
+    m_tray.SetTip(tip.c_str());
+
+    const std::wstring elapsed =
+        FormatElapsed(static_cast<uint64_t>(now.QuadPart) - start, static_cast<uint64_t>(freq.QuadPart));
+    m_status.SetPaneText(IDC_STATUS_PANE_TIME, elapsed.c_str());
 }
 
 void MainWindow::LayoutChildren() {
@@ -193,6 +240,12 @@ void MainWindow::OnExitSizeMove() {
     PersistWindowPlacement();
 }
 
+void MainWindow::OnTimer(UINT_PTR id) {
+    if (id == IDT_RECORD_ELAPSED && m_session.IsActive()) {
+        UpdateTrayRecordingTip();
+    }
+}
+
 void MainWindow::OnClose() {
     if (m_exiting) {
         PersistWindowPlacement();
@@ -210,12 +263,20 @@ void MainWindow::OnClose() {
 }
 
 void MainWindow::OnDestroy() {
+    KillTimer(IDT_RECORD_ELAPSED);
+    if (m_session.IsActive()) {
+        m_session.Stop();
+    }
+    m_devices.Shutdown();
     m_tray.Remove();
     PostQuitMessage(0);
 }
 
 void MainWindow::RequestExit() {
     m_exiting = true;
+    if (m_session.IsActive()) {
+        m_session.Stop();
+    }
     PersistWindowPlacement();
     Settings::Instance().Save();
     DestroyWindow();
@@ -326,6 +387,48 @@ LRESULT MainWindow::OnTrayIcon(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, B
     return 0;
 }
 
+LRESULT MainWindow::OnRecordingStarted(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
+    handled = TRUE;
+    m_recordView.OnRecordingStarted();
+    SetStatusRecording();
+    m_tray.SetRecording(true);
+    UpdateTrayRecordingTip();
+    SetTimer(IDT_RECORD_ELAPSED, 250);
+    return 0;
+}
+
+LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    KillTimer(IDT_RECORD_ELAPSED);
+    std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+    m_recordView.OnRecordingFinished(path ? *path : std::wstring{});
+    SetStatusIdle();
+    m_tray.SetRecording(false);
+    if (path && !path->empty()) {
+        Log::Info(L"Recording saved: " + *path);
+    }
+    return 0;
+}
+
+LRESULT MainWindow::OnRecordingError(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    std::unique_ptr<std::wstring> message(reinterpret_cast<std::wstring*>(lParam));
+    if (m_session.IsActive()) {
+        m_session.Stop();
+    }
+    KillTimer(IDT_RECORD_ELAPSED);
+    m_recordView.OnRecordingError(message ? *message : std::wstring{});
+    SetStatusIdle();
+    m_tray.SetRecording(false);
+    return 0;
+}
+
+LRESULT MainWindow::OnDevicesChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
+    handled = TRUE;
+    m_recordView.OnDevicesChanged();
+    return 0;
+}
+
 void MainWindow::ShowTrayContextMenu() {
     CMenu menu;
     menu.LoadMenu(IDR_TRAY_MENU);
@@ -334,7 +437,13 @@ void MainWindow::ShowTrayContextMenu() {
         return;
     }
 
-    popup.EnableMenuItem(ID_TRAY_STARTSTOP, MF_BYCOMMAND | MF_GRAYED);
+    const bool recording = m_session.IsActive();
+    popup.EnableMenuItem(ID_TRAY_STARTSTOP, MF_BYCOMMAND | MF_ENABLED);
+    popup.ModifyMenu(
+        ID_TRAY_STARTSTOP,
+        MF_BYCOMMAND | MF_STRING,
+        ID_TRAY_STARTSTOP,
+        recording ? L"&Stop recording" : L"&Start recording");
 
     POINT cursor{};
     ::GetCursorPos(&cursor);
@@ -375,7 +484,7 @@ void MainWindow::OnTrayShow(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void MainWindow::OnTrayStartStop(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    // Recording arrives in M2.
+    m_recordView.ToggleRecording();
 }
 
 LRESULT MainWindow::OnTabSelChange(LPNMHDR /*header*/) {

@@ -9,7 +9,21 @@
 #define IDD_RECORDINGS_PAGE     201
 
 #define IDC_TAB_MAIN            1000
-#define IDC_RECORD_HINT         1100
+
+#define IDC_MIC_LABEL           1101
+#define IDC_MIC_DEVICE          1102
+#define IDC_SYSTEM_LABEL        1103
+#define IDC_SYSTEM_DEVICE       1104
+#define IDC_FOLDER_LABEL        1105
+#define IDC_FOLDER_PATH         1106
+#define IDC_BROWSE_FOLDER       1107
+#define IDC_RECORD_BUTTON       1108
+#define IDC_ELAPSED             1109
+#define IDC_MIC_METER_LABEL     1110
+#define IDC_METER_MIC           1111
+#define IDC_SYSTEM_METER_LABEL  1112
+#define IDC_METER_SYSTEM        1113
+
 #define IDC_RECORDINGS_HINT     1200
 
 #define ID_FILE_OPENFOLDER      40001

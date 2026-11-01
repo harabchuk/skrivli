@@ -37,7 +37,7 @@ void TrayIcon::FillBase(NOTIFYICONDATAW& data) const {
     data.uCallbackMessage = WM_APP_TRAYICON;
     data.guidItem = kIconGuid;
     data.uVersion = NOTIFYICON_VERSION_4;
-    wcscpy_s(data.szTip, L"MeetingBuddy");
+    wcsncpy_s(data.szTip, m_tip, _TRUNCATE);
     data.hIcon = m_recording ? m_recordingIcon : m_idleIcon;
 }
 
@@ -117,6 +117,24 @@ void TrayIcon::ShowBalloon(const wchar_t* title, const wchar_t* text) {
 
 void TrayIcon::SetRecording(bool recording) {
     m_recording = recording;
+    if (!recording) {
+        wcsncpy_s(m_tip, L"MeetingBuddy", _TRUNCATE);
+    }
+    if (!m_added) {
+        return;
+    }
+
+    NOTIFYICONDATAW data{};
+    FillBase(data);
+    ::Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+void TrayIcon::SetTip(const wchar_t* tip) {
+    if (tip == nullptr || tip[0] == L'\0') {
+        wcsncpy_s(m_tip, L"MeetingBuddy", _TRUNCATE);
+    } else {
+        wcsncpy_s(m_tip, tip, _TRUNCATE);
+    }
     if (!m_added) {
         return;
     }

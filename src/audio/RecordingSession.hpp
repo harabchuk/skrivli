@@ -1,0 +1,81 @@
+#pragma once
+
+#include "audio/CaptureStream.hpp"
+#include "audio/DeviceManager.hpp"
+#include "audio/Mixer.hpp"
+#include "audio/RingBuffer.hpp"
+#include "audio/SilentRenderKeepAlive.hpp"
+#include "audio/WavWriter.hpp"
+
+#include <windows.h>
+
+#include <atomic>
+#include <mutex>
+#include <string>
+#include <thread>
+
+class RecordingSession {
+public:
+    enum class State {
+        Idle,
+        Starting,
+        Recording,
+        Stopping,
+        Error,
+    };
+
+    RecordingSession() = default;
+    ~RecordingSession();
+
+    RecordingSession(const RecordingSession&) = delete;
+    RecordingSession& operator=(const RecordingSession&) = delete;
+
+    void SetNotifyHwnd(HWND hwnd) { m_notifyHwnd = hwnd; }
+    void SetDeviceManager(DeviceManager* devices) { m_devices = devices; }
+
+    bool Start(
+        const std::wstring& folder,
+        const std::wstring& micDeviceId,
+        const std::wstring& systemDeviceId,
+        float micGain,
+        float systemGain,
+        bool communicationsProcessing);
+    void Stop();
+
+    State GetState() const { return m_state.load(std::memory_order_acquire); }
+    bool IsActive() const {
+        const State state = GetState();
+        return state == State::Starting || state == State::Recording || state == State::Stopping;
+    }
+
+    float PeakMic() const { return m_mixer.PeakMic(); }
+    float PeakSys() const { return m_mixer.PeakSys(); }
+    uint64_t StartQpc() const { return m_startQpc.load(std::memory_order_acquire); }
+
+private:
+    void SetState(State next);
+    void WriterMain();
+    void PostStarted();
+    void PostFinished(const std::wstring& path);
+    void PostError(const std::wstring& message);
+    void FailStart(const std::wstring& message);
+    void TeardownCapture();
+
+    HWND m_notifyHwnd = nullptr;
+    DeviceManager* m_devices = nullptr;
+
+    std::atomic<State> m_state{State::Idle};
+    std::atomic<bool> m_stopWriter{false};
+    std::atomic<uint64_t> m_startQpc{0};
+
+    RingBuffer m_micRing{48000};
+    RingBuffer m_sysRing{48000};
+    CaptureStream m_micCapture;
+    CaptureStream m_sysCapture;
+    SilentRenderKeepAlive m_keepAlive;
+    Mixer m_mixer;
+    WavWriter m_writer;
+
+    std::thread m_writerThread;
+    std::mutex m_startStopMutex;
+};

@@ -16,6 +16,7 @@ public:
     bool ReAdd();
     void ShowBalloon(const wchar_t* title, const wchar_t* text);
     void SetRecording(bool recording);
+    void SetTip(const wchar_t* tip);
 
 private:
     void FillBase(NOTIFYICONDATAW& data) const;
@@ -27,6 +28,7 @@ private:
     bool m_recording = false;
     HICON m_idleIcon = nullptr;
     HICON m_recordingIcon = nullptr;
+    wchar_t m_tip[128] = L"MeetingBuddy";
 
     static constexpr GUID kIconGuid = {
         0xb8e7a41c,

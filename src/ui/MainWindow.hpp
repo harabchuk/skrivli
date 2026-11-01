@@ -2,6 +2,8 @@
 
 #include "pch.hpp"
 #include "Ids.hpp"
+#include "audio/DeviceManager.hpp"
+#include "audio/RecordingSession.hpp"
 #include "storage/Settings.hpp"
 #include "ui/RecordView.hpp"
 #include "ui/RecordingsView.hpp"
@@ -20,8 +22,13 @@ public:
         MSG_WM_SYSCOMMAND(OnSysCommand)
         MSG_WM_DPICHANGED(OnDpiChanged)
         MSG_WM_EXITSIZEMOVE(OnExitSizeMove)
+        MSG_WM_TIMER(OnTimer)
         MESSAGE_RANGE_HANDLER(0xC000, 0xFFFF, OnRegisteredMessage)
         MESSAGE_HANDLER(WM_APP_TRAYICON, OnTrayIcon)
+        MESSAGE_HANDLER(WM_APP_RECORDING_STARTED, OnRecordingStarted)
+        MESSAGE_HANDLER(WM_APP_RECORDING_FINISHED, OnRecordingFinished)
+        MESSAGE_HANDLER(WM_APP_RECORDING_ERROR, OnRecordingError)
+        MESSAGE_HANDLER(WM_APP_DEVICES_CHANGED, OnDevicesChanged)
         COMMAND_ID_HANDLER_EX(ID_APP_EXIT, OnFileExit)
         COMMAND_ID_HANDLER_EX(ID_FILE_OPENFOLDER, OnOpenRecordingsFolder)
         COMMAND_ID_HANDLER_EX(ID_FILE_SETTINGS, OnSettings)
@@ -53,8 +60,13 @@ private:
     void OnSysCommand(UINT id, CPoint point);
     void OnDpiChanged(UINT dpiX, UINT dpiY, PRECT suggested);
     void OnExitSizeMove();
+    void OnTimer(UINT_PTR id);
     LRESULT OnRegisteredMessage(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnTrayIcon(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnRecordingStarted(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnRecordingFinished(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnRecordingError(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnDevicesChanged(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     void OnFileExit(UINT code, int id, HWND control);
     void OnOpenRecordingsFolder(UINT code, int id, HWND control);
     void OnSettings(UINT code, int id, HWND control);
@@ -73,6 +85,8 @@ private:
     bool IsPlacementOnAnyMonitor(const RECT& windowRect) const;
     void ShowTrayContextMenu();
     void SetStatusIdle();
+    void SetStatusRecording();
+    void UpdateTrayRecordingTip();
 
     WTL::CTabCtrl m_tabs;
     WTL::CMultiPaneStatusBarCtrl m_status;
@@ -80,6 +94,8 @@ private:
     RecordView m_recordView;
     RecordingsView m_recordingsView;
     TrayIcon m_tray;
+    DeviceManager m_devices;
+    RecordingSession m_session;
 
     bool m_exiting = false;
     bool m_created = false;
