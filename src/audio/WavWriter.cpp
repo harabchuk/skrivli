@@ -79,6 +79,15 @@ bool WavWriter::IsWritableDirectory(const std::wstring& folder) {
     return true;
 }
 
+bool WavWriter::FolderHasFreeSpace(const std::wstring& folder, uint64_t minBytes) {
+    ULARGE_INTEGER freeBytesAvailable{};
+    if (!::GetDiskFreeSpaceExW(folder.c_str(), &freeBytesAvailable, nullptr, nullptr)) {
+        // If the folder vanished, treat as insufficient.
+        return false;
+    }
+    return freeBytesAvailable.QuadPart >= minBytes;
+}
+
 std::wstring WavWriter::MakeBasePath(const std::wstring& folder) {
     SYSTEMTIME local{};
     ::GetLocalTime(&local);
@@ -112,14 +121,30 @@ std::wstring WavWriter::MakeBasePath(const std::wstring& folder) {
     return candidate + L"-999";
 }
 
+std::wstring WavWriter::RecoveredPathFromPartial(const std::wstring& partialPath) {
+    std::wstring path = partialPath;
+    const std::wstring suffix = L".wav.partial";
+    if (path.size() >= suffix.size()
+        && path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        path.erase(path.size() - suffix.size());
+        return path + L".recovered.wav";
+    }
+    return path + L".recovered.wav";
+}
+
 bool WavWriter::Open(const std::wstring& folder) {
     Abandon();
     if (!IsWritableDirectory(folder)) {
         Log::Error(L"Recordings folder is not writable");
         return false;
     }
+    if (!FolderHasFreeSpace(folder)) {
+        Log::Error(L"Recordings folder has insufficient free disk space");
+        return false;
+    }
 
     const std::wstring base = MakeBasePath(folder);
+    m_folder = folder;
     m_finalPath = base + L".wav";
     m_partialPath = base + L".wav.partial";
     m_framesWritten = 0;
@@ -137,6 +162,7 @@ bool WavWriter::Open(const std::wstring& folder) {
         Log::Error(L"Failed to create WAV partial file");
         m_partialPath.clear();
         m_finalPath.clear();
+        m_folder.clear();
         return false;
     }
 
@@ -234,7 +260,67 @@ bool WavWriter::Finalize(std::wstring& outFinalPath) {
 
     outFinalPath = m_finalPath;
     m_partialPath.clear();
+    m_finalPath.clear();
+    m_folder.clear();
+    m_framesWritten = 0;
+    m_bytesSincePatch = 0;
     return true;
+}
+
+bool WavWriter::RescueTo(const std::wstring& rescueDir, std::wstring& outFinalPath) {
+    outFinalPath.clear();
+    if (m_file == nullptr) {
+        return false;
+    }
+    if (!Paths::EnsureDirectory(rescueDir)) {
+        Abandon();
+        return false;
+    }
+
+    if (!SeekAndWriteSizes()) {
+        Log::Error(L"Failed to patch WAV header before rescue");
+    }
+    ::FlushFileBuffers(static_cast<HANDLE>(m_file));
+    ::CloseHandle(static_cast<HANDLE>(m_file));
+    m_file = nullptr;
+
+    const std::filesystem::path src(m_partialPath);
+    const std::wstring leaf = src.filename().wstring();
+    std::wstring destPartial = (std::filesystem::path(rescueDir) / leaf).wstring();
+    if (!::MoveFileExW(m_partialPath.c_str(), destPartial.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        // Fall back to copy if move across volumes fails mid-way.
+        if (!::CopyFileW(m_partialPath.c_str(), destPartial.c_str(), FALSE)) {
+            Log::Error(L"Failed to move partial into rescue folder");
+            Abandon();
+            return false;
+        }
+        ::DeleteFileW(m_partialPath.c_str());
+    }
+
+    if (!RepairPartialHeader(destPartial)) {
+        Log::Warn(L"Rescue partial header repair failed; leaving file as-is");
+        outFinalPath = destPartial;
+        m_partialPath.clear();
+        m_finalPath.clear();
+        m_folder.clear();
+        m_framesWritten = 0;
+        m_bytesSincePatch = 0;
+        return !outFinalPath.empty();
+    }
+
+    const std::wstring recovered = RecoveredPathFromPartial(destPartial);
+    if (!::MoveFileExW(destPartial.c_str(), recovered.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        outFinalPath = destPartial;
+    } else {
+        outFinalPath = recovered;
+    }
+
+    m_partialPath.clear();
+    m_finalPath.clear();
+    m_folder.clear();
+    m_framesWritten = 0;
+    m_bytesSincePatch = 0;
+    return !outFinalPath.empty();
 }
 
 void WavWriter::Abandon() {
@@ -245,6 +331,23 @@ void WavWriter::Abandon() {
     // Leave partial on disk for recovery.
     m_partialPath.clear();
     m_finalPath.clear();
+    m_folder.clear();
+    m_framesWritten = 0;
+    m_bytesSincePatch = 0;
+}
+
+void WavWriter::Discard() {
+    const std::wstring partial = m_partialPath;
+    if (m_file != nullptr) {
+        ::CloseHandle(static_cast<HANDLE>(m_file));
+        m_file = nullptr;
+    }
+    if (!partial.empty()) {
+        ::DeleteFileW(partial.c_str());
+    }
+    m_partialPath.clear();
+    m_finalPath.clear();
+    m_folder.clear();
     m_framesWritten = 0;
     m_bytesSincePatch = 0;
 }
@@ -299,4 +402,56 @@ bool WavWriter::RepairPartialHeader(const std::wstring& partialPath) {
     const bool ok = WriteAll(file, &header, sizeof(header));
     ::CloseHandle(file);
     return ok;
+}
+
+std::vector<std::wstring> WavWriter::RecoverPartialsInFolder(const std::wstring& folder) {
+    std::vector<std::wstring> recovered;
+    if (folder.empty() || !std::filesystem::exists(folder)) {
+        return recovered;
+    }
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(folder, ec)) {
+        if (ec || !entry.is_regular_file()) {
+            continue;
+        }
+        const std::wstring path = entry.path().wstring();
+        const std::wstring name = entry.path().filename().wstring();
+        if (name.size() < 12 || name.compare(name.size() - 12, 12, L".wav.partial") != 0) {
+            continue;
+        }
+
+        LARGE_INTEGER size{};
+        HANDLE file = ::CreateFileW(
+            path.c_str(),
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            continue;
+        }
+        const bool tooShort = !::GetFileSizeEx(file, &size) || size.QuadPart < 44;
+        ::CloseHandle(file);
+        if (tooShort) {
+            Log::Warn(L"Leaving short partial unrecovered: " + path);
+            continue;
+        }
+
+        if (!RepairPartialHeader(path)) {
+            Log::Warn(L"Failed to repair partial: " + path);
+            continue;
+        }
+
+        const std::wstring dest = RecoveredPathFromPartial(path);
+        if (!::MoveFileExW(path.c_str(), dest.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+            Log::Warn(L"Failed to rename recovered partial: " + path);
+            continue;
+        }
+        Log::Info(L"Recovered recording: " + dest);
+        recovered.push_back(dest);
+    }
+    return recovered;
 }

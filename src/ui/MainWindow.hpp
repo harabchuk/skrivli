@@ -23,12 +23,17 @@ public:
         MSG_WM_DPICHANGED(OnDpiChanged)
         MSG_WM_EXITSIZEMOVE(OnExitSizeMove)
         MSG_WM_TIMER(OnTimer)
+        MSG_WM_QUERYENDSESSION(OnQueryEndSession)
+        MSG_WM_ENDSESSION(OnEndSession)
         MESSAGE_RANGE_HANDLER(0xC000, 0xFFFF, OnRegisteredMessage)
         MESSAGE_HANDLER(WM_APP_TRAYICON, OnTrayIcon)
         MESSAGE_HANDLER(WM_APP_RECORDING_STARTED, OnRecordingStarted)
         MESSAGE_HANDLER(WM_APP_RECORDING_FINISHED, OnRecordingFinished)
         MESSAGE_HANDLER(WM_APP_RECORDING_ERROR, OnRecordingError)
         MESSAGE_HANDLER(WM_APP_DEVICES_CHANGED, OnDevicesChanged)
+        MESSAGE_HANDLER(WM_APP_DEVICE_SWITCHED, OnDeviceSwitched)
+        MESSAGE_HANDLER(WM_APP_LOW_DISK, OnLowDisk)
+        MESSAGE_HANDLER(WM_APP_RECORDING_RESCUED, OnRecordingRescued)
         COMMAND_ID_HANDLER_EX(ID_APP_EXIT, OnFileExit)
         COMMAND_ID_HANDLER_EX(ID_FILE_OPENFOLDER, OnOpenRecordingsFolder)
         COMMAND_ID_HANDLER_EX(ID_FILE_SETTINGS, OnSettings)
@@ -61,12 +66,17 @@ private:
     void OnDpiChanged(UINT dpiX, UINT dpiY, PRECT suggested);
     void OnExitSizeMove();
     void OnTimer(UINT_PTR id);
+    BOOL OnQueryEndSession(UINT source, UINT flags);
+    void OnEndSession(BOOL ending, UINT flags);
     LRESULT OnRegisteredMessage(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnTrayIcon(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnRecordingStarted(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnRecordingFinished(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnRecordingError(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnDevicesChanged(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnDeviceSwitched(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnLowDisk(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnRecordingRescued(UINT msg, WPARAM wParam, LPARAM lParam, BOOL& handled);
     void OnFileExit(UINT code, int id, HWND control);
     void OnOpenRecordingsFolder(UINT code, int id, HWND control);
     void OnSettings(UINT code, int id, HWND control);
@@ -87,6 +97,10 @@ private:
     void SetStatusIdle();
     void SetStatusRecording();
     void UpdateTrayRecordingTip();
+    void RecoverPartialRecordings();
+    // Returns true if the caller should continue exiting.
+    bool ConfirmStopRecordingForExit();
+    void FinishExit();
 
     WTL::CTabCtrl m_tabs;
     WTL::CMultiPaneStatusBarCtrl m_status;
@@ -99,6 +113,7 @@ private:
 
     bool m_exiting = false;
     bool m_created = false;
+    bool m_endSessionSaving = false;
     UINT m_taskbarCreatedMsg = 0;
     UINT m_showYourselfMsg = 0;
 };

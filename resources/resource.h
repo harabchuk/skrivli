@@ -23,6 +23,7 @@
 #define IDC_METER_MIC           1111
 #define IDC_SYSTEM_METER_LABEL  1112
 #define IDC_METER_SYSTEM        1113
+#define IDC_DEVICE_WARNING      1114
 
 #define IDC_RECORDINGS_HINT     1200
 

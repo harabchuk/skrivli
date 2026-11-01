@@ -13,6 +13,16 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
+
+struct RecordingStartResult {
+    bool started = false;
+    bool privacyDenied = false;
+    bool micMissing = false;
+    bool systemMissing = false;
+    std::wstring warning; // non-fatal (e.g. one source missing)
+    std::wstring error;
+};
 
 class RecordingSession {
 public:
@@ -24,6 +34,11 @@ public:
         Error,
     };
 
+    enum class StopMode {
+        Save,
+        Discard,
+    };
+
     RecordingSession() = default;
     ~RecordingSession();
 
@@ -33,14 +48,18 @@ public:
     void SetNotifyHwnd(HWND hwnd) { m_notifyHwnd = hwnd; }
     void SetDeviceManager(DeviceManager* devices) { m_devices = devices; }
 
-    bool Start(
+    RecordingStartResult Start(
         const std::wstring& folder,
         const std::wstring& micDeviceId,
         const std::wstring& systemDeviceId,
         float micGain,
         float systemGain,
         bool communicationsProcessing);
-    void Stop();
+
+    void Stop(StopMode mode = StopMode::Save);
+
+    // Called from UI when IMMNotificationClient reports a change.
+    void OnDevicesChanged();
 
     State GetState() const { return m_state.load(std::memory_order_acquire); }
     bool IsActive() const {
@@ -52,20 +71,36 @@ public:
     float PeakSys() const { return m_mixer.PeakSys(); }
     uint64_t StartQpc() const { return m_startQpc.load(std::memory_order_acquire); }
 
+    std::vector<std::wstring> TakeDeviceNotes();
+    std::wstring MicDeviceName() const;
+    std::wstring SystemDeviceName() const;
+
 private:
     void SetState(State next);
     void WriterMain();
     void PostStarted();
     void PostFinished(const std::wstring& path);
     void PostError(const std::wstring& message);
-    void FailStart(const std::wstring& message);
+    void PostDeviceSwitched(const std::wstring& message);
+    void PostLowDisk();
+    void PostRescued(const std::wstring& path);
+    void FailStart(RecordingStartResult& result, const std::wstring& message);
     void TeardownCapture();
+    bool TryReopenMic(const wchar_t* reason);
+    bool TryReopenSystem(const wchar_t* reason);
+    void AddDeviceNote(const std::wstring& note);
+    static bool IsPrivacyDenied(HRESULT hr);
+    static bool IsDeviceBusy(HRESULT hr);
+    static std::wstring DescribeCaptureError(HRESULT hr, bool isMic);
 
     HWND m_notifyHwnd = nullptr;
     DeviceManager* m_devices = nullptr;
 
     std::atomic<State> m_state{State::Idle};
     std::atomic<bool> m_stopWriter{false};
+    std::atomic<bool> m_devicesChanged{false};
+    std::atomic<bool> m_lowDiskStop{false};
+    std::atomic<bool> m_writeFailed{false};
     std::atomic<uint64_t> m_startQpc{0};
 
     RingBuffer m_micRing{48000};
@@ -78,4 +113,20 @@ private:
 
     std::thread m_writerThread;
     std::mutex m_startStopMutex;
+    std::mutex m_reopenMutex;
+    std::mutex m_notesMutex;
+
+    std::wstring m_micDeviceId;
+    std::wstring m_systemDeviceId;
+    bool m_micUsesDefault = true;
+    bool m_systemUsesDefault = true;
+    bool m_micEnabled = false;
+    bool m_systemEnabled = false;
+    bool m_communicationsProcessing = false;
+    float m_micGain = 1.0f;
+    float m_systemGain = 0.8f;
+
+    std::wstring m_micName;
+    std::wstring m_systemName;
+    std::vector<std::wstring> m_deviceNotes;
 };

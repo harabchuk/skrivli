@@ -1,5 +1,6 @@
 #include "ui/MainWindow.hpp"
 
+#include "audio/WavWriter.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
@@ -49,6 +50,8 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     }
     m_recordView.RefreshDevices();
 
+    RecoverPartialRecordings();
+
     if (!m_tray.Add(m_hWnd)) {
         Log::Warn(L"Tray icon was not added");
     }
@@ -56,6 +59,19 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     m_created = true;
     LayoutChildren();
     return 0;
+}
+
+void MainWindow::RecoverPartialRecordings() {
+    const std::wstring folder = Settings::Instance().RecordingsFolder();
+    auto recovered = WavWriter::RecoverPartialsInFolder(folder);
+    auto rescued = WavWriter::RecoverPartialsInFolder(Paths::RescueDir());
+    recovered.insert(recovered.end(), rescued.begin(), rescued.end());
+    if (!recovered.empty()) {
+        Log::Info(L"Recovered " + std::to_wstring(recovered.size()) + L" partial recording(s)");
+        m_tray.ShowBalloon(
+            L"MeetingBuddy",
+            L"Recovered an interrupted recording. Check your recordings or rescue folder.");
+    }
 }
 
 void MainWindow::CreateStatusBar() {
@@ -246,8 +262,55 @@ void MainWindow::OnTimer(UINT_PTR id) {
     }
 }
 
+BOOL MainWindow::OnQueryEndSession(UINT /*source*/, UINT /*flags*/) {
+    // Always allow shutdown; OnEndSession will stop and save.
+    return TRUE;
+}
+
+void MainWindow::OnEndSession(BOOL ending, UINT /*flags*/) {
+    if (!ending) {
+        return;
+    }
+    m_endSessionSaving = true;
+    if (m_session.IsActive()) {
+        m_session.Stop(RecordingSession::StopMode::Save);
+    }
+    PersistWindowPlacement();
+    Settings::Instance().Save();
+}
+
+bool MainWindow::ConfirmStopRecordingForExit() {
+    if (!m_session.IsActive()) {
+        return true;
+    }
+
+    const int answer = ::MessageBoxW(
+        m_hWnd,
+        L"Stop and save recording?",
+        L"MeetingBuddy",
+        MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON1);
+
+    if (answer == IDCANCEL) {
+        return false;
+    }
+    if (answer == IDYES) {
+        m_session.Stop(RecordingSession::StopMode::Save);
+        return true;
+    }
+    // IDNO — exit without saving
+    m_session.Stop(RecordingSession::StopMode::Discard);
+    return true;
+}
+
+void MainWindow::FinishExit() {
+    m_exiting = true;
+    PersistWindowPlacement();
+    Settings::Instance().Save();
+    DestroyWindow();
+}
+
 void MainWindow::OnClose() {
-    if (m_exiting) {
+    if (m_exiting || m_endSessionSaving) {
         PersistWindowPlacement();
         DestroyWindow();
         return;
@@ -258,14 +321,16 @@ void MainWindow::OnClose() {
         return;
     }
 
-    PersistWindowPlacement();
-    DestroyWindow();
+    if (!ConfirmStopRecordingForExit()) {
+        return;
+    }
+    FinishExit();
 }
 
 void MainWindow::OnDestroy() {
     KillTimer(IDT_RECORD_ELAPSED);
     if (m_session.IsActive()) {
-        m_session.Stop();
+        m_session.Stop(RecordingSession::StopMode::Save);
     }
     m_devices.Shutdown();
     m_tray.Remove();
@@ -273,13 +338,10 @@ void MainWindow::OnDestroy() {
 }
 
 void MainWindow::RequestExit() {
-    m_exiting = true;
-    if (m_session.IsActive()) {
-        m_session.Stop();
+    if (!ConfirmStopRecordingForExit()) {
+        return;
     }
-    PersistWindowPlacement();
-    Settings::Instance().Save();
-    DestroyWindow();
+    FinishExit();
 }
 
 void MainWindow::ShowFromTray() {
@@ -414,7 +476,7 @@ LRESULT MainWindow::OnRecordingError(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lPa
     handled = TRUE;
     std::unique_ptr<std::wstring> message(reinterpret_cast<std::wstring*>(lParam));
     if (m_session.IsActive()) {
-        m_session.Stop();
+        m_session.Stop(RecordingSession::StopMode::Save);
     }
     KillTimer(IDT_RECORD_ELAPSED);
     m_recordView.OnRecordingError(message ? *message : std::wstring{});
@@ -426,6 +488,49 @@ LRESULT MainWindow::OnRecordingError(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lPa
 LRESULT MainWindow::OnDevicesChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
     handled = TRUE;
     m_recordView.OnDevicesChanged();
+    return 0;
+}
+
+LRESULT MainWindow::OnDeviceSwitched(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    std::unique_ptr<std::wstring> message(reinterpret_cast<std::wstring*>(lParam));
+    if (message && !message->empty()) {
+        m_tray.ShowBalloon(L"MeetingBuddy", message->c_str());
+        m_recordView.SetWarning(*message);
+        Log::Warn(*message);
+    }
+    return 0;
+}
+
+LRESULT MainWindow::OnLowDisk(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
+    handled = TRUE;
+    if (m_session.IsActive()) {
+        m_session.Stop(RecordingSession::StopMode::Save);
+    }
+    KillTimer(IDT_RECORD_ELAPSED);
+    m_recordView.OnRecordingFinished({});
+    SetStatusIdle();
+    m_tray.SetRecording(false);
+    m_tray.ShowBalloon(L"MeetingBuddy", L"Recording stopped: low disk space");
+    return 0;
+}
+
+LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+    handled = TRUE;
+    std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+    if (m_session.IsActive()) {
+        m_session.Stop(RecordingSession::StopMode::Save);
+    }
+    KillTimer(IDT_RECORD_ELAPSED);
+    m_recordView.OnRecordingFinished(path ? *path : std::wstring{});
+    SetStatusIdle();
+    m_tray.SetRecording(false);
+    if (path && !path->empty()) {
+        const std::wstring text = L"Recording folder unavailable. Saved to:\n" + *path;
+        m_tray.ShowBalloon(L"MeetingBuddy", text.c_str());
+        ::MessageBoxW(m_hWnd, text.c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+        Log::Warn(text);
+    }
     return 0;
 }
 

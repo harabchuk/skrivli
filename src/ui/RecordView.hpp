@@ -30,6 +30,7 @@ public:
         DLGRESIZE_CONTROL(IDC_BROWSE_FOLDER, DLSZ_MOVE_X)
         DLGRESIZE_CONTROL(IDC_METER_MIC, DLSZ_SIZE_X)
         DLGRESIZE_CONTROL(IDC_METER_SYSTEM, DLSZ_SIZE_X)
+        DLGRESIZE_CONTROL(IDC_DEVICE_WARNING, DLSZ_SIZE_X)
     END_DLGRESIZE_MAP()
 
     void SetSession(RecordingSession* session) { m_session = session; }
@@ -40,6 +41,7 @@ public:
     void OnRecordingFinished(const std::wstring& path);
     void OnRecordingError(const std::wstring& message);
     void OnDevicesChanged();
+    void SetWarning(const std::wstring& text);
 
     bool ToggleRecording();
     bool IsRecording() const;
@@ -65,6 +67,7 @@ private:
     std::wstring SelectedDeviceId(int comboId) const;
     void SelectDeviceId(int comboId, const std::wstring& id);
     void ClearComboItemData(WTL::CComboBox& combo);
+    void ShowPrivacyDeniedDialog();
 
     RecordingSession* m_session = nullptr;
     DeviceManager* m_devices = nullptr;
@@ -74,6 +77,7 @@ private:
     WTL::CEdit m_folderEdit;
     WTL::CButton m_recordButton;
     WTL::CStatic m_elapsedLabel;
+    WTL::CStatic m_warningLabel;
     LevelMeter m_micMeter;
     LevelMeter m_systemMeter;
 

@@ -19,6 +19,7 @@ FetchContent_MakeAvailable(wtl)
 set(MEETINGBUDDY_AUDIO_SOURCES
     src/audio/DeviceManager.cpp
     src/audio/CaptureStream.cpp
+    src/audio/AudioResampler.cpp
     src/audio/SilentRenderKeepAlive.cpp
     src/audio/Mixer.cpp
     src/audio/WavWriter.cpp
@@ -69,6 +70,10 @@ target_link_libraries(MeetingBuddy PRIVATE
     avrt
     propsys
     winmm
+    mfplat
+    mf
+    mfuuid
+    wmcodecdspuuid
 )
 
 if(MSVC)

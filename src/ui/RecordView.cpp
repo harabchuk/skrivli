@@ -4,6 +4,7 @@
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
+#include <commctrl.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
 
@@ -36,6 +37,7 @@ BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_folderEdit.Attach(GetDlgItem(IDC_FOLDER_PATH));
     m_recordButton.Attach(GetDlgItem(IDC_RECORD_BUTTON));
     m_elapsedLabel.Attach(GetDlgItem(IDC_ELAPSED));
+    m_warningLabel.Attach(GetDlgItem(IDC_DEVICE_WARNING));
 
     m_micMeter.SubclassWindow(GetDlgItem(IDC_METER_MIC));
     m_systemMeter.SubclassWindow(GetDlgItem(IDC_METER_SYSTEM));
@@ -47,6 +49,7 @@ BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     SyncControlsToSettings();
     RefreshDevices();
     UpdateRecordButton();
+    SetWarning({});
     return TRUE;
 }
 
@@ -77,6 +80,12 @@ void RecordView::SyncControlsToSettings() {
     m_folderEdit.SetWindowText(folder.c_str());
 }
 
+void RecordView::SetWarning(const std::wstring& text) {
+    if (m_warningLabel.IsWindow()) {
+        m_warningLabel.SetWindowText(text.c_str());
+    }
+}
+
 void RecordView::RefreshDevices() {
     if (m_devices == nullptr || !m_micCombo.IsWindow() || !m_systemCombo.IsWindow()) {
         return;
@@ -102,6 +111,16 @@ void RecordView::RefreshDevices() {
         m_systemCombo.SetItemDataPtr(index, _wcsdup(device.id.c_str()));
     }
     SelectDeviceId(IDC_SYSTEM_DEVICE, selectedSys);
+
+    if (!IsRecording()) {
+        std::wstring warning;
+        if (capture.size() <= 1) {
+            warning = L"No microphone detected — system-only recording is available.";
+        } else if (render.size() <= 1) {
+            warning = L"No system audio device — microphone-only recording is available.";
+        }
+        SetWarning(warning);
+    }
 }
 
 void RecordView::SelectDeviceId(int comboId, const std::wstring& id) {
@@ -154,6 +173,9 @@ void RecordView::OnSystemSelChange(UINT /*code*/, int /*id*/, HWND /*control*/) 
 
 void RecordView::OnDevicesChanged() {
     if (IsRecording()) {
+        if (m_session != nullptr) {
+            m_session->OnDevicesChanged();
+        }
         return;
     }
     RefreshDevices();
@@ -254,13 +276,40 @@ bool RecordView::IsRecording() const {
     return m_session != nullptr && m_session->IsActive();
 }
 
+void RecordView::ShowPrivacyDeniedDialog() {
+    TASKDIALOGCONFIG config{};
+    config.cbSize = sizeof(config);
+    config.hwndParent = m_hWnd;
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+    config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    config.pszWindowTitle = L"MeetingBuddy";
+    config.pszMainIcon = TD_WARNING_ICON;
+    config.pszMainInstruction = L"Microphone access is turned off";
+    config.pszContent =
+        L"Windows is blocking microphone access for desktop apps.\n\n"
+        L"Open Privacy settings to allow MeetingBuddy to record.";
+    config.pszFooter = L"Recording was not started.";
+
+    TASKDIALOG_BUTTON buttons[] = {
+        { 1001, L"Open microphone settings" },
+    };
+    config.cButtons = 1;
+    config.pButtons = buttons;
+    config.nDefaultButton = 1001;
+
+    int clicked = 0;
+    if (SUCCEEDED(::TaskDialogIndirect(&config, &clicked, nullptr, nullptr)) && clicked == 1001) {
+        ::ShellExecuteW(m_hWnd, L"open", L"ms-settings:privacy-microphone", nullptr, nullptr, SW_SHOWNORMAL);
+    }
+}
+
 bool RecordView::ToggleRecording() {
     if (m_session == nullptr) {
         return false;
     }
 
     if (IsRecording()) {
-        m_session->Stop();
+        m_session->Stop(RecordingSession::StopMode::Save);
         return true;
     }
 
@@ -284,14 +333,28 @@ bool RecordView::ToggleRecording() {
     PersistDeviceSelection();
 
     const auto& settings = Settings::Instance().Data();
-    const bool started = m_session->Start(
+    const RecordingStartResult result = m_session->Start(
         folder,
         settings.micDeviceId,
         settings.systemDeviceId,
         settings.micGain,
         settings.systemGain,
         settings.communicationsProcessing);
-    return started;
+
+    if (result.privacyDenied) {
+        ShowPrivacyDeniedDialog();
+        return false;
+    }
+    if (!result.started) {
+        if (!result.error.empty()) {
+            ::MessageBoxW(m_hWnd, result.error.c_str(), L"MeetingBuddy", MB_OK | MB_ICONERROR);
+        }
+        return false;
+    }
+    if (!result.warning.empty()) {
+        SetWarning(result.warning);
+    }
+    return true;
 }
 
 void RecordView::OnRecordClicked(UINT /*code*/, int /*id*/, HWND /*control*/) {
@@ -315,6 +378,7 @@ void RecordView::OnRecordingFinished(const std::wstring& /*path*/) {
     m_elapsedLabel.SetWindowText(L"00:00:00");
     m_micMeter.SetLevel(0.0f);
     m_systemMeter.SetLevel(0.0f);
+    RefreshDevices();
 }
 
 void RecordView::OnRecordingError(const std::wstring& message) {

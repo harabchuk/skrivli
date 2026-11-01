@@ -79,3 +79,25 @@ TEST(WavWriter, RepairPartialHeader) {
     std::error_code ec;
     std::filesystem::remove(partialPath, ec);
 }
+
+TEST(WavWriter, RecoverPartialsInFolder) {
+    const std::wstring folder = TempDir() + L"\\Recover";
+    std::filesystem::create_directories(folder);
+
+    WavWriter writer;
+    ASSERT_TRUE(writer.Open(folder));
+    const std::wstring partialPath = writer.PartialPath();
+    std::vector<float> frames(480 * 2, 0.1f);
+    ASSERT_TRUE(writer.WriteFloatFrames(frames.data(), 480));
+    writer.Abandon();
+    ASSERT_TRUE(std::filesystem::exists(partialPath));
+
+    const auto recovered = WavWriter::RecoverPartialsInFolder(folder);
+    ASSERT_EQ(recovered.size(), 1u);
+    EXPECT_TRUE(std::filesystem::exists(recovered[0]));
+    EXPECT_FALSE(std::filesystem::exists(partialPath));
+    EXPECT_NE(recovered[0].find(L".recovered.wav"), std::wstring::npos);
+
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+}
