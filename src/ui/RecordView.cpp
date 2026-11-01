@@ -7,6 +7,7 @@
 #include <commctrl.h>
 #include <shellapi.h>
 #include <shobjidl.h>
+#include <uxtheme.h>
 #include <wrl/client.h>
 
 #include <cmath>
@@ -15,6 +16,10 @@
 #include <filesystem>
 
 namespace {
+
+constexpr COLORREF kRecordingRed = RGB(0xC4, 0x2B, 0x1C);
+constexpr COLORREF kWarningAmber = RGB(0x9A, 0x5B, 0x00);
+constexpr COLORREF kSectionMuted = RGB(0x70, 0x70, 0x70);
 
 std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
     if (frequency == 0) {
@@ -29,32 +34,194 @@ std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
     return buffer;
 }
 
+std::wstring FormatDb(float db) {
+    if (db <= -59.5f) {
+        return L"-inf dB";
+    }
+    wchar_t buffer[32]{};
+    std::swprintf(buffer, 32, L"%+.0f dB", db);
+    return buffer;
+}
+
+HFONT TryCreateFont(const wchar_t* face, int heightPx, int weight) {
+    LOGFONTW lf{};
+    lf.lfHeight = -heightPx;
+    lf.lfWeight = weight;
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfQuality = CLEARTYPE_QUALITY;
+    wcsncpy_s(lf.lfFaceName, face, _TRUNCATE);
+    return ::CreateFontIndirectW(&lf);
+}
+
 }  // namespace
 
 BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     DlgResize_Init(false, false);
+    ::EnableThemeDialogTexture(m_hWnd, ETDT_ENABLETAB);
 
     m_micCombo.Attach(GetDlgItem(IDC_MIC_DEVICE));
     m_systemCombo.Attach(GetDlgItem(IDC_SYSTEM_DEVICE));
     m_folderEdit.Attach(GetDlgItem(IDC_FOLDER_PATH));
-    m_recordButton.Attach(GetDlgItem(IDC_RECORD_BUTTON));
+    m_recordButton.SubclassWindow(GetDlgItem(IDC_RECORD_BUTTON));
     m_elapsedLabel.Attach(GetDlgItem(IDC_ELAPSED));
+    m_recIndicator.Attach(GetDlgItem(IDC_REC_INDICATOR));
     m_warningLabel.Attach(GetDlgItem(IDC_DEVICE_WARNING));
     m_lastRecordingLabel.Attach(GetDlgItem(IDC_LAST_RECORDING));
+    m_micDbLabel.Attach(GetDlgItem(IDC_MIC_DB));
+    m_systemDbLabel.Attach(GetDlgItem(IDC_SYSTEM_DB));
+    m_inputSection.Attach(GetDlgItem(IDC_INPUT_SECTION));
+    m_outputSection.Attach(GetDlgItem(IDC_OUTPUT_SECTION));
 
     m_micMeter.SubclassWindow(GetDlgItem(IDC_METER_MIC));
     m_systemMeter.SubclassWindow(GetDlgItem(IDC_METER_SYSTEM));
 
+    m_folderEdit.SetCueBannerText(L"Choose a folder for recordings");
+
     LARGE_INTEGER freq{};
     ::QueryPerformanceFrequency(&freq);
     m_qpcFrequency = static_cast<uint64_t>(freq.QuadPart);
+    m_dpi = ::GetDpiForWindow(m_hWnd);
+
+    InitTooltips();
+    RebuildSpecialFonts(m_dpi);
+    ApplyControlFonts();
 
     SyncControlsToSettings();
     RefreshDevices();
     UpdateRecordButton();
     SetWarning({});
     HidePostRecordPrompt();
+    m_recIndicator.ShowWindow(SW_HIDE);
+    m_micDbLabel.SetWindowText(L"-inf dB");
+    m_systemDbLabel.SetWindowText(L"-inf dB");
     return TRUE;
+}
+
+void RecordView::InitTooltips() {
+    if (m_tooltips.IsWindow()) {
+        return;
+    }
+    m_tooltips.Create(m_hWnd, nullptr, nullptr, TTS_ALWAYSTIP | TTS_NOPREFIX);
+    if (!m_tooltips.IsWindow()) {
+        return;
+    }
+    m_tooltips.SetMaxTipWidth(400);
+    m_tooltips.AddTool(m_micCombo.m_hWnd, L"");
+    m_tooltips.AddTool(m_systemCombo.m_hWnd, L"");
+    m_tooltips.AddTool(m_recordButton.m_hWnd, L"Start or stop recording");
+    m_tooltips.Activate(TRUE);
+}
+
+void RecordView::UpdateDeviceTooltips() {
+    if (!m_tooltips.IsWindow()) {
+        return;
+    }
+    CString micText;
+    const int micSel = m_micCombo.GetCurSel();
+    if (micSel >= 0) {
+        m_micCombo.GetLBText(micSel, micText);
+    }
+    m_tooltips.UpdateTipText(micText.IsEmpty() ? L"Microphone device" : micText.GetString(), m_micCombo.m_hWnd);
+
+    CString sysText;
+    const int sysSel = m_systemCombo.GetCurSel();
+    if (sysSel >= 0) {
+        m_systemCombo.GetLBText(sysSel, sysText);
+    }
+    m_tooltips.UpdateTipText(sysText.IsEmpty() ? L"System audio device" : sysText.GetString(), m_systemCombo.m_hWnd);
+}
+
+void RecordView::RebuildSpecialFonts(UINT dpi) {
+    if (dpi == 0) {
+        dpi = USER_DEFAULT_SCREEN_DPI;
+    }
+    m_dpi = dpi;
+
+    const int timerPx = ::MulDiv(28, static_cast<int>(dpi), 96);
+    HFONT timer = TryCreateFont(L"Segoe UI Variable Display", timerPx, FW_SEMIBOLD);
+    if (timer == nullptr) {
+        timer = TryCreateFont(L"Segoe UI Semibold", timerPx, FW_SEMIBOLD);
+    }
+    if (timer == nullptr) {
+        timer = TryCreateFont(L"Segoe UI", timerPx, FW_SEMIBOLD);
+    }
+    if (timer != nullptr) {
+        const HFONT previous = m_timerFont.Detach();
+        m_timerFont.Attach(timer);
+        if (previous != nullptr) {
+            ::DeleteObject(previous);
+        }
+    }
+
+    const int sectionPx = ::MulDiv(9, static_cast<int>(dpi), 96);
+    HFONT section = TryCreateFont(L"Segoe UI Semibold", sectionPx, FW_SEMIBOLD);
+    if (section == nullptr) {
+        section = TryCreateFont(L"Segoe UI", sectionPx, FW_SEMIBOLD);
+    }
+    if (section != nullptr) {
+        const HFONT previous = m_sectionFont.Detach();
+        m_sectionFont.Attach(section);
+        if (previous != nullptr) {
+            ::DeleteObject(previous);
+        }
+    }
+}
+
+void RecordView::ApplyControlFonts() {
+    if (!IsWindow()) {
+        return;
+    }
+
+    const HFONT ui = m_uiFont;
+    for (HWND child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr; child = ::GetWindow(child, GW_HWNDNEXT)) {
+        const int id = ::GetDlgCtrlID(child);
+        if (id == IDC_ELAPSED || id == IDC_INPUT_SECTION || id == IDC_OUTPUT_SECTION) {
+            continue;
+        }
+        if (ui != nullptr) {
+            ::SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(ui), FALSE);
+        }
+    }
+
+    if (m_timerFont.m_hFont != nullptr && m_elapsedLabel.IsWindow()) {
+        m_elapsedLabel.SetFont(m_timerFont);
+    }
+    if (m_sectionFont.m_hFont != nullptr) {
+        if (m_inputSection.IsWindow()) {
+            m_inputSection.SetFont(m_sectionFont);
+        }
+        if (m_outputSection.IsWindow()) {
+            m_outputSection.SetFont(m_sectionFont);
+        }
+    }
+
+    if (m_recordButton.IsWindow()) {
+        m_recordButton.Invalidate(FALSE);
+    }
+    if (m_micMeter.IsWindow()) {
+        m_micMeter.Invalidate(FALSE);
+    }
+    if (m_systemMeter.IsWindow()) {
+        m_systemMeter.Invalidate(FALSE);
+    }
+    Invalidate(FALSE);
+}
+
+void RecordView::ApplyUiFont(HFONT font) {
+    m_uiFont = font;
+    if (!IsWindow()) {
+        return;
+    }
+    if (font != nullptr) {
+        SetFont(font);
+    }
+    RebuildSpecialFonts(::GetDpiForWindow(m_hWnd));
+    ApplyControlFonts();
+}
+
+void RecordView::OnDpiChanged(UINT dpi) {
+    RebuildSpecialFonts(dpi);
+    ApplyControlFonts();
 }
 
 void RecordView::ClearComboItemData(WTL::CComboBox& combo) {
@@ -76,7 +243,42 @@ void RecordView::OnDestroy() {
     if (m_systemCombo.IsWindow()) {
         ClearComboItemData(m_systemCombo);
     }
+    if (m_tooltips.IsWindow()) {
+        m_tooltips.DestroyWindow();
+    }
     SetMsgHandled(FALSE);
+}
+
+HBRUSH RecordView::OnCtlColorStatic(CDCHandle dc, CStatic wndStatic) {
+    const int id = wndStatic.GetDlgCtrlID();
+    const HBRUSH background = ::GetSysColorBrush(COLOR_BTNFACE);
+    if (id == IDC_ELAPSED) {
+        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
+        dc.SetTextColor(IsRecording() ? kRecordingRed : ::GetSysColor(COLOR_WINDOWTEXT));
+        return background;
+    }
+    if (id == IDC_REC_INDICATOR) {
+        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
+        dc.SetTextColor(kRecordingRed);
+        return background;
+    }
+    if (id == IDC_INPUT_SECTION || id == IDC_OUTPUT_SECTION) {
+        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
+        dc.SetTextColor(kSectionMuted);
+        return background;
+    }
+    if (id == IDC_DEVICE_WARNING) {
+        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
+        dc.SetTextColor(kWarningAmber);
+        return background;
+    }
+    if (id == IDC_MIC_DB || id == IDC_SYSTEM_DB) {
+        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
+        dc.SetTextColor(::GetSysColor(COLOR_GRAYTEXT));
+        return background;
+    }
+    SetMsgHandled(FALSE);
+    return nullptr;
 }
 
 void RecordView::SyncControlsToSettings() {
@@ -85,9 +287,11 @@ void RecordView::SyncControlsToSettings() {
 }
 
 void RecordView::SetWarning(const std::wstring& text) {
-    if (m_warningLabel.IsWindow()) {
-        m_warningLabel.SetWindowText(text.c_str());
+    if (!m_warningLabel.IsWindow()) {
+        return;
     }
+    m_warningLabel.SetWindowText(text.c_str());
+    m_warningLabel.ShowWindow(text.empty() ? SW_HIDE : SW_SHOW);
 }
 
 void RecordView::RefreshDevices() {
@@ -125,6 +329,7 @@ void RecordView::RefreshDevices() {
         }
         SetWarning(warning);
     }
+    UpdateDeviceTooltips();
 }
 
 void RecordView::SelectDeviceId(int comboId, const std::wstring& id) {
@@ -158,6 +363,7 @@ void RecordView::PersistDeviceSelection() {
     Settings::Instance().Data().micDeviceId = SelectedDeviceId(IDC_MIC_DEVICE);
     Settings::Instance().Data().systemDeviceId = SelectedDeviceId(IDC_SYSTEM_DEVICE);
     Settings::Instance().Save();
+    UpdateDeviceTooltips();
 }
 
 void RecordView::PersistFolder() {
@@ -250,13 +456,10 @@ void RecordView::OnBrowseFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
         return;
     }
     if (!FolderIsWritable(path)) {
-        ::MessageBoxW(
-            m_hWnd,
-            L"That folder is not writable. Choose another location.",
-            L"MeetingBuddy",
-            MB_OK | MB_ICONWARNING);
+        SetWarning(L"That folder is not writable. Choose another location.");
         return;
     }
+    SetWarning({});
     m_folderEdit.SetWindowText(path.c_str());
     PersistFolder();
 }
@@ -269,10 +472,11 @@ void RecordView::SetInputsEnabled(bool enabled) {
 }
 
 void RecordView::UpdateRecordButton() {
-    if (IsRecording()) {
-        m_recordButton.SetWindowText(L"Stop");
-    } else {
-        m_recordButton.SetWindowText(L"Record");
+    m_recordButton.SetRecording(IsRecording());
+    if (m_tooltips.IsWindow() && m_recordButton.IsWindow()) {
+        m_tooltips.UpdateTipText(
+            IsRecording() ? L"Stop recording" : L"Start recording",
+            m_recordButton.m_hWnd);
     }
 }
 
@@ -307,6 +511,19 @@ void RecordView::ShowPrivacyDeniedDialog() {
     }
 }
 
+void RecordView::ShowErrorDialog(const std::wstring& message) {
+    TASKDIALOGCONFIG config{};
+    config.cbSize = sizeof(config);
+    config.hwndParent = m_hWnd;
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
+    config.dwCommonButtons = TDCBF_OK_BUTTON;
+    config.pszWindowTitle = L"MeetingBuddy";
+    config.pszMainIcon = TD_ERROR_ICON;
+    config.pszMainInstruction = L"Recording failed";
+    config.pszContent = message.c_str();
+    ::TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
+}
+
 bool RecordView::ToggleRecording() {
     if (m_session == nullptr) {
         return false;
@@ -325,16 +542,13 @@ bool RecordView::ToggleRecording() {
         m_folderEdit.SetWindowText(folder.c_str());
     }
     if (!FolderIsWritable(folder)) {
-        ::MessageBoxW(
-            m_hWnd,
-            L"The recordings folder is missing or not writable.",
-            L"MeetingBuddy",
-            MB_OK | MB_ICONWARNING);
+        SetWarning(L"The recordings folder is missing or not writable.");
         return false;
     }
 
     PersistFolder();
     PersistDeviceSelection();
+    SetWarning({});
 
     const auto& settings = Settings::Instance().Data();
     const RecordingStartResult result = m_session->Start(
@@ -352,7 +566,7 @@ bool RecordView::ToggleRecording() {
     }
     if (!result.started) {
         if (!result.error.empty()) {
-            ::MessageBoxW(m_hWnd, result.error.c_str(), L"MeetingBuddy", MB_OK | MB_ICONERROR);
+            ShowErrorDialog(result.error);
         }
         return false;
     }
@@ -370,9 +584,13 @@ void RecordView::OnRecordingStarted() {
     m_startedQpc = m_session != nullptr ? m_session->StartQpc() : 0;
     SetInputsEnabled(false);
     UpdateRecordButton();
+    m_recBlinkTicks = 0;
+    m_recBlinkOn = true;
+    UpdateRecIndicator();
     SetTimer(IDT_RECORD_ELAPSED, 250);
     SetTimer(IDT_RECORD_METERS, 33);
     UpdateElapsed();
+    m_elapsedLabel.Invalidate(FALSE);
 }
 
 void RecordView::OnRecordingFinished(const std::wstring& path, bool showPrompt) {
@@ -381,8 +599,13 @@ void RecordView::OnRecordingFinished(const std::wstring& path, bool showPrompt) 
     SetInputsEnabled(true);
     UpdateRecordButton();
     m_elapsedLabel.SetWindowText(L"00:00:00");
+    m_elapsedLabel.Invalidate(FALSE);
+    m_recBlinkOn = false;
+    m_recIndicator.ShowWindow(SW_HIDE);
     m_micMeter.SetLevel(0.0f);
     m_systemMeter.SetLevel(0.0f);
+    m_micDbLabel.SetWindowText(L"-inf dB");
+    m_systemDbLabel.SetWindowText(L"-inf dB");
     RefreshDevices();
     if (!path.empty() && showPrompt && !Settings::Instance().Data().autoTranscribe) {
         ShowPostRecordPrompt(path);
@@ -391,22 +614,6 @@ void RecordView::OnRecordingFinished(const std::wstring& path, bool showPrompt) 
         if (!path.empty()) {
             m_lastRecordingPath = path;
         }
-    }
-}
-
-void RecordView::ApplyUiFont(HFONT font) {
-    if (font == nullptr || !IsWindow()) {
-        return;
-    }
-    SetFont(font);
-    for (HWND child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr; child = ::GetWindow(child, GW_HWNDNEXT)) {
-        ::SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    }
-    if (m_micMeter.IsWindow()) {
-        m_micMeter.Invalidate(FALSE);
-    }
-    if (m_systemMeter.IsWindow()) {
-        m_systemMeter.Invalidate(FALSE);
     }
 }
 
@@ -436,7 +643,6 @@ void RecordView::OnTranscribeNow(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (m_lastRecordingPath.empty()) {
         return;
     }
-    // Hide the prompt (Not now is the same as dismissing).
     ::ShowWindow(GetDlgItem(IDC_TRANSCRIBE_NOW), SW_HIDE);
     ::EnableWindow(GetDlgItem(IDC_TRANSCRIBE_NOW), FALSE);
     if (m_transcribeFn != nullptr) {
@@ -457,8 +663,11 @@ void RecordView::OnRecordingError(const std::wstring& message) {
     KillTimer(IDT_RECORD_METERS);
     SetInputsEnabled(true);
     UpdateRecordButton();
+    m_recBlinkOn = false;
+    m_recIndicator.ShowWindow(SW_HIDE);
+    m_elapsedLabel.Invalidate(FALSE);
     if (!message.empty()) {
-        ::MessageBoxW(m_hWnd, message.c_str(), L"MeetingBuddy", MB_OK | MB_ICONERROR);
+        ShowErrorDialog(message);
     }
 }
 
@@ -472,17 +681,41 @@ void RecordView::UpdateElapsed() {
     m_elapsedLabel.SetWindowText(FormatElapsed(elapsed, m_qpcFrequency).c_str());
 }
 
+void RecordView::UpdateRecIndicator() {
+    if (!m_recIndicator.IsWindow()) {
+        return;
+    }
+    if (!IsRecording()) {
+        m_recIndicator.ShowWindow(SW_HIDE);
+        return;
+    }
+    m_recIndicator.SetWindowText(m_recBlinkOn ? L"\x25CF REC" : L"");
+    m_recIndicator.ShowWindow(SW_SHOW);
+}
+
 void RecordView::UpdateMeters() {
     if (m_session == nullptr) {
         return;
     }
     m_micMeter.SetLevel(m_session->PeakMic());
     m_systemMeter.SetLevel(m_session->PeakSys());
+    if (m_micDbLabel.IsWindow()) {
+        m_micDbLabel.SetWindowText(FormatDb(m_micMeter.DisplayDb()).c_str());
+    }
+    if (m_systemDbLabel.IsWindow()) {
+        m_systemDbLabel.SetWindowText(FormatDb(m_systemMeter.DisplayDb()).c_str());
+    }
 }
 
 void RecordView::OnTimer(UINT_PTR id) {
     if (id == IDT_RECORD_ELAPSED) {
         UpdateElapsed();
+        ++m_recBlinkTicks;
+        if (m_recBlinkTicks >= 2) {
+            m_recBlinkTicks = 0;
+            m_recBlinkOn = !m_recBlinkOn;
+            UpdateRecIndicator();
+        }
     } else if (id == IDT_RECORD_METERS) {
         UpdateMeters();
     }

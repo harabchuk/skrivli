@@ -27,6 +27,11 @@
 #define IDC_LAST_RECORDING      1115
 #define IDC_TRANSCRIBE_NOW      1116
 #define IDC_OPEN_LAST_FOLDER    1117
+#define IDC_INPUT_SECTION       1118
+#define IDC_OUTPUT_SECTION      1119
+#define IDC_REC_INDICATOR       1120
+#define IDC_MIC_DB              1121
+#define IDC_SYSTEM_DB           1122
 
 #define IDC_RECORDINGS_HINT     1200
 #define IDC_RECORDINGS_LIST     1201

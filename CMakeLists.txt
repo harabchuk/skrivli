@@ -80,6 +80,7 @@ add_executable(MeetingBuddy WIN32
     src/ui/TranscriptWindow.cpp
     src/ui/TrayIcon.cpp
     src/ui/LevelMeter.cpp
+    src/ui/RecordButton.cpp
     ${MEETINGBUDDY_AUDIO_SOURCES}
     ${MEETINGBUDDY_TRANSCRIPTION_SOURCES}
     ${MEETINGBUDDY_UTIL_SOURCES}
@@ -120,6 +121,7 @@ target_link_libraries(MeetingBuddy PRIVATE
     winhttp
     bcrypt
     crypt32
+    uxtheme
 )
 
 if(MSVC)

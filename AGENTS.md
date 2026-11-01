@@ -58,7 +58,7 @@ reconfigure) so `start.bat` picks them up.
 src/
   main.cpp, Application.*, pch.hpp, Ids.hpp
   ui/            MainWindow, RecordView, RecordingsView, TranscriptWindow,
-                 SettingsDialog, TrayIcon, LevelMeter
+                 SettingsDialog, TrayIcon, LevelMeter, RecordButton
   audio/         DeviceManager, CaptureStream, SilentRenderKeepAlive, RingBuffer,
                  Mixer, WavWriter, M4aEncoder, RecordingSession
   transcription/ AudioFileReader, Resampler, WhisperEngine, ModelManager,
@@ -153,9 +153,10 @@ hallucinated lines. Save as UTF-8 without BOM.
 
 - Main window: resizable frame with `CTabCtrl`. Each tab page is a child `CDialogImpl` with `CDialogResize`, and there is a
 status bar. Per-monitor DPI aware.
-- **Record tab**: mic and system device combos, a "Save to" folder picker (`IFileOpenDialog` +
-`FOS_PICKFOLDERS`), a big Record/Stop button, an elapsed timer, and two level meters. After stop, a "Transcribe now /
-Open folder" prompt appears. Inputs are disabled while recording.
+- **Record tab**: INPUT/OUTPUT sections, mic and system device combos, a read-only "Save to" path with Browse…
+(`IFileOpenDialog` + `FOS_PICKFOLDERS`), an owner-drawn Record/Stop pill button, a large elapsed timer with blinking
+REC indicator, and dB-scaled level meters (segmented fill + peak hold). After stop, a "Transcribe now / Open folder"
+prompt appears. Inputs are disabled while recording.
 - **Recordings tab**: report-view `CListViewCtrl` with columns Name | Date | Duration | Size | Transcript, newest first. Actions:
 Play, Transcribe, View transcript, Open folder, Rename, Delete, Refresh. Kept in sync via `ReadDirectoryChangesW`.
 - **Transcript window**: read-only RichEdit showing the Markdown **source** with light styling. Toolbar has Copy all

@@ -309,6 +309,9 @@ void MainWindow::OnSysCommand(UINT id, CPoint point) {
 
 void MainWindow::OnDpiChanged(UINT dpiX, UINT /*dpiY*/, PRECT suggested) {
     ApplyDpiFonts(dpiX);
+    if (m_recordView.IsWindow()) {
+        m_recordView.OnDpiChanged(dpiX);
+    }
     if (suggested != nullptr) {
         SetWindowPos(
             nullptr,

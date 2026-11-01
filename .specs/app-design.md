@@ -253,21 +253,27 @@ Saved next to the audio as `<name>.md`:
 ### 8.2 Tab 1 — Record
 ```
 ┌──────────────────────────────────────────────┐
-│  Microphone:  [ Default communications ▼ ]    │
-│  System audio:[ Default output device  ▼ ]    │
-│  Save to:     [ C:\Users\…\MeetingBuddy ] […] │
+│  INPUT                                       │
+│  Microphone   [ Default communications ▼ ]   │
+│  System audio [ Default output device  ▼ ]   │
+│  OUTPUT                                      │
+│  Save to      [ C:\Users\…\MeetingBuddy ] [Browse…] │
 │                                              │
-│              (  ● Record  )                  │   big owner-drawn button; becomes ■ Stop
-│                 00:12:34                      │
-│  Mic    ▕██████████░░░░░░░░▏                  │
-│  System ▕████░░░░░░░░░░░░░░▏                  │
+│              (  ● Start recording  )         │   owner-drawn red pill; becomes ■ Stop
+│                    00:12:34                  │   large semibold timer (red while recording)
+│                     ● REC                    │   blinks while recording
+│  Mic     ▕██████████░░░░░░░░▏  -12 dB        │   flat segmented meters, dB scale
+│  System  ▕████░░░░░░░░░░░░░░▏  -24 dB        │   with peak-hold tick
 │                                              │
-│  Last recording: MeetingBuddy_…wav            │
-│  [ Transcribe now ]  [ Open folder ]          │   shown after stop
+│  ! warning / device status (inline)          │
+│  Last recording: MeetingBuddy_…wav           │
+│  [ Transcribe now ]  [ Open folder ]         │   shown after stop
 └──────────────────────────────────────────────┘
 ```
-- The folder picker uses `IFileOpenDialog` with `FOS_PICKFOLDERS`. The path is validated as writable. Default folder: `%USERPROFILE%\Documents\MeetingBuddy`.
+- The folder picker uses `IFileOpenDialog` with `FOS_PICKFOLDERS`. The path edit is read-only; Browse… validates writability. Default folder: `%USERPROFILE%\Documents\MeetingBuddy`.
 - Device combos and folder are disabled while recording.
+- Level meters map linear peak to a −60…0 dB scale, use a green→amber→red segmented fill, double-buffer painting, and hold a peak tick for about 1 s.
+- Inline warning label covers missing devices / unwritable folder; hard failures use `TaskDialogIndirect`.
 - Hotkey: global `Ctrl+Alt+R` (`RegisterHotKey`, configurable or disableable) toggles recording.
 
 ### 8.3 Tab 2 — Recordings
