@@ -19,7 +19,8 @@ namespace {
 
 constexpr COLORREF kRecordingRed = RGB(0xC4, 0x2B, 0x1C);
 constexpr COLORREF kWarningAmber = RGB(0x9A, 0x5B, 0x00);
-constexpr COLORREF kSectionMuted = RGB(0x70, 0x70, 0x70);
+constexpr COLORREF kSectionAccent = RGB(0x00, 0x5F, 0xB8);
+constexpr COLORREF kSectionLine = RGB(0xD0, 0xD0, 0xD0);
 
 std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
     if (frequency == 0) {
@@ -56,9 +57,6 @@ HFONT TryCreateFont(const wchar_t* face, int heightPx, int weight) {
 }  // namespace
 
 BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
-    DlgResize_Init(false, false);
-    ::EnableThemeDialogTexture(m_hWnd, ETDT_ENABLETAB);
-
     m_micCombo.Attach(GetDlgItem(IDC_MIC_DEVICE));
     m_systemCombo.Attach(GetDlgItem(IDC_SYSTEM_DEVICE));
     m_folderEdit.Attach(GetDlgItem(IDC_FOLDER_PATH));
@@ -94,7 +92,17 @@ BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_recIndicator.ShowWindow(SW_HIDE);
     m_micDbLabel.SetWindowText(L"-inf dB");
     m_systemDbLabel.SetWindowText(L"-inf dB");
+
+    // Snapshot after the combo and folder rows have their final heights.
+    DlgResize_Init(false, false);
     return TRUE;
+}
+
+void RecordView::OnSize(UINT type, CSize size) {
+    if (type != SIZE_MINIMIZED) {
+        DlgResize_UpdateLayout(size.cx, size.cy);
+    }
+    LayoutFieldRows();
 }
 
 void RecordView::InitTooltips() {
@@ -153,7 +161,7 @@ void RecordView::RebuildSpecialFonts(UINT dpi) {
         }
     }
 
-    const int sectionPx = ::MulDiv(9, static_cast<int>(dpi), 96);
+    const int sectionPx = ::MulDiv(13, static_cast<int>(dpi), 96);
     HFONT section = TryCreateFont(L"Segoe UI Semibold", sectionPx, FW_SEMIBOLD);
     if (section == nullptr) {
         section = TryCreateFont(L"Segoe UI", sectionPx, FW_SEMIBOLD);
@@ -195,6 +203,16 @@ void RecordView::ApplyControlFonts() {
         }
     }
 
+    ApplyComboStyle(m_micCombo);
+    ApplyComboStyle(m_systemCombo);
+    LayoutFieldRows();
+
+    if (m_inputSection.IsWindow()) {
+        m_inputSection.Invalidate(FALSE);
+    }
+    if (m_outputSection.IsWindow()) {
+        m_outputSection.Invalidate(FALSE);
+    }
     if (m_recordButton.IsWindow()) {
         m_recordButton.Invalidate(FALSE);
     }
@@ -249,36 +267,159 @@ void RecordView::OnDestroy() {
     SetMsgHandled(FALSE);
 }
 
+HBRUSH RecordView::OnCtlColorDlg(CDCHandle dc, CWindow /*wnd*/) {
+    dc.SetBkColor(::GetSysColor(COLOR_WINDOW));
+    return ::GetSysColorBrush(COLOR_WINDOW);
+}
+
 HBRUSH RecordView::OnCtlColorStatic(CDCHandle dc, CStatic wndStatic) {
     const int id = wndStatic.GetDlgCtrlID();
-    const HBRUSH background = ::GetSysColorBrush(COLOR_BTNFACE);
+    // The read-only path field should keep the system edit colors.
+    if (id == IDC_FOLDER_PATH) {
+        SetMsgHandled(FALSE);
+        return nullptr;
+    }
+
+    const COLORREF backgroundColor = ::GetSysColor(COLOR_WINDOW);
+    const HBRUSH background = ::GetSysColorBrush(COLOR_WINDOW);
+    dc.SetBkColor(backgroundColor);
     if (id == IDC_ELAPSED) {
-        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
         dc.SetTextColor(IsRecording() ? kRecordingRed : ::GetSysColor(COLOR_WINDOWTEXT));
-        return background;
-    }
-    if (id == IDC_REC_INDICATOR) {
-        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
+    } else if (id == IDC_REC_INDICATOR) {
         dc.SetTextColor(kRecordingRed);
-        return background;
-    }
-    if (id == IDC_INPUT_SECTION || id == IDC_OUTPUT_SECTION) {
-        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
-        dc.SetTextColor(kSectionMuted);
-        return background;
-    }
-    if (id == IDC_DEVICE_WARNING) {
-        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
+    } else if (id == IDC_DEVICE_WARNING) {
         dc.SetTextColor(kWarningAmber);
-        return background;
-    }
-    if (id == IDC_MIC_DB || id == IDC_SYSTEM_DB) {
-        dc.SetBkColor(::GetSysColor(COLOR_BTNFACE));
+    } else if (id == IDC_MIC_DB || id == IDC_SYSTEM_DB) {
         dc.SetTextColor(::GetSysColor(COLOR_GRAYTEXT));
-        return background;
+    } else {
+        dc.SetTextColor(::GetSysColor(COLOR_WINDOWTEXT));
     }
-    SetMsgHandled(FALSE);
-    return nullptr;
+    return background;
+}
+
+void RecordView::OnDrawItem(int /*id*/, LPDRAWITEMSTRUCT drawItem) {
+    if (drawItem == nullptr || drawItem->CtlType != ODT_STATIC) {
+        SetMsgHandled(FALSE);
+        return;
+    }
+    if (drawItem->CtlID != IDC_INPUT_SECTION && drawItem->CtlID != IDC_OUTPUT_SECTION) {
+        SetMsgHandled(FALSE);
+        return;
+    }
+    DrawSectionHeader(drawItem);
+}
+
+void RecordView::DrawSectionHeader(LPDRAWITEMSTRUCT drawItem) {
+    CDCHandle dc(drawItem->hDC);
+    const CRect rect(drawItem->rcItem);
+    dc.FillSolidRect(&rect, ::GetSysColor(COLOR_WINDOW));
+
+    wchar_t text[64]{};
+    ::GetWindowTextW(drawItem->hwndItem, text, 64);
+
+    const HFONT font = m_sectionFont.m_hFont != nullptr ? m_sectionFont.m_hFont : m_uiFont;
+    const HFONT previousFont = font != nullptr ? dc.SelectFont(font) : nullptr;
+    dc.SetBkMode(TRANSPARENT);
+    dc.SetTextColor(kSectionAccent);
+
+    CRect textRect = rect;
+    dc.DrawTextW(text, -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    CSize textSize{};
+    dc.GetTextExtent(text, static_cast<int>(wcslen(text)), &textSize);
+    const int gap = ::MulDiv(8, static_cast<int>(m_dpi), 96);
+    const int lineLeft = rect.left + textSize.cx + gap;
+    if (lineLeft < rect.right) {
+        const int lineY = rect.top + rect.Height() / 2;
+        WTL::CPen pen;
+        pen.CreatePen(PS_SOLID, 1, kSectionLine);
+        const HPEN previousPen = dc.SelectPen(pen);
+        dc.MoveTo(lineLeft, lineY);
+        dc.LineTo(rect.right, lineY);
+        dc.SelectPen(previousPen);
+    }
+
+    if (previousFont != nullptr) {
+        dc.SelectFont(previousFont);
+    }
+}
+
+void RecordView::ApplyComboStyle(WTL::CComboBox& combo) {
+    if (!combo.IsWindow()) {
+        return;
+    }
+    ::SetWindowTheme(combo, L"CFD", nullptr);
+    const int field = ::MulDiv(24, static_cast<int>(m_dpi), 96);
+    const int item = ::MulDiv(22, static_cast<int>(m_dpi), 96);
+    combo.SetItemHeight(-1, static_cast<UINT>(field));
+    combo.SetItemHeight(0, static_cast<UINT>(item));
+    ::SendMessageW(combo, CB_SETMINVISIBLE, 8, 0);
+}
+
+int RecordView::ClosedComboHeight(HWND combo) const {
+    COMBOBOXINFO info{};
+    info.cbSize = sizeof(info);
+    if (combo == nullptr || !::GetComboBoxInfo(combo, &info)) {
+        return 0;
+    }
+    RECT window{};
+    ::GetWindowRect(combo, &window);
+    POINT bottom{info.rcButton.left, info.rcButton.bottom};
+    ::ClientToScreen(combo, &bottom);
+    return bottom.y - window.top;
+}
+
+void RecordView::MatchControlHeight(HWND control, int height) {
+    if (control == nullptr || height <= 0) {
+        return;
+    }
+    CRect rect;
+    ::GetWindowRect(control, &rect);
+    ScreenToClient(&rect);
+    if (rect.Height() == height) {
+        return;
+    }
+    ::SetWindowPos(
+        control,
+        nullptr,
+        rect.left,
+        rect.top,
+        rect.Width(),
+        height,
+        SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void RecordView::CenterLabelOnRow(int labelId, HWND row, int rowHeight) {
+    HWND label = GetDlgItem(labelId);
+    if (label == nullptr || row == nullptr || rowHeight <= 0) {
+        return;
+    }
+    CRect rowRect;
+    ::GetWindowRect(row, &rowRect);
+    ScreenToClient(&rowRect);
+    CRect labelRect;
+    ::GetWindowRect(label, &labelRect);
+    ScreenToClient(&labelRect);
+    const int y = rowRect.top + (rowHeight - labelRect.Height()) / 2;
+    if (labelRect.top == y) {
+        return;
+    }
+    ::SetWindowPos(label, nullptr, labelRect.left, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void RecordView::LayoutFieldRows() {
+    if (!m_micCombo.IsWindow() || !m_systemCombo.IsWindow()) {
+        return;
+    }
+    const int comboHeight = ClosedComboHeight(m_micCombo);
+    if (comboHeight <= 0) {
+        return;
+    }
+    MatchControlHeight(m_folderEdit, comboHeight);
+    MatchControlHeight(GetDlgItem(IDC_BROWSE_FOLDER), comboHeight);
+    CenterLabelOnRow(IDC_MIC_LABEL, m_micCombo, comboHeight);
+    CenterLabelOnRow(IDC_SYSTEM_LABEL, m_systemCombo, comboHeight);
+    CenterLabelOnRow(IDC_FOLDER_LABEL, m_folderEdit, comboHeight);
 }
 
 void RecordView::SyncControlsToSettings() {

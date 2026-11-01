@@ -17,9 +17,12 @@ public:
 
     BEGIN_MSG_MAP_EX(RecordView)
         MSG_WM_INITDIALOG(OnInitDialog)
+        MSG_WM_SIZE(OnSize)
         MSG_WM_TIMER(OnTimer)
         MSG_WM_DESTROY(OnDestroy)
+        MSG_WM_CTLCOLORDLG(OnCtlColorDlg)
         MSG_WM_CTLCOLORSTATIC(OnCtlColorStatic)
+        MSG_WM_DRAWITEM(OnDrawItem)
         COMMAND_HANDLER_EX(IDC_RECORD_BUTTON, BN_CLICKED, OnRecordClicked)
         COMMAND_HANDLER_EX(IDC_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
         COMMAND_HANDLER_EX(IDC_TRANSCRIBE_NOW, BN_CLICKED, OnTranscribeNow)
@@ -74,8 +77,11 @@ public:
 private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
     void OnDestroy();
+    void OnSize(UINT type, CSize size);
     void OnTimer(UINT_PTR id);
+    HBRUSH OnCtlColorDlg(CDCHandle dc, CWindow wnd);
     HBRUSH OnCtlColorStatic(CDCHandle dc, CStatic wndStatic);
+    void OnDrawItem(int id, LPDRAWITEMSTRUCT drawItem);
     void OnRecordClicked(UINT code, int id, HWND control);
     void OnBrowseFolder(UINT code, int id, HWND control);
     void OnTranscribeNow(UINT code, int id, HWND control);
@@ -92,6 +98,12 @@ private:
     void UpdateRecIndicator();
     void RebuildSpecialFonts(UINT dpi);
     void ApplyControlFonts();
+    void ApplyComboStyle(WTL::CComboBox& combo);
+    void LayoutFieldRows();
+    void DrawSectionHeader(LPDRAWITEMSTRUCT drawItem);
+    int ClosedComboHeight(HWND combo) const;
+    void MatchControlHeight(HWND control, int height);
+    void CenterLabelOnRow(int labelId, HWND row, int rowHeight);
     void InitTooltips();
     void UpdateDeviceTooltips();
     bool BrowseForFolder(std::wstring& path);

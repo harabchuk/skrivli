@@ -253,10 +253,10 @@ Saved next to the audio as `<name>.md`:
 ### 8.2 Tab 1 — Record
 ```
 ┌──────────────────────────────────────────────┐
-│  INPUT                                       │
+│  Input  ─────────────────────────────────    │
 │  Microphone   [ Default communications ▼ ]   │
 │  System audio [ Default output device  ▼ ]   │
-│  OUTPUT                                      │
+│  Output ─────────────────────────────────    │
 │  Save to      [ C:\Users\…\MeetingBuddy ] [Browse…] │
 │                                              │
 │              (  ● Start recording  )         │   owner-drawn red pill; becomes ■ Stop
@@ -270,6 +270,7 @@ Saved next to the audio as `<name>.md`:
 │  [ Transcribe now ]  [ Open folder ]         │   shown after stop
 └──────────────────────────────────────────────┘
 ```
+- The page uses a solid `COLOR_WINDOW` background. Input and Output are owner-drawn section headers: accent semibold text with a light separator line. Device combos use the flat file-dialog (`CFD`) theme with a taller selection field and drop-down rows; the Save to edit and Browse button match that height.
 - The folder picker uses `IFileOpenDialog` with `FOS_PICKFOLDERS`. The path edit is read-only; Browse… validates writability. Default folder: `%USERPROFILE%\Documents\MeetingBuddy`.
 - Device combos and folder are disabled while recording.
 - Level meters map linear peak to a −60…0 dB scale, use a green→amber→red segmented fill, double-buffer painting, and hold a peak tick for about 1 s.

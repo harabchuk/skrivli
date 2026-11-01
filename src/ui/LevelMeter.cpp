@@ -91,8 +91,8 @@ void LevelMeter::PaintTo(CDCHandle dc, const CRect& rect) {
     const int segmentGap = ::MulDiv(2, static_cast<int>(dpi), 96);
     const int segmentWidth = ::MulDiv(4, static_cast<int>(dpi), 96);
 
-    const COLORREF track = DarkenSysColor(COLOR_BTNFACE, 18);
-    const COLORREF parentBg = ::GetSysColor(COLOR_BTNFACE);
+    const COLORREF track = DarkenSysColor(COLOR_WINDOW, 28);
+    const COLORREF parentBg = ::GetSysColor(COLOR_WINDOW);
     dc.FillSolidRect(&rect, parentBg);
 
     WTL::CBrush trackBrush;

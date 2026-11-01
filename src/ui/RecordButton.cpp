@@ -94,7 +94,7 @@ void RecordButton::PaintTo(CDCHandle dc) {
     CRect rect;
     GetClientRect(&rect);
 
-    const COLORREF parentBg = ::GetSysColor(COLOR_BTNFACE);
+    const COLORREF parentBg = ::GetSysColor(COLOR_WINDOW);
     dc.FillSolidRect(&rect, parentBg);
 
     const UINT dpi = ::GetDpiForWindow(m_hWnd);
