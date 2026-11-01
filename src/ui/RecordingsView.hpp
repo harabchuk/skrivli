@@ -24,6 +24,8 @@ public:
     BEGIN_MSG_MAP_EX(RecordingsView)
         MSG_WM_INITDIALOG(OnInitDialog)
         MSG_WM_DESTROY(OnDestroy)
+        MSG_WM_CTLCOLORDLG(OnCtlColorDlg)
+        MSG_WM_CTLCOLORSTATIC(OnCtlColorStatic)
         COMMAND_ID_HANDLER_EX(IDC_REC_PLAY, OnPlay)
         COMMAND_ID_HANDLER_EX(IDC_REC_TRANSCRIBE, OnTranscribe)
         COMMAND_ID_HANDLER_EX(IDC_REC_VIEW, OnView)
@@ -53,6 +55,8 @@ public:
 private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
     void OnDestroy();
+    HBRUSH OnCtlColorDlg(CDCHandle dc, CWindow wnd);
+    HBRUSH OnCtlColorStatic(CDCHandle dc, CStatic wndStatic);
     void OnPlay(UINT code, int id, HWND control);
     void OnTranscribe(UINT code, int id, HWND control);
     void OnView(UINT code, int id, HWND control);

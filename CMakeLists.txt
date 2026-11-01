@@ -77,6 +77,7 @@ add_executable(MeetingBuddy WIN32
     src/ui/RecordView.cpp
     src/ui/RecordingsView.cpp
     src/ui/SettingsDialog.cpp
+    src/ui/TabCtrl.cpp
     src/ui/TranscriptWindow.cpp
     src/ui/TrayIcon.cpp
     src/ui/LevelMeter.cpp

@@ -151,6 +151,8 @@ void MainWindow::CreateStatusBar() {
 void MainWindow::CreateTabs() {
     const DWORD style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | TCS_TABS;
     m_tabs.Create(m_hWnd, rcDefault, nullptr, style, 0, IDC_TAB_MAIN);
+    const UINT dpi = ::GetDpiForWindow(m_hWnd);
+    m_tabs.SetPadding(CSize(::MulDiv(14, static_cast<int>(dpi), 96), ::MulDiv(6, static_cast<int>(dpi), 96)));
 
     TCITEMW item{};
     item.mask = TCIF_TEXT;
@@ -193,6 +195,8 @@ void MainWindow::ApplyDpiFonts(UINT dpi) {
 
     const HFONT font = m_uiFont;
     if (m_tabs.IsWindow()) {
+        const UINT tabDpi = ::GetDpiForWindow(m_tabs.m_hWnd);
+        m_tabs.SetPadding(CSize(::MulDiv(14, static_cast<int>(tabDpi), 96), ::MulDiv(6, static_cast<int>(tabDpi), 96)));
         m_tabs.SetFont(font);
     }
     if (m_status.IsWindow()) {
@@ -843,6 +847,9 @@ void MainWindow::OnTrayStartStop(UINT /*code*/, int /*id*/, HWND /*control*/) {
 
 LRESULT MainWindow::OnTabSelChange(LPNMHDR /*header*/) {
     ShowSelectedTab();
+    if (m_tabs.IsWindow()) {
+        m_tabs.Invalidate(FALSE);
+    }
     return 0;
 }
 

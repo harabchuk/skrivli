@@ -2,6 +2,7 @@
 
 #include "storage/Settings.hpp"
 #include "transcription/TranscriptionService.hpp"
+#include "ui/Theme.hpp"
 #include "ui/TranscriptWindow.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
@@ -69,11 +70,27 @@ BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_list.InsertColumn(ColSize, L"Size", LVCFMT_RIGHT, 70);
     m_list.InsertColumn(ColTranscript, L"Transcript", LVCFMT_LEFT, 80);
 
+    // Same white page color as the Record view, list included.
+    m_list.SetBkColor(ui::WindowColor());
+    m_list.SetTextBkColor(ui::WindowColor());
+
     ::EnableWindow(GetDlgItem(IDC_REC_VIEW), FALSE);
 
     EnsureWatching();
     Refresh();
     return TRUE;
+}
+
+HBRUSH RecordingsView::OnCtlColorDlg(CDCHandle dc, CWindow /*wnd*/) {
+    // Match the Record page: pure window white instead of the dialog default.
+    dc.SetBkColor(ui::WindowColor());
+    return ui::WindowBrush();
+}
+
+HBRUSH RecordingsView::OnCtlColorStatic(CDCHandle dc, CStatic /*wndStatic*/) {
+    dc.SetBkColor(ui::WindowColor());
+    dc.SetTextColor(ui::TextColor());
+    return ui::WindowBrush();
 }
 
 void RecordingsView::SetTranscriptProgress(const std::wstring& audioPath, int percent) {

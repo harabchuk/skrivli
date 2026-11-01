@@ -1,6 +1,7 @@
 #include "ui/RecordView.hpp"
 
 #include "storage/Settings.hpp"
+#include "ui/Theme.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
@@ -19,8 +20,6 @@ namespace {
 
 constexpr COLORREF kRecordingRed = RGB(0xC4, 0x2B, 0x1C);
 constexpr COLORREF kWarningAmber = RGB(0x9A, 0x5B, 0x00);
-constexpr COLORREF kSectionAccent = RGB(0x00, 0x5F, 0xB8);
-constexpr COLORREF kSectionLine = RGB(0xD0, 0xD0, 0xD0);
 
 std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
     if (frequency == 0) {
@@ -268,20 +267,24 @@ void RecordView::OnDestroy() {
 }
 
 HBRUSH RecordView::OnCtlColorDlg(CDCHandle dc, CWindow /*wnd*/) {
-    dc.SetBkColor(::GetSysColor(COLOR_WINDOW));
-    return ::GetSysColorBrush(COLOR_WINDOW);
+    dc.SetBkColor(ui::WindowColor());
+    return ui::WindowBrush();
 }
 
 HBRUSH RecordView::OnCtlColorStatic(CDCHandle dc, CStatic wndStatic) {
     const int id = wndStatic.GetDlgCtrlID();
-    // The read-only path field should keep the system edit colors.
+    // The read-only path field shares the white input look of the combos.
     if (id == IDC_FOLDER_PATH) {
-        SetMsgHandled(FALSE);
-        return nullptr;
+        dc.SetBkColor(ui::WindowColor());
+        dc.SetTextColor(
+            wndStatic.IsWindowEnabled()
+                ? ui::TextColor()
+                : ui::SecondaryTextColor());
+        return ui::WindowBrush();
     }
 
-    const COLORREF backgroundColor = ::GetSysColor(COLOR_WINDOW);
-    const HBRUSH background = ::GetSysColorBrush(COLOR_WINDOW);
+    const COLORREF backgroundColor = ui::WindowColor();
+    const HBRUSH background = ui::WindowBrush();
     dc.SetBkColor(backgroundColor);
     if (id == IDC_ELAPSED) {
         dc.SetTextColor(IsRecording() ? kRecordingRed : ::GetSysColor(COLOR_WINDOWTEXT));
@@ -312,7 +315,7 @@ void RecordView::OnDrawItem(int /*id*/, LPDRAWITEMSTRUCT drawItem) {
 void RecordView::DrawSectionHeader(LPDRAWITEMSTRUCT drawItem) {
     CDCHandle dc(drawItem->hDC);
     const CRect rect(drawItem->rcItem);
-    dc.FillSolidRect(&rect, ::GetSysColor(COLOR_WINDOW));
+    dc.FillSolidRect(&rect, ui::WindowColor());
 
     wchar_t text[64]{};
     ::GetWindowTextW(drawItem->hwndItem, text, 64);
@@ -320,8 +323,7 @@ void RecordView::DrawSectionHeader(LPDRAWITEMSTRUCT drawItem) {
     const HFONT font = m_sectionFont.m_hFont != nullptr ? m_sectionFont.m_hFont : m_uiFont;
     const HFONT previousFont = font != nullptr ? dc.SelectFont(font) : nullptr;
     dc.SetBkMode(TRANSPARENT);
-    dc.SetTextColor(kSectionAccent);
-
+    dc.SetTextColor(ui::kAccent);
     CRect textRect = rect;
     dc.DrawTextW(text, -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
@@ -332,7 +334,7 @@ void RecordView::DrawSectionHeader(LPDRAWITEMSTRUCT drawItem) {
     if (lineLeft < rect.right) {
         const int lineY = rect.top + rect.Height() / 2;
         WTL::CPen pen;
-        pen.CreatePen(PS_SOLID, 1, kSectionLine);
+        pen.CreatePen(PS_SOLID, 1, ui::kDivider);
         const HPEN previousPen = dc.SelectPen(pen);
         dc.MoveTo(lineLeft, lineY);
         dc.LineTo(rect.right, lineY);

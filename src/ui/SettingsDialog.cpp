@@ -5,6 +5,7 @@
 #include "util/Paths.hpp"
 
 #include <shobjidl.h>
+#include <uxtheme.h>
 #include <wrl/client.h>
 
 #include <cmath>
@@ -70,6 +71,13 @@ BOOL SettingsDialog::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_startMinimized.Attach(GetDlgItem(IDC_SET_START_MINIMIZED));
     m_hotkeyEnable.Attach(GetDlgItem(IDC_SET_HOTKEY_ENABLE));
     m_hotkey.Attach(GetDlgItem(IDC_SET_HOTKEY));
+
+    // Same flat dropdown look as the Record view.
+    for (WTL::CComboBox* combo : { &m_mic, &m_sys, &m_model, &m_language }) {
+        if (combo->IsWindow()) {
+            ::SetWindowTheme(combo->m_hWnd, L"CFD", nullptr);
+        }
+    }
 
     FillLanguageCombo();
     FillModelCombo();

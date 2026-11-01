@@ -8,6 +8,7 @@
 #include "transcription/TranscriptionService.hpp"
 #include "ui/RecordView.hpp"
 #include "ui/RecordingsView.hpp"
+#include "ui/TabCtrl.hpp"
 #include "ui/TrayIcon.hpp"
 
 class MainWindow : public WTL::CFrameWindowImpl<MainWindow> {
@@ -126,7 +127,7 @@ private:
     bool ConfirmStopRecordingForExit();
     void FinishExit();
 
-    WTL::CTabCtrl m_tabs;
+    TabCtrl m_tabs;
     WTL::CMultiPaneStatusBarCtrl m_status;
     WTL::CFont m_uiFont;
     RecordView m_recordView;
