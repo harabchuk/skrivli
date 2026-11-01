@@ -23,6 +23,7 @@ struct SettingsData {
     std::wstring micDeviceId;
     std::wstring systemDeviceId;
     float micGain = 1.0f;
+    bool micAgc = false;
     float systemGain = 0.8f;
     bool saveStems = false;
     bool compressToM4a = false;

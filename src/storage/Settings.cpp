@@ -92,6 +92,7 @@ bool Settings::Load() {
     m_data.micDeviceId = ReadString(file, kSectionRecording, L"MicDeviceId", L"");
     m_data.systemDeviceId = ReadString(file, kSectionRecording, L"SystemDeviceId", L"");
     m_data.micGain = ReadFloat(file, kSectionRecording, L"MicGain", 1.0f);
+    m_data.micAgc = ReadInt(file, kSectionRecording, L"MicAgc", 0) != 0;
     m_data.systemGain = ReadFloat(file, kSectionRecording, L"SystemGain", 0.8f);
     m_data.saveStems = ReadInt(file, kSectionRecording, L"SaveStems", 0) != 0;
     m_data.compressToM4a = ReadInt(file, kSectionRecording, L"CompressToM4a", 0) != 0;
@@ -131,6 +132,7 @@ bool Settings::Save() const {
     ok = WriteString(file, kSectionRecording, L"MicDeviceId", m_data.micDeviceId) && ok;
     ok = WriteString(file, kSectionRecording, L"SystemDeviceId", m_data.systemDeviceId) && ok;
     ok = WriteFloat(file, kSectionRecording, L"MicGain", m_data.micGain) && ok;
+    ok = WriteInt(file, kSectionRecording, L"MicAgc", m_data.micAgc ? 1 : 0) && ok;
     ok = WriteFloat(file, kSectionRecording, L"SystemGain", m_data.systemGain) && ok;
     ok = WriteInt(file, kSectionRecording, L"SaveStems", m_data.saveStems ? 1 : 0) && ok;
     ok = WriteInt(file, kSectionRecording, L"CompressToM4a", m_data.compressToM4a ? 1 : 0) && ok;

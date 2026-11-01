@@ -53,6 +53,7 @@ public:
         const std::wstring& micDeviceId,
         const std::wstring& systemDeviceId,
         float micGain,
+        bool micAgc,
         float systemGain,
         bool communicationsProcessing,
         bool saveStems = false);
@@ -62,6 +63,10 @@ public:
     // Called from UI when IMMNotificationClient reports a change.
     void OnDevicesChanged();
 
+    // Live mic mix gain / AGC (applied immediately while recording).
+    void SetMicGain(float micGain);
+    void SetMicAgc(bool enabled);
+
     State GetState() const { return m_state.load(std::memory_order_acquire); }
     bool IsActive() const {
         const State state = GetState();
@@ -70,6 +75,7 @@ public:
 
     float PeakMic() const { return m_mixer.PeakMic(); }
     float PeakSys() const { return m_mixer.PeakSys(); }
+    float EffectiveMicGain() const { return m_mixer.EffectiveMicGain(); }
     uint64_t StartQpc() const { return m_startQpc.load(std::memory_order_acquire); }
 
     std::vector<std::wstring> TakeDeviceNotes();
@@ -132,6 +138,7 @@ private:
     bool m_stemWritersOpen = false;
     float m_micGain = 1.0f;
     float m_systemGain = 0.8f;
+    bool m_micAgc = false;
 
     std::wstring m_micName;
     std::wstring m_systemName;

@@ -21,6 +21,7 @@ public:
         MSG_WM_SIZE(OnSize)
         MSG_WM_TIMER(OnTimer)
         MSG_WM_DESTROY(OnDestroy)
+        MSG_WM_HSCROLL(OnHScroll)
         MSG_WM_CTLCOLORDLG(OnCtlColorDlg)
         MSG_WM_CTLCOLORSTATIC(OnCtlColorStatic)
         MSG_WM_DRAWITEM(OnDrawItem)
@@ -28,6 +29,7 @@ public:
         COMMAND_HANDLER_EX(IDC_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
         COMMAND_HANDLER_EX(IDC_MIC_DEVICE, CBN_SELCHANGE, OnMicSelChange)
         COMMAND_HANDLER_EX(IDC_SYSTEM_DEVICE, CBN_SELCHANGE, OnSystemSelChange)
+        COMMAND_HANDLER_EX(IDC_MIC_GAIN_AUTO, BN_CLICKED, OnMicAgcClicked)
         CHAIN_MSG_MAP(WTL::CDialogResize<RecordView>)
     END_MSG_MAP()
 
@@ -79,9 +81,20 @@ private:
     void OnBrowseFolder(UINT code, int id, HWND control);
     void OnMicSelChange(UINT code, int id, HWND control);
     void OnSystemSelChange(UINT code, int id, HWND control);
+    void OnMicAgcClicked(UINT code, int id, HWND control);
+    void OnHScroll(UINT code, UINT pos, CScrollBar bar);
 
     void PersistDeviceSelection();
     void PersistFolder();
+    void PersistMicGain();
+    void PersistMicAgc();
+    void ApplyMicGain(float gain);
+    void ApplyMicAgc(bool enabled);
+    void SetMicGainSlider(float gain);
+    void UpdateMicGainControls();
+    void UpdateMicGainLabel(float gain);
+    float MicGainFromSlider() const;
+    bool MicAgcChecked() const;
     void SetInputsEnabled(bool enabled);
     void UpdateRecordButton();
     void UpdateElapsed();
@@ -120,6 +133,10 @@ private:
     WTL::CStatic m_warningLabel;
     WTL::CStatic m_micDbLabel;
     WTL::CStatic m_systemDbLabel;
+    WTL::CStatic m_micGainLabel;
+    WTL::CStatic m_micGainValue;
+    WTL::CTrackBarCtrl m_micGain;
+    WTL::CButton m_micAgc;
     WTL::CStatic m_inputSection;
     WTL::CStatic m_outputSection;
     LevelMeter m_micMeter;

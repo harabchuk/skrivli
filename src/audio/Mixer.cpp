@@ -3,11 +3,15 @@
 #include <algorithm>
 #include <cmath>
 
-void Mixer::Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain) {
+void Mixer::Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain, bool micAgc) {
     m_startQpc = startQpc;
     m_qpcFrequency = qpcFrequency == 0 ? 1 : qpcFrequency;
-    m_micGain = micGain;
+    m_micGain = std::clamp(micGain, 0.0f, kAgcMaxGain);
     m_systemGain = systemGain;
+    m_micAgc = micAgc;
+    m_agcGain = std::clamp(m_micGain <= 0.0f ? 1.0f : m_micGain, kAgcMinGain, kAgcMaxGain);
+    m_agcPrevGain = m_agcGain;
+    m_agcRms = 0.0f;
     m_nextBlockFrame = 0;
     m_mic.Clear();
     m_sys.Clear();
@@ -15,6 +19,48 @@ void Mixer::Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float
     m_peakMic.store(0.0f, std::memory_order_relaxed);
     m_peakSys.store(0.0f, std::memory_order_relaxed);
     m_peakMix.store(0.0f, std::memory_order_relaxed);
+    m_effectiveMicGain.store(CurrentMicGain(), std::memory_order_relaxed);
+}
+
+void Mixer::SetGains(float micGain, float systemGain) {
+    m_micGain = std::clamp(micGain, 0.0f, kAgcMaxGain);
+    m_systemGain = systemGain;
+    if (!m_micAgc) {
+        m_effectiveMicGain.store(m_micGain, std::memory_order_release);
+    }
+}
+
+void Mixer::SetMicAgc(bool enabled) {
+    m_micAgc = enabled;
+    if (enabled) {
+        const float seed = m_micGain > 0.0f ? m_micGain : 1.0f;
+        m_agcGain = std::clamp(seed, kAgcMinGain, kAgcMaxGain);
+        m_agcPrevGain = m_agcGain;
+        m_agcRms = 0.0f;
+    }
+    m_effectiveMicGain.store(CurrentMicGain(), std::memory_order_release);
+}
+
+float Mixer::CurrentMicGain() const {
+    return m_micAgc ? m_agcGain : m_micGain;
+}
+
+void Mixer::UpdateAgc(float blockRms) {
+    constexpr float dt = static_cast<float>(AudioFormat::kBlockFrames) / static_cast<float>(AudioFormat::kSampleRate);
+    const float alpha = 1.0f - std::exp(-dt / kAgcWindowSeconds);
+    m_agcRms = (1.0f - alpha) * m_agcRms + alpha * blockRms;
+
+    // Hold gain through silence so background noise is not pumped up.
+    if (m_agcRms < kAgcGateLinear) {
+        m_agcPrevGain = m_agcGain;
+        return;
+    }
+
+    const float desired = std::clamp(kAgcTargetLinear / m_agcRms, kAgcMinGain, kAgcMaxGain);
+    const float coef = desired < m_agcGain ? kAgcAttackPerBlock : kAgcReleasePerBlock;
+    m_agcPrevGain = m_agcGain;
+    m_agcGain = m_agcGain + (desired - m_agcGain) * coef;
+    m_agcGain = std::clamp(m_agcGain, kAgcMinGain, kAgcMaxGain);
 }
 
 void Mixer::EnsureCapacity(SourceBuffer& source, int64_t frameIndex, uint32_t frames) {
@@ -259,6 +305,23 @@ bool Mixer::Process(
     float micPeak = 0.0f;
     float sysPeak = 0.0f;
     float mixPeak = 0.0f;
+    double micPower = 0.0;
+
+    for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
+        const float micL = micBlock[i * 2];
+        const float micR = micBlock[i * 2 + 1];
+        const float micMono = 0.5f * (micL + micR);
+        micPeak = (std::max)(micPeak, std::fabs(micMono));
+        micPower += static_cast<double>(micMono) * static_cast<double>(micMono);
+    }
+
+    if (m_micAgc) {
+        UpdateAgc(static_cast<float>(std::sqrt(micPower / static_cast<double>(AudioFormat::kBlockFrames))));
+    }
+
+    const float gainStart = m_micAgc ? m_agcPrevGain : m_micGain;
+    const float gainEnd = CurrentMicGain();
+    m_effectiveMicGain.store(gainEnd, std::memory_order_release);
 
     for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
         const float micL = micBlock[i * 2];
@@ -267,7 +330,6 @@ bool Mixer::Process(
         const float sysL = sysBlock[i * 2];
         const float sysR = sysBlock[i * 2 + 1];
 
-        micPeak = (std::max)(micPeak, std::fabs(micMono));
         sysPeak = (std::max)(sysPeak, (std::max)(std::fabs(sysL), std::fabs(sysR)));
 
         if (outMicStem != nullptr) {
@@ -279,8 +341,10 @@ bool Mixer::Process(
             outSysStem[i * 2 + 1] = SoftLimit(sysR);
         }
 
-        float outL = m_micGain * micMono + m_systemGain * sysL;
-        float outR = m_micGain * micMono + m_systemGain * sysR;
+        const float t = static_cast<float>(i) / static_cast<float>(AudioFormat::kBlockFrames);
+        const float micGain = gainStart + (gainEnd - gainStart) * t;
+        float outL = micGain * micMono + m_systemGain * sysL;
+        float outR = micGain * micMono + m_systemGain * sysR;
         outL = SoftLimit(outL);
         outR = SoftLimit(outR);
         outInterleavedStereo[i * 2] = outL;

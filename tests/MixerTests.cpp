@@ -128,3 +128,72 @@ TEST(Mixer, DriftCorrectionUnderOffset) {
     // Assert
     SUCCEED();
 }
+
+TEST(Mixer, AgcRaisesQuietSpeechTowardTarget) {
+    // Arrange
+    RingBuffer mic(48000);
+    RingBuffer sys(48000);
+    Mixer mixer;
+    mixer.Reset(0, kFreq, 1.0f, 0.0f, true);
+    constexpr float kQuiet = 0.03f; // ~-30 dBFS
+    uint64_t qpc = 0;
+    float out[480 * 2]{};
+
+    // Act
+    for (int block = 0; block < 150; ++block) {
+        PushTone(mic, qpc, 480, kQuiet, kQuiet);
+        PushTone(sys, qpc, 480, 0.0f, 0.0f);
+        qpc += FramesToQpc(480);
+        ASSERT_TRUE(mixer.Process(mic, sys, qpc + FramesToQpc(200), out));
+    }
+
+    // Assert
+    EXPECT_GT(mixer.EffectiveMicGain(), 1.5f);
+    EXPECT_LE(mixer.EffectiveMicGain(), Mixer::kAgcMaxGain);
+    EXPECT_NEAR(std::fabs(out[0]), kQuiet * mixer.EffectiveMicGain(), 0.02f);
+}
+
+TEST(Mixer, AgcLowersLoudSpeechTowardTarget) {
+    // Arrange
+    RingBuffer mic(48000);
+    RingBuffer sys(48000);
+    Mixer mixer;
+    mixer.Reset(0, kFreq, 1.0f, 0.0f, true);
+    constexpr float kLoud = 0.5f; // ~-6 dBFS
+    uint64_t qpc = 0;
+    float out[480 * 2]{};
+
+    // Act
+    for (int block = 0; block < 80; ++block) {
+        PushTone(mic, qpc, 480, kLoud, kLoud);
+        PushTone(sys, qpc, 480, 0.0f, 0.0f);
+        qpc += FramesToQpc(480);
+        ASSERT_TRUE(mixer.Process(mic, sys, qpc + FramesToQpc(200), out));
+    }
+
+    // Assert
+    EXPECT_LT(mixer.EffectiveMicGain(), 0.85f);
+    EXPECT_GE(mixer.EffectiveMicGain(), Mixer::kAgcMinGain);
+}
+
+TEST(Mixer, AgcIgnoresSilence) {
+    // Arrange
+    RingBuffer mic(48000);
+    RingBuffer sys(48000);
+    Mixer mixer;
+    mixer.Reset(0, kFreq, 1.0f, 0.0f, true);
+    constexpr float kNoise = 0.001f; // below -45 dBFS gate
+    uint64_t qpc = 0;
+    float out[480 * 2]{};
+
+    // Act
+    for (int block = 0; block < 200; ++block) {
+        PushTone(mic, qpc, 480, kNoise, kNoise);
+        PushTone(sys, qpc, 480, 0.0f, 0.0f);
+        qpc += FramesToQpc(480);
+        ASSERT_TRUE(mixer.Process(mic, sys, qpc + FramesToQpc(200), out));
+    }
+
+    // Assert
+    EXPECT_NEAR(mixer.EffectiveMicGain(), 1.0f, 0.05f);
+}

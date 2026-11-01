@@ -120,7 +120,7 @@ use `GetMixFormat()` + the MF Audio Resampler DSP.
 same render device), **and** fill gaps in the mixer from `u64QPCPosition`.
 - Mixer: align by QPC; a gap over 5 ms becomes silence; emit a block when both sources cover it or it is
 150 ms stale. Drift correction drops or duplicates single frames when fill levels diverge by more than 20 ms.
-`out = clamp(micGain*mic + sysGain*sys)` (defaults 1.0 / 0.8), mic upmixed mono→stereo,
+`out = clamp(micGain*mic + sysGain*sys)` (defaults 1.0 / 0.8; optional mic AGC), mic upmixed mono→stereo,
 soft limiter above -1 dBFS.
 - Handle `AUDCLNT_BUFFERFLAGS_SILENT`, `DATA_DISCONTINUITY`, and `AUDCLNT_E_DEVICE_INVALIDATED`
 (reopen on the new default device, keep recording, fill the gap with silence).

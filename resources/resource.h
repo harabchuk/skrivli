@@ -29,6 +29,10 @@
 #define IDC_REC_INDICATOR       1120
 #define IDC_MIC_DB              1121
 #define IDC_SYSTEM_DB           1122
+#define IDC_MIC_GAIN_LABEL      1123
+#define IDC_MIC_GAIN            1124
+#define IDC_MIC_GAIN_VALUE      1125
+#define IDC_MIC_GAIN_AUTO       1126
 
 #define IDC_RECORDINGS_HINT     1200
 #define IDC_RECORDINGS_LIST     1201
@@ -51,6 +55,7 @@
 #define IDC_SET_SYS_DEVICE      1403
 #define IDC_SET_MIC_GAIN        1404
 #define IDC_SET_SYS_GAIN        1405
+#define IDC_SET_MIC_AGC         1411
 #define IDC_SET_SAVE_STEMS      1406
 #define IDC_SET_COMPRESS_M4A    1407
 #define IDC_SET_KEEP_WAV        1408

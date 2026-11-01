@@ -172,7 +172,8 @@ WASAPI loopback delivers **no packets** while nothing is playing, which would ma
 - The mixer emits 10 ms blocks (480 frames) once both sources have covered the block, **or** once the block is more than 150 ms behind "now" (the missing source is treated as silence). That bounds latency and survives a stalled device.
 - **Drift control**: mic and output devices run on different crystals. Track each buffer's fill level with a moving average. If it diverges by more than 20 ms, drop or duplicate one frame per correction step, spread out so it's inaudible for speech. A tiny-ratio resampler is a later improvement.
 - **Mixdown**: `out = clamp(micGain * mic + sysGain * sys)`. Mic is mono-summed and duplicated to both channels. Default gains: mic 1.0, system 0.8. A simple soft limiter (tanh above -1 dBFS) prevents clipping.
-- Peak levels per source (and mixed) go into atomics for the UI meters.
+- **Mic AGC** (optional, off by default): when enabled, replace the fixed mic gain with app-side automatic gain control in the mixer. Measure mic RMS over ~0.75 s, target speech around −18 dBFS, raise gain slowly and cut quickly, clamp to 0.5×–4×, ignore levels below −45 dBFS (noise gate), and interpolate gain across each 10 ms block to avoid pumping. This adjusts recording volume only — not the Windows mic input level. Driver “communications processing” remains a separate, inconsistent option.
+- Peak levels per source (and mixed) go into atomics for the UI meters. The effective mic gain (manual or AGC) is also published for the Record-tab readout.
 - Optional setting (off by default): also save `*.mic.wav` / `*.system.wav` stems. Useful later for diarization ("You" vs. "Others").
 
 ### 6.5 Writing files
@@ -264,6 +265,7 @@ Saved next to the audio as `<name>.md`:
 │                    00:12:34                  │   large semibold timer (red while recording)
 │                     ● REC                    │   blinks while recording
 │  Mic     ▕██████████░░░░░░░░▏  -12 dB        │   flat segmented meters, dB scale
+│  Gain    ──●────  1.0×  [Auto]               │   short slider + AGC; live under mic meter
 │  System  ▕████░░░░░░░░░░░░░░▏  -24 dB        │   with peak-hold tick
 │                                              │
 │  ! warning / device status (inline)          │
@@ -271,8 +273,8 @@ Saved next to the audio as `<name>.md`:
 ```
 - The page uses a solid `COLOR_WINDOW` background. Input and Output are owner-drawn section headers: accent semibold text with a light separator line. Device combos use the flat file-dialog (`CFD`) theme with a taller selection field and drop-down rows; the Save to edit and Browse button match that height.
 - The folder picker uses `IFileOpenDialog` with `FOS_PICKFOLDERS`. The path edit is read-only; Browse… validates writability. Default folder: `%USERPROFILE%\Documents\MeetingBuddy`.
-- Device combos and folder are disabled while recording.
-- Level meters map linear peak to a −60…0 dB scale, use a green→amber→red segmented fill, double-buffer painting, and hold a peak tick for about 1 s. They run continuously: while idle, `LevelMonitor` opens the selected mic + loopback (with keep-alive) and publishes peaks to atomics; while recording, peaks come from the mixer. The monitor stops before a recording starts and restarts when it ends or when the device selection changes.
+- Device combos and folder are disabled while recording. The mic gain slider and Auto checkbox stay enabled and apply immediately (including mid-take). Auto disables the slider and runs mixer AGC; the value label shows `Auto` while idle or the live effective gain while recording.
+- Level meters map linear peak to a −60…0 dB scale, use a green→amber→red segmented fill, double-buffer painting, and hold a peak tick for about 1 s. The mic meter displays post-gain level so the gain controls under it are meaningful. They run continuously: while idle, `LevelMonitor` opens the selected mic + loopback (with keep-alive) and publishes peaks to atomics; while recording, peaks come from the mixer. The monitor stops before a recording starts and restarts when it ends or when the device selection changes.
 - Inline warning label covers missing devices / unwritable folder; hard failures use `TaskDialogIndirect`.
 - Hotkey: global `Ctrl+Alt+R` (`RegisterHotKey`, configurable or disableable) toggles recording.
 
@@ -303,7 +305,7 @@ Saved next to the audio as `<name>.md`:
 - Named mutex `Local\MeetingBuddy.SingleInstance`. A second launch finds the existing window (`FindWindow` on the class name) and sends it a registered "show yourself" message, then exits.
 
 ### 8.7 Settings dialog
-- Recording folder, default devices, mic/system gains, save separate stems, compress to M4A after recording, keep WAV after compression.
+- Recording folder, default devices, mic/system gains, mic Auto (AGC), save separate stems, compress to M4A after recording, keep WAV after compression.
 - Transcription: model, language, auto-transcribe after recording, threads, use VAD.
 - General: close to tray, start with Windows, start minimized, global hotkey.
 

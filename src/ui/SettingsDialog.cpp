@@ -57,6 +57,7 @@ BOOL SettingsDialog::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_sys.Attach(GetDlgItem(IDC_SET_SYS_DEVICE));
     m_micGain.Attach(GetDlgItem(IDC_SET_MIC_GAIN));
     m_sysGain.Attach(GetDlgItem(IDC_SET_SYS_GAIN));
+    m_micAgc.Attach(GetDlgItem(IDC_SET_MIC_AGC));
     m_saveStems.Attach(GetDlgItem(IDC_SET_SAVE_STEMS));
     m_compress.Attach(GetDlgItem(IDC_SET_COMPRESS_M4A));
     m_keepWav.Attach(GetDlgItem(IDC_SET_KEEP_WAV));
@@ -175,6 +176,7 @@ void SettingsDialog::LoadFromSettings() {
 
     m_micGain.SetWindowText(FormatGain(data.micGain).c_str());
     m_sysGain.SetWindowText(FormatGain(data.systemGain).c_str());
+    m_micAgc.SetCheck(data.micAgc ? BST_CHECKED : BST_UNCHECKED);
     m_saveStems.SetCheck(data.saveStems ? BST_CHECKED : BST_UNCHECKED);
     m_compress.SetCheck(data.compressToM4a ? BST_CHECKED : BST_UNCHECKED);
     m_keepWav.SetCheck(data.keepWav ? BST_CHECKED : BST_UNCHECKED);
@@ -212,9 +214,15 @@ void SettingsDialog::UpdateDependentEnabled() {
     m_keepWav.EnableWindow(compress ? TRUE : FALSE);
     const bool hotkey = m_hotkeyEnable.GetCheck() == BST_CHECKED;
     m_hotkey.EnableWindow(hotkey ? TRUE : FALSE);
+    const bool micAgc = m_micAgc.GetCheck() == BST_CHECKED;
+    m_micGain.EnableWindow(micAgc ? FALSE : TRUE);
 }
 
 void SettingsDialog::OnCompressToggled(UINT /*code*/, int /*id*/, HWND /*control*/) {
+    UpdateDependentEnabled();
+}
+
+void SettingsDialog::OnMicAgcToggled(UINT /*code*/, int /*id*/, HWND /*control*/) {
     UpdateDependentEnabled();
 }
 
@@ -340,6 +348,7 @@ bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) const {
     m_sysGain.GetWindowText(sysGainText);
     out.micGain = ParseFloat(micGainText, 1.0f);
     out.systemGain = ParseFloat(sysGainText, 0.8f);
+    out.micAgc = m_micAgc.GetCheck() == BST_CHECKED;
     if (!std::isfinite(out.micGain) || out.micGain < 0.0f || out.micGain > 4.0f
         || !std::isfinite(out.systemGain) || out.systemGain < 0.0f || out.systemGain > 4.0f) {
         error = L"Gains must be between 0 and 4.";

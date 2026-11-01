@@ -11,6 +11,7 @@
 #include <uxtheme.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
@@ -19,6 +20,9 @@ namespace {
 
 constexpr COLORREF kRecordingRed = RGB(0xC4, 0x2B, 0x1C);
 constexpr COLORREF kWarningAmber = RGB(0x9A, 0x5B, 0x00);
+constexpr int kMicGainSliderMin = 0;
+constexpr int kMicGainSliderMax = 40; // 0.0 .. 4.0 in 0.1 steps
+constexpr float kMicGainStep = 0.1f;
 
 std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
     if (frequency == 0) {
@@ -39,6 +43,12 @@ std::wstring FormatDb(float db) {
     }
     wchar_t buffer[32]{};
     std::swprintf(buffer, 32, L"%+.0f dB", db);
+    return buffer;
+}
+
+std::wstring FormatGainMultiplier(float gain) {
+    wchar_t buffer[32]{};
+    std::swprintf(buffer, 32, L"%.1f\u00D7", static_cast<double>(gain));
     return buffer;
 }
 
@@ -64,11 +74,19 @@ BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_warningLabel.Attach(GetDlgItem(IDC_DEVICE_WARNING));
     m_micDbLabel.Attach(GetDlgItem(IDC_MIC_DB));
     m_systemDbLabel.Attach(GetDlgItem(IDC_SYSTEM_DB));
+    m_micGainLabel.Attach(GetDlgItem(IDC_MIC_GAIN_LABEL));
+    m_micGainValue.Attach(GetDlgItem(IDC_MIC_GAIN_VALUE));
+    m_micGain.Attach(GetDlgItem(IDC_MIC_GAIN));
+    m_micAgc.Attach(GetDlgItem(IDC_MIC_GAIN_AUTO));
     m_inputSection.Attach(GetDlgItem(IDC_INPUT_SECTION));
     m_outputSection.Attach(GetDlgItem(IDC_OUTPUT_SECTION));
 
     m_micMeter.SubclassWindow(GetDlgItem(IDC_METER_MIC));
     m_systemMeter.SubclassWindow(GetDlgItem(IDC_METER_SYSTEM));
+
+    m_micGain.SetRange(kMicGainSliderMin, kMicGainSliderMax);
+    m_micGain.SetPageSize(1);
+    m_micGain.SetLineSize(1);
 
     m_folderEdit.SetCueBannerText(L"Choose a folder for recordings");
 
@@ -114,6 +132,14 @@ void RecordView::InitTooltips() {
     m_tooltips.AddTool(m_micCombo.m_hWnd, L"");
     m_tooltips.AddTool(m_systemCombo.m_hWnd, L"");
     m_tooltips.AddTool(m_recordButton.m_hWnd, L"Start or stop recording");
+    if (m_micGain.IsWindow()) {
+        m_tooltips.AddTool(m_micGain.m_hWnd, L"Microphone mix gain (0.0\u20134.0)");
+    }
+    if (m_micAgc.IsWindow()) {
+        m_tooltips.AddTool(
+            m_micAgc.m_hWnd,
+            L"Automatic gain control targets speech around -18 dBFS (0.5\u00D7\u20134.0\u00D7)");
+    }
     m_tooltips.Activate(TRUE);
 }
 
@@ -291,7 +317,7 @@ HBRUSH RecordView::OnCtlColorStatic(CDCHandle dc, CStatic wndStatic) {
         dc.SetTextColor(kRecordingRed);
     } else if (id == IDC_DEVICE_WARNING) {
         dc.SetTextColor(kWarningAmber);
-    } else if (id == IDC_MIC_DB || id == IDC_SYSTEM_DB) {
+    } else if (id == IDC_MIC_DB || id == IDC_SYSTEM_DB || id == IDC_MIC_GAIN_VALUE) {
         dc.SetTextColor(::GetSysColor(COLOR_GRAYTEXT));
     } else {
         dc.SetTextColor(::GetSysColor(COLOR_WINDOWTEXT));
@@ -424,8 +450,110 @@ void RecordView::LayoutFieldRows() {
 }
 
 void RecordView::SyncControlsToSettings() {
+    const auto& settings = Settings::Instance().Data();
     const std::wstring folder = Settings::Instance().RecordingsFolder();
     m_folderEdit.SetWindowText(folder.c_str());
+    SetMicGainSlider(settings.micGain);
+    if (m_micAgc.IsWindow()) {
+        m_micAgc.SetCheck(settings.micAgc ? BST_CHECKED : BST_UNCHECKED);
+    }
+    UpdateMicGainControls();
+    ApplyMicGain(settings.micGain);
+    ApplyMicAgc(settings.micAgc);
+}
+
+float RecordView::MicGainFromSlider() const {
+    if (!m_micGain.IsWindow()) {
+        return 1.0f;
+    }
+    const int pos = std::clamp(m_micGain.GetPos(), kMicGainSliderMin, kMicGainSliderMax);
+    return static_cast<float>(pos) * kMicGainStep;
+}
+
+bool RecordView::MicAgcChecked() const {
+    return m_micAgc.IsWindow() && m_micAgc.GetCheck() == BST_CHECKED;
+}
+
+void RecordView::UpdateMicGainLabel(float gain) {
+    if (m_micGainValue.IsWindow()) {
+        m_micGainValue.SetWindowText(FormatGainMultiplier(gain).c_str());
+    }
+}
+
+void RecordView::UpdateMicGainControls() {
+    const bool autoGain = MicAgcChecked();
+    if (m_micGain.IsWindow()) {
+        m_micGain.EnableWindow(autoGain ? FALSE : TRUE);
+    }
+    if (autoGain) {
+        if (IsRecording() && m_session != nullptr) {
+            UpdateMicGainLabel(m_session->EffectiveMicGain());
+        } else if (m_micGainValue.IsWindow()) {
+            m_micGainValue.SetWindowText(L"Auto");
+        }
+    } else {
+        UpdateMicGainLabel(MicGainFromSlider());
+    }
+}
+
+void RecordView::SetMicGainSlider(float gain) {
+    if (!m_micGain.IsWindow()) {
+        return;
+    }
+    const float clamped = std::clamp(gain, 0.0f, 4.0f);
+    const int pos = std::clamp(
+        static_cast<int>(std::lround(static_cast<double>(clamped) / static_cast<double>(kMicGainStep))),
+        kMicGainSliderMin,
+        kMicGainSliderMax);
+    if (m_micGain.GetPos() != pos) {
+        m_micGain.SetPos(pos);
+    }
+}
+
+void RecordView::ApplyMicGain(float gain) {
+    if (m_session != nullptr && m_session->IsActive()) {
+        m_session->SetMicGain(gain);
+    }
+}
+
+void RecordView::ApplyMicAgc(bool enabled) {
+    if (m_session != nullptr && m_session->IsActive()) {
+        m_session->SetMicAgc(enabled);
+    }
+}
+
+void RecordView::PersistMicGain() {
+    if (MicAgcChecked()) {
+        return;
+    }
+    const float gain = MicGainFromSlider();
+    UpdateMicGainLabel(gain);
+    Settings::Instance().Data().micGain = gain;
+    Settings::Instance().Save();
+    ApplyMicGain(gain);
+}
+
+void RecordView::PersistMicAgc() {
+    const bool enabled = MicAgcChecked();
+    Settings::Instance().Data().micAgc = enabled;
+    Settings::Instance().Save();
+    UpdateMicGainControls();
+    ApplyMicAgc(enabled);
+    if (!enabled) {
+        ApplyMicGain(MicGainFromSlider());
+    }
+}
+
+void RecordView::OnMicAgcClicked(UINT /*code*/, int /*id*/, HWND /*control*/) {
+    PersistMicAgc();
+}
+
+void RecordView::OnHScroll(UINT /*code*/, UINT /*pos*/, CScrollBar bar) {
+    if (!m_micGain.IsWindow() || bar.m_hWnd != m_micGain.m_hWnd) {
+        SetMsgHandled(FALSE);
+        return;
+    }
+    PersistMicGain();
 }
 
 void RecordView::SetWarning(const std::wstring& text) {
@@ -723,6 +851,7 @@ bool RecordView::ToggleRecording() {
         settings.micDeviceId,
         settings.systemDeviceId,
         settings.micGain,
+        settings.micAgc,
         settings.systemGain,
         settings.communicationsProcessing,
         settings.saveStems);
@@ -818,7 +947,16 @@ void RecordView::UpdateMeters() {
         micPeak = m_levelMonitor.PeakMic();
         sysPeak = m_levelMonitor.PeakSys();
     }
-    m_micMeter.SetLevel(micPeak);
+    // Show post-gain mic level so the gain controls under the meter are meaningful.
+    const auto& settings = Settings::Instance().Data();
+    float micGain = settings.micGain;
+    if (settings.micAgc) {
+        micGain = (IsRecording() && m_session != nullptr) ? m_session->EffectiveMicGain() : 1.0f;
+        if (IsRecording()) {
+            UpdateMicGainLabel(micGain);
+        }
+    }
+    m_micMeter.SetLevel(micPeak * micGain);
     m_systemMeter.SetLevel(sysPeak);
     if (m_micDbLabel.IsWindow()) {
         m_micDbLabel.SetWindowText(FormatDb(m_micMeter.DisplayDb()).c_str());

@@ -810,9 +810,11 @@ void MainWindow::OnSettings(UINT /*code*/, int /*id*/, HWND /*control*/) {
         Settings::Instance().Data().startMinimized);
     RegisterConfiguredHotkey();
 
-    if (m_recordView.IsWindow() && !m_session.IsActive()) {
+    if (m_recordView.IsWindow()) {
         m_recordView.SyncControlsToSettings();
-        m_recordView.RefreshDevices();
+        if (!m_session.IsActive()) {
+            m_recordView.RefreshDevices();
+        }
     }
     if (dialog.FolderChanged() || m_recordingsView.IsWindow()) {
         m_recordingsView.EnsureWatching();

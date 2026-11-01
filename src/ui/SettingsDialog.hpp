@@ -19,6 +19,7 @@ public:
         COMMAND_HANDLER_EX(IDC_SET_MODEL_DOWNLOAD, BN_CLICKED, OnModelDownload)
         COMMAND_HANDLER_EX(IDC_SET_MODEL_BROWSE, BN_CLICKED, OnModelBrowse)
         COMMAND_HANDLER_EX(IDC_SET_COMPRESS_M4A, BN_CLICKED, OnCompressToggled)
+        COMMAND_HANDLER_EX(IDC_SET_MIC_AGC, BN_CLICKED, OnMicAgcToggled)
         COMMAND_HANDLER_EX(IDC_SET_HOTKEY_ENABLE, BN_CLICKED, OnHotkeyToggled)
     END_MSG_MAP()
 
@@ -33,6 +34,7 @@ private:
     void OnModelDownload(UINT code, int id, HWND control);
     void OnModelBrowse(UINT code, int id, HWND control);
     void OnCompressToggled(UINT code, int id, HWND control);
+    void OnMicAgcToggled(UINT code, int id, HWND control);
     void OnHotkeyToggled(UINT code, int id, HWND control);
 
     void LoadFromSettings();
@@ -55,6 +57,7 @@ private:
     WTL::CComboBox m_sys;
     WTL::CEdit m_micGain;
     WTL::CEdit m_sysGain;
+    WTL::CButton m_micAgc;
     WTL::CButton m_saveStems;
     WTL::CButton m_compress;
     WTL::CButton m_keepWav;

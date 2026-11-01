@@ -7,6 +7,9 @@
 #include <audioclient.h>
 #include <windows.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace {
 
 constexpr DWORD kDiskCheckIntervalMs = 30000;
@@ -158,11 +161,25 @@ void RecordingSession::OnDevicesChanged() {
     }
 }
 
+void RecordingSession::SetMicGain(float micGain) {
+    if (!std::isfinite(micGain)) {
+        return;
+    }
+    m_micGain = std::clamp(micGain, 0.0f, 4.0f);
+    m_mixer.SetGains(m_micGain, m_systemGain);
+}
+
+void RecordingSession::SetMicAgc(bool enabled) {
+    m_micAgc = enabled;
+    m_mixer.SetMicAgc(enabled);
+}
+
 RecordingStartResult RecordingSession::Start(
     const std::wstring& folder,
     const std::wstring& micDeviceId,
     const std::wstring& systemDeviceId,
     float micGain,
+    bool micAgc,
     float systemGain,
     bool communicationsProcessing,
     bool saveStems) {
@@ -200,6 +217,7 @@ RecordingStartResult RecordingSession::Start(
     m_saveStems = saveStems;
     m_stemWritersOpen = false;
     m_micGain = micGain;
+    m_micAgc = micAgc;
     m_systemGain = systemGain;
     m_micEnabled = false;
     m_systemEnabled = false;
@@ -341,7 +359,8 @@ RecordingStartResult RecordingSession::Start(
         static_cast<uint64_t>(qpc.QuadPart),
         static_cast<uint64_t>(freq.QuadPart),
         micGain,
-        systemGain);
+        systemGain,
+        micAgc);
 
     try {
         m_writerThread = std::thread([this]() { WriterMain(); });
