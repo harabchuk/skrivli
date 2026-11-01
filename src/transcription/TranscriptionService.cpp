@@ -4,6 +4,7 @@
 #include "storage/RecordingLibrary.hpp"
 #include "storage/Settings.hpp"
 #include "transcription/AudioFileReader.hpp"
+#include "transcription/ChunkPlan.hpp"
 #include "transcription/MarkdownFormatter.hpp"
 #include "transcription/ModelManager.hpp"
 #include "transcription/Resampler.hpp"
@@ -15,13 +16,11 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <sstream>
 
 namespace {
 
 constexpr uint64_t kIdleUnloadMs = 5ull * 60ull * 1000ull;
-constexpr double kChunkSeconds = 30.0 * 60.0;
-constexpr double kLongThresholdSeconds = 60.0 * 60.0;
-constexpr double kOverlapSeconds = 1.0;
 
 std::string TitleFromStartLocal(const std::string& startLocal) {
     // 2026-11-01T13:18:00 → 2026-11-01 13:18
@@ -310,9 +309,9 @@ void TranscriptionService::ProcessJob(Job job) {
     }
 
     const size_t totalFrames48 = decoded.interleavedStereo.size() / 2;
-    const bool chunked = decoded.durationSeconds > kLongThresholdSeconds;
-    const size_t chunkFrames48 = static_cast<size_t>(kChunkSeconds * 48000.0);
-    const size_t overlapFrames48 = static_cast<size_t>(kOverlapSeconds * 48000.0);
+    const auto chunks = ChunkPlan::Plan(totalFrames48);
+    const size_t chunkCount = (std::max)(size_t{1}, chunks.size());
+    const bool chunked = chunks.size() > 1;
 
     std::vector<TranscriptSegment> allSegments;
     std::string detectedLanguage;
@@ -324,13 +323,9 @@ void TranscriptionService::ProcessJob(Job job) {
         Sidecar::WideToUtf8(job.modelFileName),
         job.language);
 
-    const size_t chunkCount = chunked
-        ? (std::max)(size_t{1}, (totalFrames48 + chunkFrames48 - 1) / chunkFrames48)
-        : size_t{1};
+    const auto wallStart = std::chrono::steady_clock::now();
 
-    size_t frameOffset = 0;
-    size_t chunkIndex = 0;
-    while (frameOffset < totalFrames48) {
+    for (size_t chunkIndex = 0; chunkIndex < chunks.size(); ++chunkIndex) {
         if (m_cancel.load()) {
             UpdateSidecarStatus(job.audioPath, TranscriptStatus::Cancelled, "Cancelled", {}, {});
             auto* notify = new TranscribeNotify{};
@@ -340,14 +335,15 @@ void TranscriptionService::ProcessJob(Job job) {
             return;
         }
 
-        size_t frames = chunked ? (std::min)(chunkFrames48, totalFrames48 - frameOffset) : totalFrames48;
+        const size_t frameOffset = chunks[chunkIndex].first;
+        const size_t frames = chunks[chunkIndex].second;
         const float* stereo = decoded.interleavedStereo.data() + frameOffset * 2;
         auto mono16k = Resampler::Stereo48kToMono16k(stereo, frames);
 
         const int basePercent = chunked
             ? static_cast<int>((chunkIndex * 100) / chunkCount)
             : 0;
-        const int span = chunked ? static_cast<int>(100 / (std::max)(size_t{1}, chunkCount)) : 100;
+        const int span = chunked ? static_cast<int>(100 / chunkCount) : 100;
 
         std::vector<TranscriptSegment> segments;
         std::string chunkLang;
@@ -389,24 +385,26 @@ void TranscriptionService::ProcessJob(Job job) {
             detectedLanguage = chunkLang;
         }
 
-        const int64_t offsetTenths = static_cast<int64_t>((frameOffset * 100.0) / 48000.0);
+        const int64_t offsetTenths = ChunkPlan::OffsetTenths(frameOffset);
         for (auto& seg : segments) {
             seg.t0 += offsetTenths;
             seg.t1 += offsetTenths;
             allSegments.push_back(std::move(seg));
         }
-
-        if (!chunked) {
-            break;
-        }
-
-        if (frameOffset + frames >= totalFrames48) {
-            break;
-        }
-        const size_t advance = frames > overlapFrames48 ? frames - overlapFrames48 : frames;
-        frameOffset += advance;
-        ++chunkIndex;
     }
+
+    const double wallSeconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - wallStart).count();
+    const double audioSeconds =
+        decoded.durationSeconds > 0.0 ? decoded.durationSeconds : 1.0;
+    const double rtf = wallSeconds / audioSeconds;
+    std::wostringstream rtfLine;
+    rtfLine.setf(std::ios::fixed);
+    rtfLine.precision(3);
+    rtfLine << L"Transcription RTF " << rtf
+            << L" (wall " << wallSeconds << L"s / audio " << audioSeconds << L"s"
+            << L", model " << job.modelFileName << L")";
+    Log::Info(rtfLine.str());
 
     RecordingSidecar side{};
     Sidecar::Load(RecordingLibrary::JsonPathForAudio(job.audioPath), side);
