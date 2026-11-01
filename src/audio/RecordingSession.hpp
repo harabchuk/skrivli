@@ -74,6 +74,8 @@ public:
     std::vector<std::wstring> TakeDeviceNotes();
     std::wstring MicDeviceName() const;
     std::wstring SystemDeviceName() const;
+    SYSTEMTIME StartLocalTime() const { return m_startLocal; }
+    double ElapsedSeconds() const;
 
 private:
     void SetState(State next);
@@ -129,4 +131,5 @@ private:
     std::wstring m_micName;
     std::wstring m_systemName;
     std::vector<std::wstring> m_deviceNotes;
+    SYSTEMTIME m_startLocal{};
 };

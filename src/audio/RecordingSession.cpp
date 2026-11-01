@@ -117,6 +117,22 @@ std::wstring RecordingSession::SystemDeviceName() const {
     return m_systemName;
 }
 
+double RecordingSession::ElapsedSeconds() const {
+    const uint64_t start = m_startQpc.load(std::memory_order_acquire);
+    if (start == 0) {
+        return 0.0;
+    }
+    LARGE_INTEGER now{};
+    LARGE_INTEGER freq{};
+    ::QueryPerformanceCounter(&now);
+    ::QueryPerformanceFrequency(&freq);
+    if (freq.QuadPart == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(static_cast<uint64_t>(now.QuadPart) - start)
+        / static_cast<double>(freq.QuadPart);
+}
+
 void RecordingSession::FailStart(RecordingStartResult& result, const std::wstring& message) {
     Log::Error(message);
     TeardownCapture();
@@ -288,6 +304,8 @@ RecordingStartResult RecordingSession::Start(
         FailStart(result, L"Could not open any audio device.");
         return result;
     }
+
+    ::GetLocalTime(&m_startLocal);
 
     LARGE_INTEGER qpc{};
     LARGE_INTEGER freq{};

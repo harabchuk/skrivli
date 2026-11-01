@@ -98,6 +98,8 @@ private:
     void SetStatusRecording();
     void UpdateTrayRecordingTip();
     void RecoverPartialRecordings();
+    void WriteSidecarForPath(const std::wstring& audioPath);
+    void RefreshRecordingsList();
     // Returns true if the caller should continue exiting.
     bool ConfirmStopRecordingForExit();
     void FinishExit();

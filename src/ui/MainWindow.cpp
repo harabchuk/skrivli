@@ -1,6 +1,8 @@
 #include "ui/MainWindow.hpp"
 
 #include "audio/WavWriter.hpp"
+#include "storage/RecordingLibrary.hpp"
+#include "storage/RecordingSidecar.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
@@ -66,11 +68,53 @@ void MainWindow::RecoverPartialRecordings() {
     auto recovered = WavWriter::RecoverPartialsInFolder(folder);
     auto rescued = WavWriter::RecoverPartialsInFolder(Paths::RescueDir());
     recovered.insert(recovered.end(), rescued.begin(), rescued.end());
+    for (const auto& path : recovered) {
+        RecordingSidecar side{};
+        side.startLocal = Sidecar::FormatLocalTimestampNow();
+        side.endLocal = side.startLocal;
+        side.durationSeconds = RecordingLibrary::ReadWavDurationSeconds(path);
+        side.sampleRate = 48000;
+        side.channels = 2;
+        side.deviceNotes.push_back("Recovered from partial file");
+        side.transcriptStatus = TranscriptStatus::None;
+        RecordingLibrary::WriteSidecarForAudio(path, side);
+    }
     if (!recovered.empty()) {
         Log::Info(L"Recovered " + std::to_wstring(recovered.size()) + L" partial recording(s)");
         m_tray.ShowBalloon(
             L"MeetingBuddy",
             L"Recovered an interrupted recording. Check your recordings or rescue folder.");
+    }
+}
+
+void MainWindow::WriteSidecarForPath(const std::wstring& audioPath) {
+    if (audioPath.empty()) {
+        return;
+    }
+
+    RecordingSidecar side{};
+    side.startLocal = Sidecar::FormatLocalTimestamp(m_session.StartLocalTime());
+    side.endLocal = Sidecar::FormatLocalTimestampNow();
+    side.durationSeconds = RecordingLibrary::ReadWavDurationSeconds(audioPath);
+    if (side.durationSeconds <= 0.0) {
+        side.durationSeconds = m_session.ElapsedSeconds();
+    }
+    side.sampleRate = 48000;
+    side.channels = 2;
+    side.micDevice = Sidecar::WideToUtf8(m_session.MicDeviceName());
+    side.systemDevice = Sidecar::WideToUtf8(m_session.SystemDeviceName());
+    for (const auto& note : m_session.TakeDeviceNotes()) {
+        side.deviceNotes.push_back(Sidecar::WideToUtf8(note));
+    }
+    side.transcriptStatus = TranscriptStatus::None;
+    if (!RecordingLibrary::WriteSidecarForAudio(audioPath, side)) {
+        Log::Warn(L"Failed to write sidecar for " + audioPath);
+    }
+}
+
+void MainWindow::RefreshRecordingsList() {
+    if (m_recordingsView.IsWindow()) {
+        m_recordingsView.Refresh();
     }
 }
 
@@ -463,12 +507,14 @@ LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM 
     handled = TRUE;
     KillTimer(IDT_RECORD_ELAPSED);
     std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+    if (path && !path->empty()) {
+        WriteSidecarForPath(*path);
+        Log::Info(L"Recording saved: " + *path);
+    }
     m_recordView.OnRecordingFinished(path ? *path : std::wstring{});
     SetStatusIdle();
     m_tray.SetRecording(false);
-    if (path && !path->empty()) {
-        Log::Info(L"Recording saved: " + *path);
-    }
+    RefreshRecordingsList();
     return 0;
 }
 
@@ -504,6 +550,7 @@ LRESULT MainWindow::OnDeviceSwitched(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lPa
 
 LRESULT MainWindow::OnLowDisk(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
     handled = TRUE;
+    // Stop finalizes and posts WM_APP_RECORDING_FINISHED (which writes the sidecar).
     if (m_session.IsActive()) {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
@@ -512,6 +559,7 @@ LRESULT MainWindow::OnLowDisk(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/
     SetStatusIdle();
     m_tray.SetRecording(false);
     m_tray.ShowBalloon(L"MeetingBuddy", L"Recording stopped: low disk space");
+    RefreshRecordingsList();
     return 0;
 }
 
@@ -522,15 +570,17 @@ LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM l
         m_session.Stop(RecordingSession::StopMode::Save);
     }
     KillTimer(IDT_RECORD_ELAPSED);
-    m_recordView.OnRecordingFinished(path ? *path : std::wstring{});
-    SetStatusIdle();
-    m_tray.SetRecording(false);
     if (path && !path->empty()) {
+        WriteSidecarForPath(*path);
         const std::wstring text = L"Recording folder unavailable. Saved to:\n" + *path;
         m_tray.ShowBalloon(L"MeetingBuddy", text.c_str());
         ::MessageBoxW(m_hWnd, text.c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
         Log::Warn(text);
     }
+    m_recordView.OnRecordingFinished(path ? *path : std::wstring{});
+    SetStatusIdle();
+    m_tray.SetRecording(false);
+    RefreshRecordingsList();
     return 0;
 }
 

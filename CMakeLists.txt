@@ -28,6 +28,9 @@ set(MEETINGBUDDY_AUDIO_SOURCES
 
 set(MEETINGBUDDY_UTIL_SOURCES
     src/storage/Settings.cpp
+    src/storage/RecordingSidecar.cpp
+    src/storage/RecordingLibrary.cpp
+    src/storage/DirectoryWatcher.cpp
     src/util/Paths.cpp
     src/util/Log.cpp
     src/util/HResult.cpp
@@ -98,8 +101,11 @@ if(MEETINGBUDDY_BUILD_TESTS)
         tests/RingBufferTests.cpp
         tests/WavWriterTests.cpp
         tests/MixerTests.cpp
+        tests/RecordingLibraryTests.cpp
         src/audio/Mixer.cpp
         src/audio/WavWriter.cpp
+        src/storage/RecordingSidecar.cpp
+        src/storage/RecordingLibrary.cpp
         src/util/Paths.cpp
         src/util/Log.cpp
         src/util/HResult.cpp
@@ -119,6 +125,7 @@ if(MEETINGBUDDY_BUILD_TESTS)
     target_link_libraries(MeetingBuddyTests PRIVATE
         GTest::gtest_main
         ole32
+        uuid
         shell32
         shlwapi
         advapi32

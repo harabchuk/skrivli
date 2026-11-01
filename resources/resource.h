@@ -26,6 +26,19 @@
 #define IDC_DEVICE_WARNING      1114
 
 #define IDC_RECORDINGS_HINT     1200
+#define IDC_RECORDINGS_LIST     1201
+#define IDC_REC_PLAY            1202
+#define IDC_REC_TRANSCRIBE      1203
+#define IDC_REC_VIEW            1204
+#define IDC_REC_OPENFOLDER      1205
+#define IDC_REC_RENAME          1206
+#define IDC_REC_DELETE          1207
+#define IDC_REC_REFRESH         1208
+
+#define IDD_RENAME_DIALOG       202
+#define IDC_RENAME_EDIT         1300
+
+#define IDR_RECORDINGS_MENU     104
 
 #define ID_FILE_OPENFOLDER      40001
 #define ID_FILE_SETTINGS        40002
