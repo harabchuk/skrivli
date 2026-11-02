@@ -1,6 +1,7 @@
 #include "ui/RecordView.hpp"
 
 #include "storage/Settings.hpp"
+#include "ui/ShellDialogs.hpp"
 #include "ui/Theme.hpp"
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
@@ -164,7 +165,7 @@ void RecordView::RebuildSpecialFonts(UINT dpi) {
     }
     m_dpi = dpi;
 
-    const int timerPx = ::MulDiv(28, static_cast<int>(dpi), 96);
+    const int timerPx = ui::Scale(28, dpi);
     HFONT timer = TryCreateFont(L"Segoe UI Variable Display", timerPx, FW_SEMIBOLD);
     if (timer == nullptr) {
         timer = TryCreateFont(L"Segoe UI Semibold", timerPx, FW_SEMIBOLD);
@@ -180,7 +181,7 @@ void RecordView::RebuildSpecialFonts(UINT dpi) {
         }
     }
 
-    const int sectionPx = ::MulDiv(13, static_cast<int>(dpi), 96);
+    const int sectionPx = ui::Scale(13, dpi);
     HFONT section = TryCreateFont(L"Segoe UI Semibold", sectionPx, FW_SEMIBOLD);
     if (section == nullptr) {
         section = TryCreateFont(L"Segoe UI", sectionPx, FW_SEMIBOLD);
@@ -350,7 +351,7 @@ void RecordView::DrawSectionHeader(LPDRAWITEMSTRUCT drawItem) {
 
     CSize textSize{};
     dc.GetTextExtent(text, static_cast<int>(wcslen(text)), &textSize);
-    const int gap = ::MulDiv(8, static_cast<int>(m_dpi), 96);
+    const int gap = ui::Scale(8, m_dpi);
     const int lineLeft = rect.left + textSize.cx + gap;
     if (lineLeft < rect.right) {
         const int lineY = rect.top + rect.Height() / 2;
@@ -372,8 +373,8 @@ void RecordView::ApplyComboStyle(WTL::CComboBox& combo) {
         return;
     }
     ::SetWindowTheme(combo, L"CFD", nullptr);
-    const int field = ::MulDiv(24, static_cast<int>(m_dpi), 96);
-    const int item = ::MulDiv(22, static_cast<int>(m_dpi), 96);
+    const int field = ui::Scale(24, m_dpi);
+    const int item = ui::Scale(22, m_dpi);
     combo.SetItemHeight(-1, static_cast<UINT>(field));
     combo.SetItemHeight(0, static_cast<UINT>(item));
     ::SendMessageW(combo, CB_SETMINVISIBLE, 8, 0);
@@ -679,50 +680,12 @@ void RecordView::StopMeterPreview() {
     m_levelMonitor.Stop();
 }
 
-bool RecordView::BrowseForFolder(std::wstring& path) {
-    Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
-    HRESULT hr = ::CoCreateInstance(
-        CLSID_FileOpenDialog,
-        nullptr,
-        CLSCTX_ALL,
-        IID_PPV_ARGS(&dialog));
-    if (FAILED(hr) || !dialog) {
-        return false;
-    }
-
-    DWORD options = 0;
-    dialog->GetOptions(&options);
-    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
-
-    hr = dialog->Show(m_hWnd);
-    if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
-        return false;
-    }
-    if (FAILED(hr)) {
-        return false;
-    }
-
-    Microsoft::WRL::ComPtr<IShellItem> item;
-    hr = dialog->GetResult(&item);
-    if (FAILED(hr) || !item) {
-        return false;
-    }
-
-    PWSTR filePath = nullptr;
-    hr = item->GetDisplayName(SIGDN_FILESYSPATH, &filePath);
-    if (FAILED(hr) || filePath == nullptr) {
-        return false;
-    }
-    path = filePath;
-    ::CoTaskMemFree(filePath);
-    return true;
-}
-
 void RecordView::OnBrowseFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    std::wstring path;
-    if (!BrowseForFolder(path)) {
+    const auto picked = ui::PickFolder(m_hWnd);
+    if (!picked) {
         return;
     }
+    const std::wstring& path = *picked;
     if (!FileIo::IsWritableDirectory(path)) {
         SetWarning(L"That folder is not writable. Choose another location.");
         return;

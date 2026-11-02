@@ -46,7 +46,6 @@ private:
     std::wstring SelectedDeviceId(const WTL::CComboBox& combo) const;
     void SelectDeviceId(WTL::CComboBox& combo, const std::wstring& id);
     void ClearComboItemData(WTL::CComboBox& combo);
-    bool BrowseForFolder(std::wstring& path);
 
     DeviceManager* m_devices = nullptr;
     SettingsData m_applied{};

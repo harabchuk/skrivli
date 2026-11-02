@@ -2,6 +2,8 @@
 #include "transcription/ModelManager.hpp"
 
 #include "storage/RecordingSidecar.hpp"
+#include "ui/ShellDialogs.hpp"
+#include "ui/Theme.hpp"
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
@@ -460,39 +462,15 @@ bool ModelManager::VerifySha256(const std::wstring& path, const char* expectedHe
 }
 
 bool ModelManager::BrowseAndInstall(HWND owner, std::wstring& outFileName) {
-    Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
-    HRESULT hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
-    if (FAILED(hr) || !dialog) {
-        return false;
-    }
-
-    COMDLG_FILTERSPEC filters[] = {
+    static constexpr ui::FileFilter kFilters[] = {
         {L"Whisper models (*.bin)", L"*.bin"},
         {L"All files (*.*)", L"*.*"},
     };
-    dialog->SetFileTypes(2, filters);
-    dialog->SetTitle(L"Select a whisper ggml model");
-    hr = dialog->Show(owner);
-    if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+    const auto picked = ui::PickOpenFile(owner, kFilters, L"Select a whisper ggml model");
+    if (!picked) {
         return false;
     }
-    if (FAILED(hr)) {
-        return false;
-    }
-
-    Microsoft::WRL::ComPtr<IShellItem> item;
-    hr = dialog->GetResult(&item);
-    if (FAILED(hr) || !item) {
-        return false;
-    }
-
-    PWSTR path = nullptr;
-    hr = item->GetDisplayName(SIGDN_FILESYSPATH, &path);
-    if (FAILED(hr) || path == nullptr) {
-        return false;
-    }
-    const std::wstring source = path;
-    ::CoTaskMemFree(path);
+    const std::wstring& source = *picked;
 
     Paths::EnsureDirectory(Paths::ModelsDir());
     const std::wstring leaf = std::filesystem::path(source).filename().wstring();
@@ -501,7 +479,7 @@ bool ModelManager::BrowseAndInstall(HWND owner, std::wstring& outFileName) {
     if (!Text::PathEquals(source, dest)) {
         std::filesystem::copy_file(source, dest, std::filesystem::copy_options::overwrite_existing, ec);
         if (ec) {
-            ::MessageBoxW(owner, L"Could not copy model into the models folder.", L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+            ui::ShowMessage(owner, L"Could not copy model into the models folder.", MB_OK | MB_ICONWARNING);
             return false;
         }
     }
@@ -556,10 +534,9 @@ std::wstring ModelManager::EnsureModel(HWND owner, const std::wstring& fileName)
         return ModelPath(chosen);
     }
 
-    const int answer = ::MessageBoxW(
+    const int answer = ui::ShowMessage(
         owner,
         L"The selected whisper model is not installed.\n\nDownload it now, or browse for a local .bin file?",
-        L"MeetingBuddy",
         MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON1);
     // Yes = Download, No = Browse, Cancel = abort
     if (answer == IDCANCEL) {
@@ -587,7 +564,7 @@ std::wstring ModelManager::EnsureModel(HWND owner, const std::wstring& fileName)
     std::wstring error;
     if (!Download(owner, *info, error)) {
         if (!error.empty()) {
-            ::MessageBoxW(owner, error.c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+            ui::ShowMessage(owner, error.c_str(), MB_OK | MB_ICONWARNING);
         }
         return {};
     }

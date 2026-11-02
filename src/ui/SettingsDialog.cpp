@@ -1,6 +1,8 @@
 #include "ui/SettingsDialog.hpp"
 
 #include "transcription/ModelManager.hpp"
+#include "ui/ShellDialogs.hpp"
+#include "ui/Theme.hpp"
 #include "util/Hotkey.hpp"
 #include "util/Paths.hpp"
 #include "util/Text.hpp"
@@ -231,42 +233,9 @@ void SettingsDialog::OnHotkeyToggled(UINT /*code*/, int /*id*/, HWND /*control*/
     UpdateDependentEnabled();
 }
 
-bool SettingsDialog::BrowseForFolder(std::wstring& path) {
-    Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
-    HRESULT hr = ::CoCreateInstance(
-        CLSID_FileOpenDialog,
-        nullptr,
-        CLSCTX_ALL,
-        IID_PPV_ARGS(&dialog));
-    if (FAILED(hr) || !dialog) {
-        return false;
-    }
-    DWORD options = 0;
-    dialog->GetOptions(&options);
-    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
-    hr = dialog->Show(m_hWnd);
-    if (FAILED(hr)) {
-        return false;
-    }
-    Microsoft::WRL::ComPtr<IShellItem> item;
-    hr = dialog->GetResult(&item);
-    if (FAILED(hr) || !item) {
-        return false;
-    }
-    PWSTR filePath = nullptr;
-    hr = item->GetDisplayName(SIGDN_FILESYSPATH, &filePath);
-    if (FAILED(hr) || filePath == nullptr) {
-        return false;
-    }
-    path = filePath;
-    ::CoTaskMemFree(filePath);
-    return true;
-}
-
 void SettingsDialog::OnBrowseFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    std::wstring path;
-    if (BrowseForFolder(path)) {
-        m_folder.SetWindowText(path.c_str());
+    if (const auto path = ui::PickFolder(m_hWnd)) {
+        m_folder.SetWindowText(path->c_str());
     }
 }
 
@@ -286,7 +255,7 @@ void SettingsDialog::OnModelDownload(UINT /*code*/, int /*id*/, HWND /*control*/
     std::wstring error;
     if (!ModelManager::Download(m_hWnd, *info, error)) {
         if (!error.empty()) {
-            ::MessageBoxW(m_hWnd, error.c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+            ui::ShowMessage(m_hWnd, error.c_str(), MB_OK | MB_ICONWARNING);
         }
         return;
     }
@@ -410,14 +379,14 @@ void SettingsDialog::OnOk(UINT /*code*/, int /*id*/, HWND /*control*/) {
     SettingsData next{};
     std::wstring error;
     if (!CollectTo(next, error)) {
-        ::MessageBoxW(m_hWnd, error.c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+        ui::ShowMessage(m_hWnd, error.c_str(), MB_OK | MB_ICONWARNING);
         return;
     }
 
     const std::wstring previousFolder = Settings::Instance().RecordingsFolder();
     Settings::Instance().Data() = next;
     if (!Settings::Instance().Save()) {
-        ::MessageBoxW(m_hWnd, L"Failed to save settings.", L"MeetingBuddy", MB_OK | MB_ICONERROR);
+        ui::ShowMessage(m_hWnd, L"Failed to save settings.", MB_OK | MB_ICONERROR);
         return;
     }
 

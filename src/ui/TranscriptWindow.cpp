@@ -2,6 +2,8 @@
 
 #include "storage/RecordingSidecar.hpp"
 #include "transcription/MarkdownFormatter.hpp"
+#include "ui/ShellDialogs.hpp"
+#include "ui/Theme.hpp"
 #include "util/Clipboard.hpp"
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
@@ -382,32 +384,17 @@ LRESULT TranscriptWindow::OnCopyMessage(UINT /*msg*/, WPARAM /*wParam*/, LPARAM 
 }
 
 void TranscriptWindow::OnSaveAs(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    COMDLG_FILTERSPEC filters[] = {
+    static constexpr ui::FileFilter kFilters[] = {
         {L"Markdown (*.md)", L"*.md"},
         {L"All files (*.*)", L"*.*"},
     };
-    Microsoft::WRL::ComPtr<IFileSaveDialog> dialog;
-    if (FAILED(::CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))) || !dialog) {
+    const auto picked = ui::PickSaveFile(m_hWnd, kFilters, L"md", std::filesystem::path(m_path).filename().wstring());
+    if (!picked) {
         return;
     }
-    dialog->SetFileTypes(2, filters);
-    dialog->SetDefaultExtension(L"md");
-    dialog->SetFileName(std::filesystem::path(m_path).filename().c_str());
-    if (FAILED(dialog->Show(m_hWnd))) {
-        return;
-    }
-    Microsoft::WRL::ComPtr<IShellItem> item;
-    if (FAILED(dialog->GetResult(&item)) || !item) {
-        return;
-    }
-    PWSTR path = nullptr;
-    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) || path == nullptr) {
-        return;
-    }
-    const std::wstring dest = path;
-    ::CoTaskMemFree(path);
+    const std::wstring& dest = *picked;
     if (!MarkdownFormatter::WriteUtf8NoBom(dest, m_utf8Source)) {
-        ::MessageBoxW(m_hWnd, L"Could not save the transcript.", L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+        ui::ShowMessage(m_hWnd, L"Could not save the transcript.", MB_OK | MB_ICONWARNING);
     }
 }
 
@@ -467,7 +454,7 @@ LRESULT TranscriptWindow::OnFindMsg(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lPar
         m_edit.SetSel(ft.chrgText);
         m_edit.SendMessage(EM_SCROLLCARET, 0, 0);
     } else {
-        ::MessageBoxW(m_hWnd, L"Text not found.", L"MeetingBuddy", MB_OK | MB_ICONINFORMATION);
+        ui::ShowMessage(m_hWnd, L"Text not found.", MB_OK | MB_ICONINFORMATION);
     }
     return 0;
 }

@@ -111,6 +111,7 @@ add_executable(MeetingBuddy WIN32
     src/ui/MainWindow.cpp
     src/ui/RecordView.cpp
     src/ui/RecordingsView.cpp
+    src/ui/ShellDialogs.cpp
     src/ui/SettingsDialog.cpp
     src/ui/TabCtrl.cpp
     src/ui/TranscriptWindow.cpp

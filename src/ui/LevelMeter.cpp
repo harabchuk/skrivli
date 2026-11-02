@@ -1,5 +1,7 @@
 #include "ui/LevelMeter.hpp"
 
+#include "ui/Theme.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -87,9 +89,9 @@ void LevelMeter::OnSize(UINT /*type*/, CSize /*size*/) {
 
 void LevelMeter::PaintTo(CDCHandle dc, const CRect& rect) {
     const UINT dpi = IsWindow() ? ::GetDpiForWindow(m_hWnd) : USER_DEFAULT_SCREEN_DPI;
-    const int radius = ::MulDiv(4, static_cast<int>(dpi), 96);
-    const int segmentGap = ::MulDiv(2, static_cast<int>(dpi), 96);
-    const int segmentWidth = ::MulDiv(4, static_cast<int>(dpi), 96);
+    const int radius = ui::Scale(4, dpi);
+    const int segmentGap = ui::Scale(2, dpi);
+    const int segmentWidth = ui::Scale(4, dpi);
 
     const COLORREF track = DarkenSysColor(COLOR_WINDOW, 28);
     const COLORREF parentBg = ::GetSysColor(COLOR_WINDOW);
@@ -106,7 +108,7 @@ void LevelMeter::PaintTo(CDCHandle dc, const CRect& rect) {
     dc.SelectPen(oldPen);
 
     CRect inner = rect;
-    inner.DeflateRect(::MulDiv(2, static_cast<int>(dpi), 96), ::MulDiv(2, static_cast<int>(dpi), 96));
+    inner.DeflateRect(ui::Scale(2, dpi), ui::Scale(2, dpi));
     if (inner.Width() <= 0 || inner.Height() <= 0) {
         return;
     }
@@ -133,7 +135,7 @@ void LevelMeter::PaintTo(CDCHandle dc, const CRect& rect) {
 
     if (m_peakHold > 0.01f) {
         const int peakX = inner.left + static_cast<int>(inner.Width() * m_peakHold);
-        const int tickW = std::max(2, ::MulDiv(2, static_cast<int>(dpi), 96));
+        const int tickW = std::max(2, ui::Scale(2, dpi));
         CRect tick(peakX - tickW / 2, inner.top, peakX - tickW / 2 + tickW, inner.bottom);
         tick.left = std::clamp(tick.left, inner.left, inner.right - tickW);
         tick.right = tick.left + tickW;

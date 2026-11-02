@@ -1,5 +1,7 @@
 #include "ui/RecordButton.hpp"
 
+#include "ui/Theme.hpp"
+
 namespace {
 
 constexpr COLORREF kAccentRed = RGB(0xC4, 0x2B, 0x1C);
@@ -98,8 +100,8 @@ void RecordButton::PaintTo(CDCHandle dc) {
     dc.FillSolidRect(&rect, parentBg);
 
     const UINT dpi = ::GetDpiForWindow(m_hWnd);
-    const int radius = ::MulDiv(18, static_cast<int>(dpi), 96);
-    const int pad = ::MulDiv(1, static_cast<int>(dpi), 96);
+    const int radius = ui::Scale(18, dpi);
+    const int pad = ui::Scale(1, dpi);
 
     CRect pill = rect;
     pill.DeflateRect(pad + 2, pad + 2);
@@ -127,11 +129,11 @@ void RecordButton::PaintTo(CDCHandle dc) {
         oldFont = dc.SelectFont(font);
     }
 
-    const int glyphSize = ::MulDiv(10, static_cast<int>(dpi), 96);
+    const int glyphSize = ui::Scale(10, dpi);
     CSize textSize{};
     dc.GetTextExtent(text, text.GetLength(), &textSize);
 
-    const int gap = ::MulDiv(8, static_cast<int>(dpi), 96);
+    const int gap = ui::Scale(8, dpi);
     const int contentWidth = glyphSize + gap + textSize.cx;
     int x = pill.left + (pill.Width() - contentWidth) / 2;
     const int midY = pill.top + pill.Height() / 2;
@@ -155,7 +157,7 @@ void RecordButton::PaintTo(CDCHandle dc) {
     }
     x += glyphSize + gap;
 
-    CRect textRect(x, pill.top, pill.right - ::MulDiv(8, static_cast<int>(dpi), 96), pill.bottom);
+    CRect textRect(x, pill.top, pill.right - ui::Scale(8, dpi), pill.bottom);
     dc.DrawText(text, text.GetLength(), &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
     if (oldFont != nullptr) {

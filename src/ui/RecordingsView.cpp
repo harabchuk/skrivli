@@ -400,7 +400,7 @@ void RecordingsView::OnRename(UINT /*code*/, int /*id*/, HWND /*control*/) {
     }
     std::wstring error;
     if (!RecordingLibrary::Rename(*entry, stem, error)) {
-        ::MessageBoxW(m_hWnd, error.c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+        ui::ShowMessage(m_hWnd, error.c_str(), MB_OK | MB_ICONWARNING);
         return;
     }
     Refresh();
@@ -411,17 +411,16 @@ void RecordingsView::OnDelete(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (entry == nullptr) {
         return;
     }
-    const int answer = ::MessageBoxW(
+    const int answer = ui::ShowMessage(
         m_hWnd,
         L"Move this recording and its sidecars to the Recycle Bin?",
-        L"MeetingBuddy",
         MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
     if (answer != IDYES) {
         return;
     }
     std::wstring error;
     if (!RecordingLibrary::DeleteToRecycleBin(*entry, error)) {
-        ::MessageBoxW(m_hWnd, error.c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+        ui::ShowMessage(m_hWnd, error.c_str(), MB_OK | MB_ICONWARNING);
         return;
     }
     Refresh();

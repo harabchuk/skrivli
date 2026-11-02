@@ -153,7 +153,7 @@ void MainWindow::ApplyStatusPaneWidths() {
         dc.GetTextExtent(text, static_cast<int>(wcslen(text)), &size);
         dc.SelectFont(old);
         // Borders + padding so labels are not tight against pane edges.
-        return size.cx + ::MulDiv(24, static_cast<int>(dpi), 96);
+        return size.cx + ui::Scale(24, dpi);
     };
 
     m_status.SetPaneWidth(IDC_STATUS_PANE_STATE, measure(L"Recording"));
@@ -164,7 +164,7 @@ void MainWindow::CreateTabs() {
     const DWORD style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | TCS_TABS;
     m_tabs.Create(m_hWnd, rcDefault, nullptr, style, 0, IDC_TAB_MAIN);
     const UINT dpi = ::GetDpiForWindow(m_hWnd);
-    m_tabs.SetPadding(CSize(::MulDiv(14, static_cast<int>(dpi), 96), ::MulDiv(6, static_cast<int>(dpi), 96)));
+    m_tabs.SetPadding(CSize(ui::Scale(14, dpi), ui::Scale(6, dpi)));
 
     TCITEMW item{};
     item.mask = TCIF_TEXT;
@@ -208,7 +208,7 @@ void MainWindow::ApplyDpiFonts(UINT dpi) {
     const HFONT font = m_uiFont;
     if (m_tabs.IsWindow()) {
         const UINT tabDpi = ::GetDpiForWindow(m_tabs.m_hWnd);
-        m_tabs.SetPadding(CSize(::MulDiv(14, static_cast<int>(tabDpi), 96), ::MulDiv(6, static_cast<int>(tabDpi), 96)));
+        m_tabs.SetPadding(CSize(ui::Scale(14, tabDpi), ui::Scale(6, tabDpi)));
         m_tabs.SetFont(font);
     }
     if (m_status.IsWindow()) {
@@ -438,10 +438,9 @@ bool MainWindow::ConfirmStopRecordingForExit() {
         return true;
     }
 
-    const int answer = ::MessageBoxW(
+    const int answer = ui::ShowMessage(
         m_hWnd,
         L"Stop and save recording?",
-        L"MeetingBuddy",
         MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON1);
 
     if (answer == IDCANCEL) {
@@ -511,10 +510,9 @@ void MainWindow::RegisterConfiguredHotkey() {
     if (!chord.valid) {
         if (!m_hotkeyWarned) {
             m_hotkeyWarned = true;
-            ::MessageBoxW(
+            ui::ShowMessage(
                 m_hWnd,
                 L"The configured hotkey is invalid. Recording remains available from the window and tray.",
-                L"MeetingBuddy",
                 MB_OK | MB_ICONWARNING);
         }
         return;
@@ -522,11 +520,10 @@ void MainWindow::RegisterConfiguredHotkey() {
     if (!Hotkey::Register(m_hWnd, ID_HOTKEY_TOGGLE_RECORD, chord)) {
         if (!m_hotkeyWarned) {
             m_hotkeyWarned = true;
-            ::MessageBoxW(
+            ui::ShowMessage(
                 m_hWnd,
                 L"Could not register the global hotkey (it may already be in use). "
                 L"Recording remains available from the window and tray.",
-                L"MeetingBuddy",
                 MB_OK | MB_ICONWARNING);
         }
         return;
@@ -797,7 +794,7 @@ LRESULT MainWindow::OnM4aFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, 
     m_pendingCompressWav.clear();
     if (message && !message->empty()) {
         m_tray.ShowBalloon(L"MeetingBuddy", message->c_str());
-        ::MessageBoxW(m_hWnd, message->c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+        ui::ShowMessage(m_hWnd, message->c_str(), MB_OK | MB_ICONWARNING);
     }
     FinishRecordingUi(wav);
     return 0;
@@ -859,7 +856,7 @@ LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM l
         WriteSidecarForPath(*path);
         const std::wstring text = L"Recording folder unavailable. Saved to:\n" + *path;
         m_tray.ShowBalloon(L"MeetingBuddy", text.c_str());
-        ::MessageBoxW(m_hWnd, text.c_str(), L"MeetingBuddy", MB_OK | MB_ICONWARNING);
+        ui::ShowMessage(m_hWnd, text.c_str(), MB_OK | MB_ICONWARNING);
         Log::Warn(text);
     }
     m_recordView.OnRecordingFinished(path ? *path : std::wstring{});

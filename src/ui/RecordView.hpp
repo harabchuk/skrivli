@@ -112,7 +112,6 @@ private:
     void CenterLabelOnRow(int labelId, HWND row, int rowHeight);
     void InitTooltips();
     void UpdateDeviceTooltips();
-    bool BrowseForFolder(std::wstring& path);
     std::wstring SelectedDeviceId(int comboId) const;
     void SelectDeviceId(int comboId, const std::wstring& id);
     void ClearComboItemData(WTL::CComboBox& combo);

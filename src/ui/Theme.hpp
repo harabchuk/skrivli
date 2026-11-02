@@ -2,8 +2,18 @@
 
 #include "pch.hpp"
 
+#include "Version.hpp"
+
 // Shared palette so every view paints the same surfaces and accents.
 namespace ui {
+
+inline int Scale(int px, UINT dpi) {
+    return ::MulDiv(px, static_cast<int>(dpi), 96);
+}
+
+inline int ShowMessage(HWND hwnd, const wchar_t* text, UINT flags) {
+    return ::MessageBoxW(hwnd, text, kAppName, flags);
+}
 
 inline COLORREF WindowColor() {
     return ::GetSysColor(COLOR_WINDOW);
