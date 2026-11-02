@@ -1,13 +1,13 @@
-#include "audio/SilentRenderKeepAlive.hpp"
+#include "infrastructure/audio/SilentRenderKeepAlive.hpp"
 
-#include "audio/AudioFormat.hpp"
-#include "util/Scoped.hpp"
-
-#include <atlbase.h>
+#include "core/AudioFormat.hpp"
+#include "infrastructure/common/Scoped.hpp"
 
 #include <audioclient.h>
 #include <avrt.h>
 #include <mmdeviceapi.h>
+
+#include <wil/resource.h>
 
 #include <algorithm>
 #include <vector>
@@ -30,7 +30,7 @@ bool SilentRenderKeepAlive::Start(IMMDevice* renderDevice) {
         m_thread = std::thread([this]() { ThreadMain(); });
     } catch (...) {
         m_running.store(false, std::memory_order_release);
-        m_device.Reset();
+        m_device.reset();
         return false;
     }
     return true;
@@ -42,7 +42,7 @@ void SilentRenderKeepAlive::Stop() {
         m_thread.join();
     }
     m_running.store(false, std::memory_order_release);
-    m_device.Reset();
+    m_device.reset();
 }
 
 void SilentRenderKeepAlive::ThreadMain() {
@@ -59,8 +59,8 @@ void SilentRenderKeepAlive::RenderLoop() {
         return;
     }
 
-    Microsoft::WRL::ComPtr<IAudioClient> audioClient;
-    auto hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &audioClient);
+    wil::com_ptr_nothrow<IAudioClient> audioClient;
+    auto hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, audioClient.put_void());
     if (FAILED(hr) || !audioClient) {
         return;
     }
@@ -79,18 +79,18 @@ void SilentRenderKeepAlive::RenderLoop() {
         return;
     }
 
-    ATL::CHandle eventHandle(::CreateEventW(nullptr, FALSE, FALSE, nullptr));
-    if (eventHandle.m_h == nullptr) {
+    wil::unique_event_nothrow eventHandle;
+    if (!eventHandle.try_create(wil::EventOptions::None, nullptr)) {
         return;
     }
 
-    hr = audioClient->SetEventHandle(eventHandle);
+    hr = audioClient->SetEventHandle(eventHandle.get());
     if (FAILED(hr)) {
         return;
     }
 
-    Microsoft::WRL::ComPtr<IAudioRenderClient> renderClient;
-    hr = audioClient->GetService(__uuidof(IAudioRenderClient), &renderClient);
+    wil::com_ptr_nothrow<IAudioRenderClient> renderClient;
+    hr = audioClient->GetService(__uuidof(IAudioRenderClient), renderClient.put_void());
     if (FAILED(hr) || !renderClient) {
         return;
     }
@@ -118,7 +118,7 @@ void SilentRenderKeepAlive::RenderLoop() {
     }
 
     while (!m_stop.load(std::memory_order_acquire)) {
-        const auto wait = ::WaitForSingleObject(eventHandle, AudioFormat::kEventTimeoutMs);
+        const auto wait = ::WaitForSingleObject(eventHandle.get(), AudioFormat::kEventTimeoutMs);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT) {
             break;
         }

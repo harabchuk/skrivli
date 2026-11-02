@@ -1,17 +1,15 @@
-#include "ui/TranscriptWindow.hpp"
+#include "views/TranscriptWindow.hpp"
 
-#include "storage/RecordingSidecar.hpp"
-#include "transcription/MarkdownFormatter.hpp"
+#include "core/MarkdownFormatter.hpp"
 #include "ui/ShellDialogs.hpp"
 #include "ui/Theme.hpp"
-#include "util/Clipboard.hpp"
-#include "util/FileIo.hpp"
-#include "util/Log.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/system/Clipboard.hpp"
+#include "infrastructure/common/FileIo.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <commdlg.h>
 #include <richedit.h>
-#include <wrl/client.h>
 
 #include <algorithm>
 #include <cctype>

@@ -1,4 +1,4 @@
-#include "util/Hotkey.hpp"
+#include "infrastructure/system/Hotkey.hpp"
 
 #include <cctype>
 #include <vector>

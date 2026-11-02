@@ -1,4 +1,4 @@
-#include "util/Text.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <windows.h>
 

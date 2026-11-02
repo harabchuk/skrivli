@@ -1,15 +1,18 @@
 #pragma once
 
-#include "audio/AudioResampler.hpp"
-#include "audio/RingBuffer.hpp"
+#include "infrastructure/audio/AudioResampler.hpp"
+#include "core/RingBuffer.hpp"
 
-#include <atlbase.h>
+#include <windows.h>
+#include <objbase.h>
+
+#include <wil/com.h>
+#include <wil/resource.h>
 
 #include <atomic>
 #include <cstdint>
 #include <thread>
 #include <vector>
-#include <wrl/client.h>
 
 struct IAudioClient;
 struct IMMDevice;
@@ -47,17 +50,17 @@ private:
 
     void ThreadMain();
     void CaptureLoop();
-    bool ActivateClient(Microsoft::WRL::ComPtr<IAudioClient>& client);
+    bool ActivateClient(wil::com_ptr_nothrow<IAudioClient>& client);
     bool InitializeClient(ActiveClient& active);
     void DrainPackets(ActiveClient& active);
 
     Mode m_mode = Mode::Microphone;
     RingBuffer* m_ring = nullptr;
     bool m_communicationsProcessing = false;
-    Microsoft::WRL::ComPtr<IMMDevice> m_device;
+    wil::com_ptr_nothrow<IMMDevice> m_device;
 
     std::thread m_thread;
-    ATL::CHandle m_initEvent;
+    wil::unique_event_nothrow m_initEvent;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_stop{false};
     std::atomic<HRESULT> m_fatalError{S_OK};

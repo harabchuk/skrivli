@@ -1,9 +1,9 @@
 #pragma once
 
-#include "audio/CaptureStream.hpp"
-#include "audio/DeviceManager.hpp"
-#include "audio/RingBuffer.hpp"
-#include "audio/SilentRenderKeepAlive.hpp"
+#include "infrastructure/audio/CaptureStream.hpp"
+#include "infrastructure/audio/DeviceManager.hpp"
+#include "core/RingBuffer.hpp"
+#include "infrastructure/audio/SilentRenderKeepAlive.hpp"
 
 #include <atomic>
 #include <mutex>

@@ -1,8 +1,10 @@
-#include "util/Autostart.hpp"
+#include "infrastructure/system/Autostart.hpp"
 
-#include "util/Log.hpp"
+#include "infrastructure/common/Log.hpp"
 
 #include <windows.h>
+
+#include <wil/registry.h>
 
 #include <string>
 
@@ -35,21 +37,21 @@ auto CommandLineForRunKey(bool startMinimized) -> std::wstring {
 }
 
 bool IsEnabled() {
-    HKEY key = nullptr;
-    if (::RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_READ, &key) != ERROR_SUCCESS) {
+    wil::unique_hkey key;
+    if (FAILED(wil::reg::open_unique_key_nothrow(HKEY_CURRENT_USER, kRunKey, key))) {
         return false;
     }
     DWORD type = 0;
     DWORD size = 0;
-    const auto rc = ::RegQueryValueExW(key, kRunValueName, nullptr, &type, nullptr, &size);
-    ::RegCloseKey(key);
+    const auto rc = ::RegQueryValueExW(key.get(), kRunValueName, nullptr, &type, nullptr, &size);
     return rc == ERROR_SUCCESS && type == REG_SZ;
 }
 
 bool Apply(bool enable, bool startMinimized) {
-    HKEY key = nullptr;
-    const auto openRc = ::RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &key);
-    if (openRc != ERROR_SUCCESS) {
+    wil::unique_hkey key;
+    const auto openHr = wil::reg::open_unique_key_nothrow(
+        HKEY_CURRENT_USER, kRunKey, key, wil::reg::key_access::readwrite);
+    if (FAILED(openHr)) {
         Log::Error(L"Failed to open HKCU Run key for autostart");
         return false;
     }
@@ -58,11 +60,10 @@ bool Apply(bool enable, bool startMinimized) {
     if (enable) {
         const auto cmd = CommandLineForRunKey(startMinimized);
         if (cmd.empty()) {
-            ::RegCloseKey(key);
             return false;
         }
         const auto rc = ::RegSetValueExW(
-            key,
+            key.get(),
             kRunValueName,
             0,
             REG_SZ,
@@ -73,14 +74,13 @@ bool Apply(bool enable, bool startMinimized) {
             ok = false;
         }
     } else {
-        const auto rc = ::RegDeleteValueW(key, kRunValueName);
+        const auto rc = ::RegDeleteValueW(key.get(), kRunValueName);
         if (rc != ERROR_SUCCESS && rc != ERROR_FILE_NOT_FOUND) {
             Log::Error(L"Failed to remove Start with Windows Run value");
             ok = false;
         }
     }
 
-    ::RegCloseKey(key);
     return ok;
 }
 

@@ -1,6 +1,6 @@
-#include "storage/RecordingLibrary.hpp"
-#include "storage/RecordingSidecar.hpp"
-#include "audio/WavWriter.hpp"
+#include "infrastructure/storage/RecordingLibrary.hpp"
+#include "infrastructure/storage/RecordingSidecar.hpp"
+#include "infrastructure/files/WavWriter.hpp"
 
 #include <gtest/gtest.h>
 

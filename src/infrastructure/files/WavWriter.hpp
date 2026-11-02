@@ -1,5 +1,9 @@
 #pragma once
 
+#include <windows.h>
+
+#include <wil/resource.h>
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -32,7 +36,7 @@ public:
     // Close and delete the partial (discard without saving).
     void Discard();
 
-    bool IsOpen() const { return m_file != nullptr; }
+    bool IsOpen() const { return static_cast<bool>(m_file); }
     auto PartialPath() const -> const std::wstring& { return m_partialPath; }
     auto FinalPath() const -> const std::wstring& { return m_finalPath; }
     auto Folder() const -> const std::wstring& { return m_folder; }
@@ -60,7 +64,7 @@ private:
     static auto RecoveredPathFromPartial(const std::wstring& partialPath) -> std::wstring;
 
     std::unique_ptr<WavEncoder, WavEncoderDeleter> m_encoder;
-    void* m_file = nullptr; // HANDLE
+    wil::unique_hfile m_file;
     std::wstring m_folder;
     std::wstring m_partialPath;
     std::wstring m_finalPath;

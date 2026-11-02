@@ -1,4 +1,4 @@
-#include "transcription/ChunkPlan.hpp"
+#include "core/ChunkPlan.hpp"
 
 #include <gtest/gtest.h>
 

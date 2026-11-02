@@ -1,8 +1,10 @@
 #pragma once
 
-#include "ui/MainWindow.hpp"
+#include "views/MainWindow.hpp"
 
 #include <windows.h>
+
+#include <wil/resource.h>
 
 class Application {
 public:
@@ -15,5 +17,5 @@ private:
     static bool HasTrayArgument();
 
     MainWindow m_mainWindow;
-    HANDLE m_instanceMutex = nullptr;
+    wil::unique_handle m_instanceMutex;
 };

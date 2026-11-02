@@ -1,8 +1,10 @@
-#include "util/FileIo.hpp"
+#include "infrastructure/common/FileIo.hpp"
 
-#include "util/Paths.hpp"
+#include "infrastructure/common/Paths.hpp"
 
 #include <windows.h>
+
+#include <wil/resource.h>
 
 #include <filesystem>
 #include <fstream>
@@ -15,20 +17,19 @@ namespace {
 constexpr unsigned char kBomBytes[] = {0xEF, 0xBB, 0xBF};
 
 bool WriteDirect(const std::wstring& path, std::string_view data) {
-    const auto file = ::CreateFileW(
+    wil::unique_hfile file(::CreateFileW(
         path.c_str(),
         GENERIC_WRITE,
         FILE_SHARE_READ,
         nullptr,
         CREATE_ALWAYS,
         FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
+        nullptr));
+    if (!file) {
         return false;
     }
     DWORD written = 0;
-    const BOOL ok = ::WriteFile(file, data.data(), static_cast<DWORD>(data.size()), &written, nullptr);
-    ::CloseHandle(file);
+    const BOOL ok = ::WriteFile(file.get(), data.data(), static_cast<DWORD>(data.size()), &written, nullptr);
     return ok != FALSE && written == data.size();
 }
 
@@ -74,19 +75,15 @@ bool IsWritableDirectory(const std::wstring& folder) {
         return false;
     }
     const auto probe = std::filesystem::path(folder) / L".meetingbuddy_write_test";
-    const auto file = ::CreateFileW(
+    const wil::unique_hfile file(::CreateFileW(
         probe.c_str(),
         GENERIC_WRITE,
         0,
         nullptr,
         CREATE_ALWAYS,
         FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    ::CloseHandle(file);
-    return true;
+        nullptr));
+    return static_cast<bool>(file);
 }
 
 uint64_t FileSize(const std::wstring& path) {

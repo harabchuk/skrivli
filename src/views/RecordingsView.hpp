@@ -2,8 +2,8 @@
 
 #include "pch.hpp"
 #include "Ids.hpp"
-#include "storage/DirectoryWatcher.hpp"
-#include "storage/RecordingLibrary.hpp"
+#include "infrastructure/storage/DirectoryWatcher.hpp"
+#include "infrastructure/storage/RecordingLibrary.hpp"
 
 #include <vector>
 

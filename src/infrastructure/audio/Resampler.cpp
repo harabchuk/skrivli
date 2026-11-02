@@ -1,7 +1,7 @@
-#include "transcription/Resampler.hpp"
+#include "infrastructure/audio/Resampler.hpp"
 
-#include "audio/MaConverter.hpp"
-#include "audio/MiniAudio.hpp"
+#include "infrastructure/audio/MaConverter.hpp"
+#include "infrastructure/audio/MiniAudio.hpp"
 
 #include <cstddef>
 #include <vector>

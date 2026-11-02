@@ -1,6 +1,6 @@
 #include "ui/TrayIcon.hpp"
 
-#include "util/Log.hpp"
+#include "infrastructure/common/Log.hpp"
 
 namespace {
 

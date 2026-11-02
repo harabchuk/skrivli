@@ -1,6 +1,6 @@
-#include "util/HResult.hpp"
+#include "infrastructure/common/HResult.hpp"
 
-#include "util/Log.hpp"
+#include "infrastructure/common/Log.hpp"
 
 namespace HResult {
 

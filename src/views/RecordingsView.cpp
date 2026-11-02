@@ -1,12 +1,13 @@
-#include "ui/RecordingsView.hpp"
+#include "views/RecordingsView.hpp"
 
-#include "storage/Settings.hpp"
-#include "transcription/TranscriptionService.hpp"
+#include "infrastructure/storage/Settings.hpp"
+#include "services/TranscriptionService.hpp"
+#include "views/ModelPrompt.hpp"
 #include "ui/Theme.hpp"
-#include "ui/TranscriptWindow.hpp"
-#include "util/Log.hpp"
-#include "util/Paths.hpp"
-#include "util/Text.hpp"
+#include "views/TranscriptWindow.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Paths.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <shellapi.h>
 
@@ -384,7 +385,10 @@ void RecordingsView::OnTranscribe(UINT /*code*/, int /*id*/, HWND /*control*/) {
         service.Cancel(entry->audioPath);
         return;
     }
-    if (!service.Enqueue(GetParent(), entry->audioPath)) {
+    const auto& settings = Settings::Instance().Data();
+    const auto modelFile = settings.model.empty() ? std::wstring(kDefaultWhisperModel) : settings.model;
+    const auto modelPath = ModelPrompt::EnsureModel(GetParent(), modelFile);
+    if (modelPath.empty() || !service.Enqueue(entry->audioPath, modelPath)) {
         return;
     }
     Refresh();

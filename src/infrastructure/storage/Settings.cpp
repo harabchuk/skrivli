@@ -1,10 +1,9 @@
-#include "storage/Settings.hpp"
+#include "infrastructure/storage/Settings.hpp"
 
-#include "transcription/ModelManager.hpp"
-#include "util/FileIo.hpp"
-#include "util/Log.hpp"
-#include "util/Paths.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/common/FileIo.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Paths.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <glaze/glaze.hpp>
 
@@ -45,7 +44,7 @@ struct RecordingSettings {
 };
 
 struct TranscriptionSettings {
-    std::string model = Text::WideToUtf8(ModelManager::kDefaultModel);
+    std::string model = Text::WideToUtf8(kDefaultWhisperModel);
     std::string language = "auto";
     bool autoTranscribe = false;
     int threads = 0;

@@ -1,22 +1,14 @@
-#include "pch.hpp"
-#include "transcription/ModelManager.hpp"
+#include "infrastructure/ai/ModelManager.hpp"
 
-#include "storage/RecordingSidecar.hpp"
-#include "ui/ShellDialogs.hpp"
-#include "ui/Theme.hpp"
-#include "util/FileIo.hpp"
-#include "util/Log.hpp"
-#include "util/Paths.hpp"
-#include "util/Scoped.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/common/FileIo.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Paths.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <bcrypt.h>
-#include <commctrl.h>
-#include <shobjidl.h>
 #include <winhttp.h>
-#include <wrl/client.h>
+#include <wil/resource.h>
 
-#include <atomic>
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -28,6 +20,9 @@
 #pragma comment(lib, "winhttp.lib")
 
 namespace {
+
+using UniqueWinHttp = wil::unique_any<HINTERNET, decltype(&::WinHttpCloseHandle), ::WinHttpCloseHandle>;
+using ProgressFn = ModelManager::ProgressFn;
 
 constexpr wchar_t kHost[] = L"huggingface.co";
 constexpr wchar_t kPathPrefix[] = L"/ggerganov/whisper.cpp/resolve/main/";
@@ -43,125 +38,16 @@ auto ToLowerHex(const BYTE* data, DWORD len) -> std::string {
     return out;
 }
 
-struct DownloadProgress {
-    HWND dialog = nullptr;
-    HWND bar = nullptr;
+struct DownloadState {
     std::atomic_bool* cancel = nullptr;
+    const ProgressFn* onProgress = nullptr;
     uint64_t total = 0;
     uint64_t done = 0;
 };
 
-void RequestCancel(HWND hwnd) {
-    auto* state = reinterpret_cast<DownloadProgress*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-    if (state != nullptr && state->cancel != nullptr) {
-        state->cancel->store(true);
-    }
-}
-
-LRESULT CALLBACK DownloadWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_CREATE) {
-        auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
-        ::SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
-        return 0;
-    }
-    if ((msg == WM_COMMAND && LOWORD(wParam) == IDCANCEL) || msg == WM_CLOSE) {
-        RequestCancel(hwnd);
-        return 0;
-    }
-    return ::DefWindowProcW(hwnd, msg, wParam, lParam);
-}
-
-HWND CreateDownloadDialog(HWND owner, DownloadProgress* state) {
-    const wchar_t* className = L"MeetingBuddy.DownloadDlg";
-    WNDCLASSW wc{};
-    if (!::GetClassInfoW(_Module.GetModuleInstance(), className, &wc)) {
-        wc.lpfnWndProc = DownloadWndProc;
-        wc.hInstance = _Module.GetModuleInstance();
-        wc.lpszClassName = className;
-        wc.hCursor = ::LoadCursor(nullptr, IDC_ARROW);
-        wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-        ::RegisterClassW(&wc);
-    }
-
-    auto dlg = ::CreateWindowExW(
-        WS_EX_DLGMODALFRAME,
-        className,
-        L"Downloading model",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        420,
-        140,
-        owner,
-        nullptr,
-        _Module.GetModuleInstance(),
-        state);
-    if (dlg == nullptr) {
-        return nullptr;
-    }
-
-    ::CreateWindowExW(
-        0,
-        L"STATIC",
-        L"Downloading whisper model…",
-        WS_CHILD | WS_VISIBLE,
-        16,
-        16,
-        370,
-        20,
-        dlg,
-        nullptr,
-        _Module.GetModuleInstance(),
-        nullptr);
-
-    auto bar = ::CreateWindowExW(
-        0,
-        PROGRESS_CLASSW,
-        L"",
-        WS_CHILD | WS_VISIBLE,
-        16,
-        48,
-        370,
-        18,
-        dlg,
-        nullptr,
-        _Module.GetModuleInstance(),
-        nullptr);
-    ::SendMessageW(bar, PBM_SETRANGE, 0, MAKELPARAM(0, 1000));
-    state->bar = bar;
-
-    ::CreateWindowExW(
-        0,
-        L"BUTTON",
-        L"Cancel",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        300,
-        78,
-        86,
-        24,
-        dlg,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
-        _Module.GetModuleInstance(),
-        nullptr);
-
-    RECT ownerRect{};
-    if (owner != nullptr) {
-        ::GetWindowRect(owner, &ownerRect);
-        const int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - 420) / 2;
-        const int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - 140) / 2;
-        ::SetWindowPos(dlg, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
-    }
-
-    ::ShowWindow(dlg, SW_SHOW);
-    ::UpdateWindow(dlg);
-    return dlg;
-}
-
-void PumpMessages() {
-    MSG msg{};
-    while (::PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-        ::TranslateMessage(&msg);
-        ::DispatchMessageW(&msg);
+void Report(DownloadState* state) {
+    if (state != nullptr && state->onProgress != nullptr && *state->onProgress) {
+        (*state->onProgress)(state->done, state->total);
     }
 }
 
@@ -262,7 +148,7 @@ bool StreamToFile(
     const HttpResponse& response,
     const std::wstring& partial,
     uint64_t existing,
-    DownloadProgress* progress,
+    DownloadState* progress,
     std::wstring& error) {
     const bool resumed = existing > 0 && response.status == 206;
 
@@ -286,12 +172,12 @@ bool StreamToFile(
         error = L"Could not create download file.";
         return false;
     }
-    CHandle file(rawFile);
+    wil::unique_handle file(rawFile);
 
     if (resumed) {
         LARGE_INTEGER move{};
         move.QuadPart = static_cast<LONGLONG>(existing);
-        ::SetFilePointerEx(file, move, nullptr, FILE_BEGIN);
+        ::SetFilePointerEx(file.get(), move, nullptr, FILE_BEGIN);
     } else if (progress != nullptr) {
         progress->done = 0;
         progress->total = response.contentLength > 0 ? response.contentLength : 1;
@@ -321,18 +207,14 @@ bool StreamToFile(
         }
 
         DWORD written = 0;
-        if (!::WriteFile(file, buffer.data(), read, &written, nullptr) || written != read) {
+        if (!::WriteFile(file.get(), buffer.data(), read, &written, nullptr) || written != read) {
             error = L"Failed writing download.";
             return false;
         }
 
         if (progress != nullptr) {
             progress->done += read;
-            if (progress->bar != nullptr && progress->total > 0) {
-                const int pos = static_cast<int>((progress->done * 1000ull) / progress->total);
-                ::SendMessageW(progress->bar, PBM_SETPOS, pos, 0);
-            }
-            PumpMessages();
+            Report(progress);
         }
     }
 }
@@ -340,7 +222,7 @@ bool StreamToFile(
 bool HttpDownloadToFile(
     const std::wstring& fileName,
     const std::wstring& destPath,
-    DownloadProgress* progress,
+    DownloadState* progress,
     std::wstring& error) {
     const auto partial = destPath + L".partial";
     const auto existing = FileIo::FileSize(partial);
@@ -462,54 +344,18 @@ bool ModelManager::VerifySha256(const std::wstring& path, const char* expectedHe
     return _wcsicmp(actual.c_str(), expected.c_str()) == 0;
 }
 
-bool ModelManager::BrowseAndInstall(HWND owner, std::wstring& outFileName) {
-    static constexpr ui::FileFilter kFilters[] = {
-        {L"Whisper models (*.bin)", L"*.bin"},
-        {L"All files (*.*)", L"*.*"},
-    };
-    const auto picked = ui::PickOpenFile(owner, kFilters, L"Select a whisper ggml model");
-    if (!picked) {
-        return false;
-    }
-    const std::wstring& source = *picked;
-
-    Paths::EnsureDirectory(Paths::ModelsDir());
-    const auto leaf = std::filesystem::path(source).filename().wstring();
-    const auto dest = ModelPath(leaf);
-    std::error_code ec;
-    if (!Text::PathEquals(source, dest)) {
-        std::filesystem::copy_file(source, dest, std::filesystem::copy_options::overwrite_existing, ec);
-        if (ec) {
-            ui::ShowMessage(owner, L"Could not copy model into the models folder.", MB_OK | MB_ICONWARNING);
-            return false;
-        }
-    }
-    outFileName = leaf;
-    return true;
-}
-
-bool ModelManager::Download(HWND owner, const ModelInfo& info, std::wstring& error) {
+bool ModelManager::DownloadToFile(
+    const ModelInfo& info,
+    std::atomic_bool& cancel,
+    const ProgressFn& onProgress,
+    std::wstring& error) {
     Paths::EnsureDirectory(Paths::ModelsDir());
     const auto dest = ModelPath(info.fileName);
 
-    std::atomic_bool cancel{false};
-    DownloadProgress progress{};
+    DownloadState progress{};
     progress.cancel = &cancel;
-    progress.dialog = CreateDownloadDialog(owner, &progress);
-    if (owner != nullptr) {
-        ::EnableWindow(owner, FALSE);
-    }
-
+    progress.onProgress = &onProgress;
     const bool ok = HttpDownloadToFile(info.fileName, dest, &progress, error);
-
-    if (progress.dialog != nullptr) {
-        ::DestroyWindow(progress.dialog);
-    }
-    if (owner != nullptr) {
-        ::EnableWindow(owner, TRUE);
-        ::SetForegroundWindow(owner);
-    }
-
     if (!ok) {
         std::error_code ec;
         std::filesystem::remove(dest + L".partial", ec);
@@ -525,49 +371,4 @@ bool ModelManager::Download(HWND owner, const ModelInfo& info, std::wstring& err
         return false;
     }
     return true;
-}
-
-auto ModelManager::EnsureModel(HWND owner, const std::wstring& fileName) -> std::wstring {
-    Paths::EnsureDirectory(Paths::ModelsDir());
-    std::wstring chosen = fileName.empty() ? ModelManager::kDefaultModel : fileName;
-
-    if (IsPresent(chosen)) {
-        return ModelPath(chosen);
-    }
-
-    const int answer = ui::ShowMessage(
-        owner,
-        L"The selected whisper model is not installed.\n\nDownload it now, or browse for a local .bin file?",
-        MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON1);
-    // Yes = Download, No = Browse, Cancel = abort
-    if (answer == IDCANCEL) {
-        return {};
-    }
-
-    if (answer == IDNO) {
-        std::wstring browsed;
-        if (!BrowseAndInstall(owner, browsed)) {
-            return {};
-        }
-        return ModelPath(browsed);
-    }
-
-    const ModelInfo* info = Find(chosen);
-    if (info == nullptr) {
-        // Unknown custom name — offer browse instead of inventing a hash.
-        std::wstring browsed;
-        if (!BrowseAndInstall(owner, browsed)) {
-            return {};
-        }
-        return ModelPath(browsed);
-    }
-
-    std::wstring error;
-    if (!Download(owner, *info, error)) {
-        if (!error.empty()) {
-            ui::ShowMessage(owner, error.c_str(), MB_OK | MB_ICONWARNING);
-        }
-        return {};
-    }
-    return ModelPath(info->fileName);
 }

@@ -1,8 +1,7 @@
-#include "transcription/WhisperEngine.hpp"
+#include "infrastructure/ai/WhisperEngine.hpp"
 
-#include "storage/RecordingSidecar.hpp"
-#include "util/Log.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <whisper.h>
 

@@ -1,15 +1,15 @@
-#include "ui/SettingsDialog.hpp"
+#include "views/SettingsDialog.hpp"
 
-#include "transcription/ModelManager.hpp"
+#include "infrastructure/ai/ModelManager.hpp"
+#include "views/ModelPrompt.hpp"
 #include "ui/ShellDialogs.hpp"
 #include "ui/Theme.hpp"
-#include "util/Hotkey.hpp"
-#include "util/Paths.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/system/Hotkey.hpp"
+#include "infrastructure/common/Paths.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <shobjidl.h>
 #include <uxtheme.h>
-#include <wrl/client.h>
 
 #include <cmath>
 #include <cstdio>
@@ -202,7 +202,7 @@ void SettingsDialog::OnModelDownload(UINT /*code*/, int /*id*/, HWND /*control*/
         return;
     }
     std::wstring error;
-    if (!ModelManager::Download(m_hWnd, *info, error)) {
+    if (!ModelPrompt::Download(m_hWnd, *info, error)) {
         if (!error.empty()) {
             ui::ShowMessage(m_hWnd, error.c_str(), MB_OK | MB_ICONWARNING);
         }
@@ -214,7 +214,7 @@ void SettingsDialog::OnModelDownload(UINT /*code*/, int /*id*/, HWND /*control*/
 
 void SettingsDialog::OnModelBrowse(UINT /*code*/, int /*id*/, HWND /*control*/) {
     std::wstring installed;
-    if (!ModelManager::BrowseAndInstall(m_hWnd, installed) || installed.empty()) {
+    if (!ModelPrompt::BrowseAndInstall(m_hWnd, installed) || installed.empty()) {
         return;
     }
     FillModelCombo();

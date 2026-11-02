@@ -1,4 +1,4 @@
-#include "transcription/Resampler.hpp"
+#include "infrastructure/audio/Resampler.hpp"
 
 #include <gtest/gtest.h>
 

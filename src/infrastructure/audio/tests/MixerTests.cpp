@@ -1,5 +1,5 @@
-#include "audio/Mixer.hpp"
-#include "audio/RingBuffer.hpp"
+#include "infrastructure/audio/Mixer.hpp"
+#include "core/RingBuffer.hpp"
 
 #include <gtest/gtest.h>
 

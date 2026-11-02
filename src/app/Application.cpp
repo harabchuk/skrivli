@@ -1,11 +1,13 @@
 #include "Application.hpp"
 
-#include "storage/Settings.hpp"
-#include "util/Autostart.hpp"
-#include "util/Log.hpp"
-#include "util/Paths.hpp"
+#include "infrastructure/storage/Settings.hpp"
+#include "infrastructure/system/Autostart.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Paths.hpp"
 
 #include <shellapi.h>
+
+#include <wil/resource.h>
 
 namespace {
 
@@ -17,10 +19,11 @@ constexpr wchar_t kShowYourselfMessage[] = L"MeetingBuddy.ShowYourself";
 
 bool Application::HasTrayArgument() {
     int argc = 0;
-    auto* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
-    if (argv == nullptr) {
+    wil::unique_hlocal argvMemory(::CommandLineToArgvW(::GetCommandLineW(), &argc));
+    if (!argvMemory) {
         return false;
     }
+    const auto argv = static_cast<wchar_t**>(argvMemory.get());
     bool tray = false;
     for (int i = 1; i < argc; ++i) {
         if (_wcsicmp(argv[i], L"--tray") == 0) {
@@ -28,13 +31,12 @@ bool Application::HasTrayArgument() {
             break;
         }
     }
-    ::LocalFree(argv);
     return tray;
 }
 
 bool Application::ClaimSingleInstance() {
-    m_instanceMutex = ::CreateMutexW(nullptr, TRUE, kMutexName);
-    if (m_instanceMutex == nullptr) {
+    m_instanceMutex.reset(::CreateMutexW(nullptr, TRUE, kMutexName));
+    if (!m_instanceMutex) {
         Log::Error(L"CreateMutex failed for single-instance guard");
         return false;
     }
@@ -56,10 +58,7 @@ void Application::ActivateExistingInstance() const {
 }
 
 void Application::ReleaseSingleInstance() {
-    if (m_instanceMutex != nullptr) {
-        ::CloseHandle(m_instanceMutex);
-        m_instanceMutex = nullptr;
-    }
+    m_instanceMutex.reset();
 }
 
 int Application::Run(HINSTANCE /*instance*/, int showCommand) {

@@ -1,20 +1,21 @@
-#include "ui/MainWindow.hpp"
+#include "views/MainWindow.hpp"
 
 #include "Version.hpp"
-#include "audio/M4aEncoder.hpp"
-#include "audio/WavWriter.hpp"
-#include "storage/RecordingLibrary.hpp"
-#include "storage/RecordingSidecar.hpp"
-#include "ui/SettingsDialog.hpp"
+#include "infrastructure/files/M4aEncoder.hpp"
+#include "infrastructure/files/WavWriter.hpp"
+#include "infrastructure/storage/RecordingLibrary.hpp"
+#include "infrastructure/storage/RecordingSidecar.hpp"
+#include "views/ModelPrompt.hpp"
+#include "views/SettingsDialog.hpp"
 #include "ui/Theme.hpp"
-#include "ui/TranscriptWindow.hpp"
-#include "util/Autostart.hpp"
-#include "util/Hotkey.hpp"
-#include "util/Log.hpp"
-#include "util/Paths.hpp"
-#include "util/PostOwned.hpp"
-#include "util/Scoped.hpp"
-#include "util/Text.hpp"
+#include "views/TranscriptWindow.hpp"
+#include "infrastructure/system/Autostart.hpp"
+#include "infrastructure/system/Hotkey.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Paths.hpp"
+#include "infrastructure/common/PostOwned.hpp"
+#include "infrastructure/common/Scoped.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <iterator>
 #include <cstdio>
@@ -78,7 +79,7 @@ void MainWindow::RecoverPartialRecordings() {
     auto rescued = WavWriter::RecoverPartialsInFolder(Paths::RescueDir());
     recovered.insert(recovered.end(), rescued.begin(), rescued.end());
     for (const auto& path : recovered) {
-        auto side = RecordingSidecar::ForAudio(path);
+        auto side = Sidecar::ForAudio(path);
         side.deviceNotes.push_back("Recovered from partial file");
         RecordingLibrary::WriteSidecarForAudio(path, side);
     }
@@ -95,7 +96,7 @@ void MainWindow::WriteSidecarForPath(const std::wstring& audioPath) {
         return;
     }
 
-    auto side = RecordingSidecar::ForAudio(audioPath);
+    auto side = Sidecar::ForAudio(audioPath);
     side.startLocal = Sidecar::FormatLocalTimestamp(m_session.StartLocalTime());
     if (side.durationSeconds <= 0.0) {
         side.durationSeconds = m_session.ElapsedSeconds();
@@ -585,7 +586,13 @@ bool MainWindow::EnqueueTranscription(const std::wstring& audioPath) {
     if (audioPath.empty()) {
         return false;
     }
-    return TranscriptionService::Instance().Enqueue(m_hWnd, audioPath);
+    const auto& settings = Settings::Instance().Data();
+    const auto modelFile = settings.model.empty() ? std::wstring(kDefaultWhisperModel) : settings.model;
+    const auto modelPath = ModelPrompt::EnsureModel(m_hWnd, modelFile);
+    if (modelPath.empty()) {
+        return false;
+    }
+    return TranscriptionService::Instance().Enqueue(audioPath, modelPath);
 }
 
 void MainWindow::RequestExit() {

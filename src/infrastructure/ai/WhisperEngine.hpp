@@ -1,6 +1,6 @@
 #pragma once
 
-#include "transcription/MarkdownFormatter.hpp"
+#include "core/Transcript.hpp"
 
 #include <atomic>
 #include <cstdint>

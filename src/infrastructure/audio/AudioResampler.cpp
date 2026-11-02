@@ -1,9 +1,9 @@
-#include "audio/AudioResampler.hpp"
+#include "infrastructure/audio/AudioResampler.hpp"
 
-#include "audio/AudioFormat.hpp"
-#include "audio/MaConverter.hpp"
-#include "audio/MiniAudio.hpp"
-#include "util/Log.hpp"
+#include "core/AudioFormat.hpp"
+#include "infrastructure/audio/MaConverter.hpp"
+#include "infrastructure/audio/MiniAudio.hpp"
+#include "infrastructure/common/Log.hpp"
 
 #include <mmreg.h>
 

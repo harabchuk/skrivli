@@ -1,7 +1,7 @@
 #pragma once
 
-#include "audio/AudioFormat.hpp"
-#include "audio/RingBuffer.hpp"
+#include "core/AudioFormat.hpp"
+#include "core/RingBuffer.hpp"
 
 #include <atomic>
 #include <cstdint>

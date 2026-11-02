@@ -1,14 +1,16 @@
-#include "audio/M4aEncoder.hpp"
+#include "infrastructure/files/M4aEncoder.hpp"
 
-#include "audio/WavHeader.hpp"
-#include "util/Log.hpp"
-#include "util/Scoped.hpp"
+#include "infrastructure/audio/WavHeader.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Scoped.hpp"
 
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <wmcodecdsp.h>
-#include <wrl/client.h>
+
+#include <wil/com.h>
+#include <wil/result.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -27,29 +29,27 @@ constexpr UINT32 kAacBitrate = 128000;
 constexpr UINT32 kChunkFrames = 4800; // 100 ms
 
 bool ReadWavPcm16Stereo48k(const std::wstring& path, std::vector<int16_t>& pcm, std::wstring& error) {
-    HANDLE file = ::CreateFileW(
+    wil::unique_hfile file(::CreateFileW(
         path.c_str(),
         GENERIC_READ,
         FILE_SHARE_READ,
         nullptr,
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
+        nullptr));
+    if (!file) {
         error = L"Could not open WAV for compression.";
         return false;
     }
 
     LARGE_INTEGER size{};
-    if (!::GetFileSizeEx(file, &size) || size.QuadPart < 44) {
-        ::CloseHandle(file);
+    if (!::GetFileSizeEx(file.get(), &size) || size.QuadPart < 44) {
         error = L"WAV file is too short.";
         return false;
     }
 
-    const auto header = WavHeader::Read(file);
+    const auto header = WavHeader::Read(file.get());
     if (!header) {
-        ::CloseHandle(file);
         error = L"Not a RIFF/WAVE file.";
         return false;
     }
@@ -57,7 +57,6 @@ bool ReadWavPcm16Stereo48k(const std::wstring& path, std::vector<int16_t>& pcm, 
     // Our WavWriter uses the canonical 44-byte header; other chunk layouts are not walked.
     if (header->format != 1 || header->channels != kChannels || header->sampleRate != kSampleRate
         || header->bits != kBitsPerSample) {
-        ::CloseHandle(file);
         error = L"WAV must be PCM 16-bit stereo 48 kHz.";
         return false;
     }
@@ -65,7 +64,6 @@ bool ReadWavPcm16Stereo48k(const std::wstring& path, std::vector<int16_t>& pcm, 
     const uint64_t remaining = static_cast<uint64_t>(size.QuadPart) - WavHeader::kHeaderBytes;
     const uint64_t bytes = (std::min)(remaining, static_cast<uint64_t>(header->dataSize));
     if (bytes % 4 != 0) {
-        ::CloseHandle(file);
         error = L"WAV data size is not aligned.";
         return false;
     }
@@ -73,13 +71,11 @@ bool ReadWavPcm16Stereo48k(const std::wstring& path, std::vector<int16_t>& pcm, 
     pcm.resize(static_cast<size_t>(bytes / sizeof(int16_t)));
     if (!pcm.empty()) {
         DWORD read = 0;
-        if (!::ReadFile(file, pcm.data(), static_cast<DWORD>(bytes), &read, nullptr) || read != bytes) {
-            ::CloseHandle(file);
+        if (!::ReadFile(file.get(), pcm.data(), static_cast<DWORD>(bytes), &read, nullptr) || read != bytes) {
             error = L"Failed to read WAV PCM data.";
             return false;
         }
     }
-    ::CloseHandle(file);
     return true;
 }
 
@@ -99,9 +95,7 @@ HRESULT SetAttrs(IMFAttributes* attrs, std::initializer_list<MfAttr> list) {
         const HRESULT hr = attr.guidValue != nullptr
             ? attrs->SetGUID(attr.key, *attr.guidValue)
             : attrs->SetUINT32(attr.key, attr.uintValue);
-        if (FAILED(hr)) {
-            return hr;
-        }
+        RETURN_IF_FAILED(hr);
     }
     return S_OK;
 }
@@ -109,12 +103,9 @@ HRESULT SetAttrs(IMFAttributes* attrs, std::initializer_list<MfAttr> list) {
 HRESULT ConfigureSinkWriter(
     IMFSinkWriter* writer,
     DWORD* streamIndex) {
-    Microsoft::WRL::ComPtr<IMFMediaType> outType;
-    HRESULT hr = ::MFCreateMediaType(&outType);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = SetAttrs(outType.Get(), {
+    wil::com_ptr_nothrow<IMFMediaType> outType;
+    RETURN_IF_FAILED(::MFCreateMediaType(outType.put()));
+    const HRESULT outHr = SetAttrs(outType.get(), {
         {MF_MT_MAJOR_TYPE, MFMediaType_Audio},
         {MF_MT_SUBTYPE, MFAudioFormat_AAC},
         {MF_MT_AUDIO_SAMPLES_PER_SECOND, kSampleRate},
@@ -123,21 +114,13 @@ HRESULT ConfigureSinkWriter(
         {MF_MT_AUDIO_AVG_BYTES_PER_SECOND, kAacBitrate / 8},
         {MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29}, // AAC profile LC
     });
-    if (FAILED(hr)) {
-        return hr;
-    }
+    RETURN_IF_FAILED(outHr);
 
-    hr = writer->AddStream(outType.Get(), streamIndex);
-    if (FAILED(hr)) {
-        return hr;
-    }
+    RETURN_IF_FAILED(writer->AddStream(outType.get(), streamIndex));
 
-    Microsoft::WRL::ComPtr<IMFMediaType> inType;
-    hr = ::MFCreateMediaType(&inType);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = SetAttrs(inType.Get(), {
+    wil::com_ptr_nothrow<IMFMediaType> inType;
+    RETURN_IF_FAILED(::MFCreateMediaType(inType.put()));
+    const HRESULT inHr = SetAttrs(inType.get(), {
         {MF_MT_MAJOR_TYPE, MFMediaType_Audio},
         {MF_MT_SUBTYPE, MFAudioFormat_PCM},
         {MF_MT_AUDIO_NUM_CHANNELS, kChannels},
@@ -147,11 +130,9 @@ HRESULT ConfigureSinkWriter(
         {MF_MT_AUDIO_BITS_PER_SAMPLE, kBitsPerSample},
         {MF_MT_ALL_SAMPLES_INDEPENDENT, static_cast<UINT32>(TRUE)},
     });
-    if (FAILED(hr)) {
-        return hr;
-    }
+    RETURN_IF_FAILED(inHr);
 
-    return writer->SetInputMediaType(*streamIndex, inType.Get(), nullptr);
+    return writer->SetInputMediaType(*streamIndex, inType.get(), nullptr);
 }
 
 }  // namespace
@@ -181,15 +162,15 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
     }
 
     bool ok = false;
-    Microsoft::WRL::ComPtr<IMFSinkWriter> writer;
-    HRESULT hr = ::MFCreateSinkWriterFromURL(m4aPath.c_str(), nullptr, nullptr, &writer);
+    wil::com_ptr_nothrow<IMFSinkWriter> writer;
+    HRESULT hr = ::MFCreateSinkWriterFromURL(m4aPath.c_str(), nullptr, nullptr, writer.put());
     if (FAILED(hr) || !writer) {
         error = L"Could not create M4A writer.";
         return false;
     }
 
     DWORD streamIndex = 0;
-    hr = ConfigureSinkWriter(writer.Get(), &streamIndex);
+    hr = ConfigureSinkWriter(writer.get(), &streamIndex);
     if (FAILED(hr)) {
         error = L"Could not configure AAC encoder.";
         ::DeleteFileW(m4aPath.c_str());
@@ -212,8 +193,8 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
         const size_t sampleCount = frames * kChannels;
         const DWORD bytes = static_cast<DWORD>(sampleCount * sizeof(int16_t));
 
-        Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
-        hr = ::MFCreateMemoryBuffer(bytes, &buffer);
+        wil::com_ptr_nothrow<IMFMediaBuffer> buffer;
+        hr = ::MFCreateMemoryBuffer(bytes, buffer.put());
         if (FAILED(hr) || !buffer) {
             error = L"MFCreateMemoryBuffer failed.";
             break;
@@ -229,17 +210,17 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
         buffer->Unlock();
         buffer->SetCurrentLength(bytes);
 
-        Microsoft::WRL::ComPtr<IMFSample> sample;
-        hr = ::MFCreateSample(&sample);
+        wil::com_ptr_nothrow<IMFSample> sample;
+        hr = ::MFCreateSample(sample.put());
         if (FAILED(hr) || !sample) {
             error = L"MFCreateSample failed.";
             break;
         }
-        sample->AddBuffer(buffer.Get());
+        sample->AddBuffer(buffer.get());
         sample->SetSampleTime(time100ns);
         sample->SetSampleDuration(frameDuration * static_cast<LONGLONG>(frames));
 
-        hr = writer->WriteSample(streamIndex, sample.Get());
+        hr = writer->WriteSample(streamIndex, sample.get());
         if (FAILED(hr)) {
             error = L"WriteSample failed during AAC encode.";
             break;
@@ -257,7 +238,7 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
         }
     }
 
-    writer.Reset();
+    writer.reset();
 
     if (!ok) {
         ::DeleteFileW(m4aPath.c_str());

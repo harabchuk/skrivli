@@ -274,7 +274,7 @@ Add to `Ids.hpp`:
 - Store enough timing to support M3: QPC of the first frame in each pushed packet, plus frame count. Stereo interleaved `float` samples.
 - No allocation inside `Push` / `Pop`.
 
-**Tests:** `tests/RingBufferTests.cpp` — SPSC correctness, wraparound, overrun drops without blocking. GoogleTest via `FetchContent`, pinned tag, `MEETINGBUDDY_BUILD_TESTS` default ON, `ctest` in the Release config. Add `scripts/test.bat` (`ctest --test-dir build -C Release`) so later milestones can run it.
+**Tests:** `src/core/tests/RingBufferTests.cpp` — SPSC correctness, wraparound, overrun drops without blocking. GoogleTest via `FetchContent`, pinned tag, `MEETINGBUDDY_BUILD_TESTS` default ON, `ctest` in the Release config. Add `scripts/test.bat` (`ctest --test-dir build -C Release`) so later milestones can run it.
 
 ### M2.4 CaptureStream (microphone)
 
@@ -302,7 +302,7 @@ When `CommunicationsProcessing` is on, set `AudioClientProperties.eCategory = Au
 - Write `*.wav.partial` with a RIFF header up front. Patch the RIFF and data sizes every 2 s and on close. On success, flush, close, and rename to `.wav`.
 - On failure, close and leave the partial file for M4 recovery. Do not delete the user's other files.
 
-**Tests:** `tests/WavWriterTests.cpp` — header layout, periodic size patch, a truncated partial still has a consistent header after a repair helper. That helper is what M4's startup recovery will call.
+**Tests:** `src/infrastructure/files/tests/WavWriterTests.cpp` — header layout, periodic size patch, a truncated partial still has a consistent header after a repair helper. That helper is what M4's startup recovery will call.
 
 ### M2.6 RecordingSession (mic only)
 
@@ -371,7 +371,7 @@ Replace the placeholder page:
 - Publish peak levels for mic, system, and the mix in atomics.
 - A source that failed to open is silence for the whole take (see M4 for the user-visible warning). M3 still requires both devices present for the happy path.
 
-**Tests:** `tests/MixerTests.cpp` with synthetic QPC timestamps — alignment, gap fill, overlap drop, drift under a simulated 100 ppm offset, limiter not exceeding full scale. No audio hardware.
+**Tests:** `src/infrastructure/audio/tests/MixerTests.cpp` with synthetic QPC timestamps — alignment, gap fill, overlap drop, drift under a simulated 100 ppm offset, limiter not exceeding full scale. No audio hardware.
 
 ### M3.4 Session wiring
 
@@ -499,7 +499,7 @@ Write `<name>.json` next to the WAV when a take finalizes (including recovered f
 - Rename and delete treat audio + `.md` + `.json` as one unit. Delete uses `IFileOperation` to send all of them to the Recycle Bin.
 - Run the M4 partial-file repair before the scan.
 
-**Tests:** `tests/RecordingLibraryTests.cpp` on a temp directory — pairing, sort order, missing sidecar, partial recovery. No UI.
+**Tests:** `src/infrastructure/storage/tests/RecordingLibraryTests.cpp` on a temp directory — pairing, sort order, missing sidecar, partial recovery. No UI.
 
 ### M5.3 List view
 

@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <wil/resource.h>
+
 #include <atomic>
 #include <string>
 #include <thread>
@@ -26,8 +28,8 @@ private:
     std::wstring m_folder;
     HWND m_hwnd = nullptr;
     UINT m_notifyMsg = 0;
-    HANDLE m_stopEvent = nullptr;
-    HANDLE m_dirHandle = nullptr;
+    wil::unique_event_nothrow m_stopEvent;
+    wil::unique_hfile m_dirHandle;
     std::thread m_thread;
     std::atomic<bool> m_running{false};
 };

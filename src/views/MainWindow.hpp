@@ -2,12 +2,12 @@
 
 #include "pch.hpp"
 #include "Ids.hpp"
-#include "audio/DeviceManager.hpp"
-#include "audio/RecordingSession.hpp"
-#include "storage/Settings.hpp"
-#include "transcription/TranscriptionService.hpp"
-#include "ui/RecordView.hpp"
-#include "ui/RecordingsView.hpp"
+#include "infrastructure/audio/DeviceManager.hpp"
+#include "services/RecordingSession.hpp"
+#include "infrastructure/storage/Settings.hpp"
+#include "services/TranscriptionService.hpp"
+#include "views/RecordView.hpp"
+#include "views/RecordingsView.hpp"
 #include "ui/TabCtrl.hpp"
 #include "ui/TrayIcon.hpp"
 

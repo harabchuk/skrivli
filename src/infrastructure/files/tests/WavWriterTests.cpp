@@ -1,4 +1,4 @@
-#include "audio/WavWriter.hpp"
+#include "infrastructure/files/WavWriter.hpp"
 
 #include <gtest/gtest.h>
 

@@ -48,7 +48,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(whisper)
 
 # miniaudio 0.11.22 — WAV encode/decode, resampling, channel conversion, and mixing.
-# Device I/O stays on WASAPI in this app. Keep these options in sync with src/audio/MiniAudio.hpp.
+# Device I/O stays on WASAPI in this app. Keep these options in sync with src/infrastructure/audio/MiniAudio.hpp.
 set(MINIAUDIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(MINIAUDIO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(MINIAUDIO_NO_EXTRA_NODES ON CACHE BOOL "" FORCE)
@@ -68,61 +68,86 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(miniaudio)
 
-set(MEETINGBUDDY_AUDIO_SOURCES
-    src/audio/DeviceManager.cpp
-    src/audio/CaptureStream.cpp
-    src/audio/AudioResampler.cpp
-    src/audio/MaConverter.cpp
-    src/audio/SilentRenderKeepAlive.cpp
-    src/audio/Mixer.cpp
-    src/audio/WavHeader.cpp
-    src/audio/WavWriter.cpp
-    src/audio/M4aEncoder.cpp
-    src/audio/RecordingSession.cpp
-    src/audio/LevelMonitor.cpp
+# WIL v1.0.260126.7 — header-only. Do not add_subdirectory: upstream lists require
+# CMake 3.29 and build tests and packaging by default.
+FetchContent_Declare(
+    wil
+    GIT_REPOSITORY https://github.com/microsoft/wil.git
+    GIT_TAG        v1.0.260126.7
+    GIT_SHALLOW    TRUE
+)
+FetchContent_GetProperties(wil)
+if(NOT wil_POPULATED)
+    FetchContent_Populate(wil)
+endif()
+add_library(WIL_WIL INTERFACE)
+add_library(WIL::WIL ALIAS WIL_WIL)
+target_include_directories(WIL_WIL SYSTEM INTERFACE "${wil_SOURCE_DIR}/include")
+
+set(MEETINGBUDDY_CORE_SOURCES
+    src/core/MarkdownFormatter.cpp
 )
 
-set(MEETINGBUDDY_TRANSCRIPTION_SOURCES
-    src/transcription/AudioFileReader.cpp
-    src/transcription/Resampler.cpp
-    src/transcription/MarkdownFormatter.cpp
-    src/transcription/WhisperEngine.cpp
-    src/transcription/ModelManager.cpp
-    src/transcription/TranscriptionService.cpp
+set(MEETINGBUDDY_SERVICES_SOURCES
+    src/services/RecordingSession.cpp
+    src/services/LevelMonitor.cpp
+    src/services/TranscriptionService.cpp
 )
 
-set(MEETINGBUDDY_UTIL_SOURCES
-    src/storage/Settings.cpp
-    src/storage/RecordingSidecar.cpp
-    src/storage/RecordingLibrary.cpp
-    src/storage/DirectoryWatcher.cpp
-    src/util/Paths.cpp
-    src/util/Text.cpp
-    src/util/FileIo.cpp
-    src/util/Log.cpp
-    src/util/HResult.cpp
-    src/util/Autostart.cpp
-    src/util/Hotkey.cpp
+set(MEETINGBUDDY_INFRA_SOURCES
+    src/infrastructure/audio/DeviceManager.cpp
+    src/infrastructure/audio/CaptureStream.cpp
+    src/infrastructure/audio/AudioResampler.cpp
+    src/infrastructure/audio/MaConverter.cpp
+    src/infrastructure/audio/SilentRenderKeepAlive.cpp
+    src/infrastructure/audio/Mixer.cpp
+    src/infrastructure/audio/WavHeader.cpp
+    src/infrastructure/audio/Resampler.cpp
+    src/infrastructure/ai/WhisperEngine.cpp
+    src/infrastructure/ai/ModelManager.cpp
+    src/infrastructure/storage/Settings.cpp
+    src/infrastructure/storage/RecordingSidecar.cpp
+    src/infrastructure/storage/RecordingLibrary.cpp
+    src/infrastructure/storage/DirectoryWatcher.cpp
+    src/infrastructure/files/WavWriter.cpp
+    src/infrastructure/files/M4aEncoder.cpp
+    src/infrastructure/files/AudioFileReader.cpp
+    src/infrastructure/system/Autostart.cpp
+    src/infrastructure/system/Hotkey.cpp
+    src/infrastructure/system/Clipboard.cpp
+    src/infrastructure/common/Paths.cpp
+    src/infrastructure/common/Text.cpp
+    src/infrastructure/common/FileIo.cpp
+    src/infrastructure/common/Log.cpp
+    src/infrastructure/common/HResult.cpp
+)
+
+set(MEETINGBUDDY_UI_SOURCES
+    src/ui/DeviceCombo.cpp
+    src/ui/ShellDialogs.cpp
+    src/ui/TabCtrl.cpp
+    src/ui/TrayIcon.cpp
+    src/ui/LevelMeter.cpp
+    src/ui/RecordButton.cpp
+)
+
+set(MEETINGBUDDY_VIEWS_SOURCES
+    src/views/MainWindow.cpp
+    src/views/RecordView.cpp
+    src/views/RecordingsView.cpp
+    src/views/SettingsDialog.cpp
+    src/views/TranscriptWindow.cpp
+    src/views/ModelPrompt.cpp
 )
 
 add_executable(MeetingBuddy WIN32
     src/main.cpp
-    src/Application.cpp
-    src/ui/MainWindow.cpp
-    src/ui/DeviceCombo.cpp
-    src/ui/RecordView.cpp
-    src/ui/RecordingsView.cpp
-    src/ui/ShellDialogs.cpp
-    src/ui/SettingsDialog.cpp
-    src/ui/TabCtrl.cpp
-    src/ui/TranscriptWindow.cpp
-    src/ui/TrayIcon.cpp
-    src/ui/LevelMeter.cpp
-    src/ui/RecordButton.cpp
-    ${MEETINGBUDDY_AUDIO_SOURCES}
-    ${MEETINGBUDDY_TRANSCRIPTION_SOURCES}
-    ${MEETINGBUDDY_UTIL_SOURCES}
-    src/util/Clipboard.cpp
+    src/app/Application.cpp
+    ${MEETINGBUDDY_CORE_SOURCES}
+    ${MEETINGBUDDY_SERVICES_SOURCES}
+    ${MEETINGBUDDY_INFRA_SOURCES}
+    ${MEETINGBUDDY_UI_SOURCES}
+    ${MEETINGBUDDY_VIEWS_SOURCES}
     resources/MeetingBuddy.rc
 )
 
@@ -138,9 +163,11 @@ target_compile_definitions(MeetingBuddy PRIVATE
     WIN32_LEAN_AND_MEAN
     _WTL_USE_CSTRING
     NOMINMAX
+    WIL_SUPPRESS_EXCEPTIONS
 )
 
 target_link_libraries(MeetingBuddy PRIVATE
+    WIL::WIL
     whisper
     miniaudio
     glaze::glaze
@@ -183,48 +210,50 @@ if(MEETINGBUDDY_BUILD_TESTS)
     enable_testing()
 
     add_executable(MeetingBuddyTests
-        tests/RingBufferTests.cpp
-        tests/WavWriterTests.cpp
-        tests/MixerTests.cpp
-        tests/RecordingLibraryTests.cpp
-        tests/ResamplerTests.cpp
-        tests/MarkdownFormatterTests.cpp
-        tests/ChunkPlanTests.cpp
-        tests/SettingsTests.cpp
-        tests/TextTests.cpp
-        tests/FileIoTests.cpp
-        tests/WavHeaderTests.cpp
-        src/storage/Settings.cpp
-        src/audio/Mixer.cpp
-        src/audio/MaConverter.cpp
-        src/audio/WavHeader.cpp
-        src/audio/WavWriter.cpp
-        src/storage/RecordingSidecar.cpp
-        src/storage/RecordingLibrary.cpp
-        src/transcription/Resampler.cpp
-        src/transcription/MarkdownFormatter.cpp
-        src/util/Paths.cpp
-        src/util/Text.cpp
-        src/util/FileIo.cpp
-        src/util/Log.cpp
-        src/util/HResult.cpp
+        src/core/tests/RingBufferTests.cpp
+        src/core/tests/ChunkPlanTests.cpp
+        src/core/tests/MarkdownFormatterTests.cpp
+        src/infrastructure/audio/tests/MixerTests.cpp
+        src/infrastructure/audio/tests/ResamplerTests.cpp
+        src/infrastructure/audio/tests/WavHeaderTests.cpp
+        src/infrastructure/files/tests/WavWriterTests.cpp
+        src/infrastructure/storage/tests/RecordingLibraryTests.cpp
+        src/infrastructure/storage/tests/SettingsTests.cpp
+        src/infrastructure/common/tests/TextTests.cpp
+        src/infrastructure/common/tests/FileIoTests.cpp
+        src/infrastructure/storage/Settings.cpp
+        src/infrastructure/audio/Mixer.cpp
+        src/infrastructure/audio/MaConverter.cpp
+        src/infrastructure/audio/WavHeader.cpp
+        src/infrastructure/files/WavWriter.cpp
+        src/infrastructure/storage/RecordingSidecar.cpp
+        src/infrastructure/storage/RecordingLibrary.cpp
+        src/infrastructure/audio/Resampler.cpp
+        src/core/MarkdownFormatter.cpp
+        src/infrastructure/common/Paths.cpp
+        src/infrastructure/common/Text.cpp
+        src/infrastructure/common/FileIo.cpp
+        src/infrastructure/common/Log.cpp
+        src/infrastructure/common/HResult.cpp
     )
 
     target_include_directories(MeetingBuddyTests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
-    target_compile_definitions(MeetingBuddyTests PRIVATE
-        UNICODE
-        _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-    )
+target_compile_definitions(MeetingBuddyTests PRIVATE
+    UNICODE
+    _UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    WIL_SUPPRESS_EXCEPTIONS
+)
 
-    target_link_libraries(MeetingBuddyTests PRIVATE
-        GTest::gtest_main
-        miniaudio
-        glaze::glaze
+target_link_libraries(MeetingBuddyTests PRIVATE
+    WIL::WIL
+    GTest::gtest_main
+    miniaudio
+    glaze::glaze
         ole32
         uuid
         shell32

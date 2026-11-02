@@ -1,13 +1,14 @@
-#include "transcription/AudioFileReader.hpp"
+#include "infrastructure/files/AudioFileReader.hpp"
 
-#include "audio/MaConverter.hpp"
-#include "audio/MiniAudio.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/audio/MaConverter.hpp"
+#include "infrastructure/audio/MiniAudio.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
-#include <wrl/client.h>
+
+#include <wil/com.h>
 
 #include <algorithm>
 #include <cstring>
@@ -122,16 +123,16 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
     }
 
     bool ok = false;
-    Microsoft::WRL::ComPtr<IMFSourceReader> reader;
-    hr = ::MFCreateSourceReaderFromURL(path.c_str(), nullptr, &reader);
+    wil::com_ptr_nothrow<IMFSourceReader> reader;
+    hr = ::MFCreateSourceReaderFromURL(path.c_str(), nullptr, reader.put());
     if (FAILED(hr) || !reader) {
         error = L"Could not open media file.";
         ::MFShutdown();
         return false;
     }
 
-    Microsoft::WRL::ComPtr<IMFMediaType> partial;
-    hr = ::MFCreateMediaType(&partial);
+    wil::com_ptr_nothrow<IMFMediaType> partial;
+    hr = ::MFCreateMediaType(partial.put());
     if (FAILED(hr)) {
         error = L"MFCreateMediaType failed.";
         ::MFShutdown();
@@ -139,15 +140,15 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
     }
     partial->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
     partial->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_Float);
-    hr = reader->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), nullptr, partial.Get());
+    hr = reader->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), nullptr, partial.get());
     if (FAILED(hr)) {
         error = L"Could not configure float audio decode.";
         ::MFShutdown();
         return false;
     }
 
-    Microsoft::WRL::ComPtr<IMFMediaType> current;
-    hr = reader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), &current);
+    wil::com_ptr_nothrow<IMFMediaType> current;
+    hr = reader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), current.put());
     if (FAILED(hr) || !current) {
         error = L"Could not read decoded audio format.";
         ::MFShutdown();
@@ -169,14 +170,14 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
         DWORD streamIndex = 0;
         DWORD flags = 0;
         LONGLONG timestamp = 0;
-        Microsoft::WRL::ComPtr<IMFSample> sample;
+        wil::com_ptr_nothrow<IMFSample> sample;
         hr = reader->ReadSample(
             static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),
             0,
             &streamIndex,
             &flags,
             &timestamp,
-            &sample);
+            sample.put());
         if (FAILED(hr)) {
             error = L"ReadSample failed.";
             break;
@@ -189,8 +190,8 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
             continue;
         }
 
-        Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
-        hr = sample->ConvertToContiguousBuffer(&buffer);
+        wil::com_ptr_nothrow<IMFMediaBuffer> buffer;
+        hr = sample->ConvertToContiguousBuffer(buffer.put());
         if (FAILED(hr) || !buffer) {
             continue;
         }

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "audio/CaptureStream.hpp"
-#include "audio/DeviceManager.hpp"
-#include "audio/Mixer.hpp"
-#include "audio/RingBuffer.hpp"
-#include "audio/SilentRenderKeepAlive.hpp"
-#include "audio/WavWriter.hpp"
+#include "infrastructure/audio/CaptureStream.hpp"
+#include "infrastructure/audio/DeviceManager.hpp"
+#include "infrastructure/audio/Mixer.hpp"
+#include "core/RingBuffer.hpp"
+#include "infrastructure/audio/SilentRenderKeepAlive.hpp"
+#include "infrastructure/files/WavWriter.hpp"
 
 #include <windows.h>
 
@@ -92,7 +92,7 @@ private:
         bool Open(IMMDevice* device, const wchar_t* reason);
         void NoteBufferFlags();
         void Stop();
-        auto Resolve(const DeviceManager& devices) const -> Microsoft::WRL::ComPtr<IMMDevice>;
+        auto Resolve(const DeviceManager& devices) const -> wil::com_ptr_nothrow<IMMDevice>;
 
         RecordingSession& owner;
         CaptureStream stream;

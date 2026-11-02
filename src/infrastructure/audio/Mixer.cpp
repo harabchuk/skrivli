@@ -1,6 +1,6 @@
-#include "audio/Mixer.hpp"
+#include "infrastructure/audio/Mixer.hpp"
 
-#include "audio/MiniAudio.hpp"
+#include "infrastructure/audio/MiniAudio.hpp"
 
 #include <algorithm>
 #include <cmath>

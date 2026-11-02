@@ -2,8 +2,8 @@
 
 #include "pch.hpp"
 #include "Ids.hpp"
-#include "audio/DeviceManager.hpp"
-#include "storage/Settings.hpp"
+#include "infrastructure/audio/DeviceManager.hpp"
+#include "infrastructure/storage/Settings.hpp"
 #include "ui/DeviceCombo.hpp"
 
 #include <array>

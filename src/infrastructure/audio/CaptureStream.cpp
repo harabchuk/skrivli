@@ -1,8 +1,8 @@
-#include "audio/CaptureStream.hpp"
+#include "infrastructure/audio/CaptureStream.hpp"
 
-#include "audio/AudioFormat.hpp"
-#include "util/Log.hpp"
-#include "util/Scoped.hpp"
+#include "core/AudioFormat.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Scoped.hpp"
 
 #include <audioclient.h>
 #include <avrt.h>
@@ -21,8 +21,8 @@ constexpr DWORD kAutoConvertFlags =
 constexpr DWORD kRawEventFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
 
 void ApplyCommunicationsCategory(IAudioClient* client) {
-    Microsoft::WRL::ComPtr<IAudioClient2> audioClient2;
-    if (SUCCEEDED(client->QueryInterface(IID_PPV_ARGS(&audioClient2))) && audioClient2) {
+    wil::com_ptr_nothrow<IAudioClient2> audioClient2;
+    if (SUCCEEDED(client->QueryInterface(IID_PPV_ARGS(audioClient2.put()))) && audioClient2) {
         AudioClientProperties props{};
         props.cbSize = sizeof(props);
         props.bIsOffload = FALSE;
@@ -35,10 +35,10 @@ void ApplyCommunicationsCategory(IAudioClient* client) {
 }  // namespace
 
 struct CaptureStream::ActiveClient {
-    Microsoft::WRL::ComPtr<IAudioClient> audio;
-    Microsoft::WRL::ComPtr<IAudioCaptureClient> capture;
-    CComHeapPtr<WAVEFORMATEX> mixFormat;
-    ATL::CHandle event;
+    wil::com_ptr_nothrow<IAudioClient> audio;
+    wil::com_ptr_nothrow<IAudioCaptureClient> capture;
+    wil::unique_cotaskmem_ptr<WAVEFORMATEX> mixFormat;
+    wil::unique_event_nothrow event;
     std::vector<float> silence;
     UINT32 bufferFrames = 0;
     bool useResampler = false;
@@ -71,8 +71,7 @@ bool CaptureStream::Start(
     m_sawSilent.store(false, std::memory_order_release);
     m_sawDiscontinuityFlag.store(false, std::memory_order_release);
 
-    m_initEvent.Attach(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
-    if (m_initEvent.m_h == nullptr) {
+    if (!m_initEvent.try_create(wil::EventOptions::ManualReset, nullptr)) {
         m_fatalError.store(HRESULT_FROM_WIN32(::GetLastError()), std::memory_order_release);
         return false;
     }
@@ -82,12 +81,12 @@ bool CaptureStream::Start(
         m_thread = std::thread([this]() { ThreadMain(); });
     } catch (...) {
         m_running.store(false, std::memory_order_release);
-        m_initEvent.Close();
+        m_initEvent.reset();
         m_fatalError.store(E_FAIL, std::memory_order_release);
         return false;
     }
 
-    ::WaitForSingleObject(m_initEvent, 10000);
+    ::WaitForSingleObject(m_initEvent.get(), 10000);
     if (FAILED(m_fatalError.load(std::memory_order_acquire))
         || m_deviceInvalidated.load(std::memory_order_acquire)) {
         Stop();
@@ -102,11 +101,11 @@ void CaptureStream::Stop() {
         m_thread.join();
     }
     m_running.store(false, std::memory_order_release);
-    m_device.Reset();
+    m_device.reset();
     m_ring = nullptr;
     m_resampler.Reset();
     m_resampleScratch.clear();
-    m_initEvent.Close();
+    m_initEvent.reset();
 }
 
 void CaptureStream::ThreadMain() {
@@ -117,22 +116,22 @@ void CaptureStream::ThreadMain() {
             CaptureLoop();
         }
 
-        if (m_initEvent.m_h != nullptr) {
-            ::SetEvent(m_initEvent);
+        if (m_initEvent) {
+            m_initEvent.SetEvent();
         }
     }
     m_running.store(false, std::memory_order_release);
 }
 
-bool CaptureStream::ActivateClient(Microsoft::WRL::ComPtr<IAudioClient>& client) {
-    const auto hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client);
+bool CaptureStream::ActivateClient(wil::com_ptr_nothrow<IAudioClient>& client) {
+    const auto hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void());
     if (FAILED(hr) || !client) {
         m_fatalError.store(hr, std::memory_order_release);
         return false;
     }
 
     if (m_mode == Mode::Microphone && m_communicationsProcessing) {
-        ApplyCommunicationsCategory(client.Get());
+        ApplyCommunicationsCategory(client.get());
     }
     return true;
 }
@@ -159,14 +158,16 @@ bool CaptureStream::InitializeClient(ActiveClient& active) {
     if (FAILED(hr)) {
         Log::WriteHResult(Log::Level::Warn, L"AUTOCONVERTPCM Initialize failed; trying mix-format + miniaudio resampler", hr);
 
-        hr = active.audio->GetMixFormat(&active.mixFormat);
-        if (FAILED(hr) || active.mixFormat == nullptr) {
+        WAVEFORMATEX* mixFormat = nullptr;
+        hr = active.audio->GetMixFormat(&mixFormat);
+        active.mixFormat.reset(mixFormat);
+        if (FAILED(hr) || !active.mixFormat) {
             m_fatalError.store(hr, std::memory_order_release);
             return false;
         }
 
         // Re-Activate a fresh client after a failed Initialize.
-        active.audio.Reset();
+        active.audio.reset();
         if (!ActivateClient(active.audio)) {
             return false;
         }
@@ -181,14 +182,14 @@ bool CaptureStream::InitializeClient(ActiveClient& active) {
             rawFlags,
             AudioFormat::kBufferDuration,
             0,
-            active.mixFormat,
+            active.mixFormat.get(),
             nullptr);
         if (FAILED(hr)) {
             m_fatalError.store(hr, std::memory_order_release);
             return false;
         }
 
-        if (!m_resampler.Initialize(active.mixFormat)) {
+        if (!m_resampler.Initialize(active.mixFormat.get())) {
             m_fatalError.store(E_FAIL, std::memory_order_release);
             return false;
         }
@@ -196,19 +197,18 @@ bool CaptureStream::InitializeClient(ActiveClient& active) {
         m_usedResampler.store(true, std::memory_order_release);
     }
 
-    active.event.Attach(::CreateEventW(nullptr, FALSE, FALSE, nullptr));
-    if (active.event.m_h == nullptr) {
+    if (!active.event.try_create(wil::EventOptions::None, nullptr)) {
         m_fatalError.store(HRESULT_FROM_WIN32(::GetLastError()), std::memory_order_release);
         return false;
     }
 
-    hr = active.audio->SetEventHandle(active.event);
+    hr = active.audio->SetEventHandle(active.event.get());
     if (FAILED(hr)) {
         m_fatalError.store(hr, std::memory_order_release);
         return false;
     }
 
-    hr = active.audio->GetService(__uuidof(IAudioCaptureClient), &active.capture);
+    hr = active.audio->GetService(__uuidof(IAudioCaptureClient), active.capture.put_void());
     if (FAILED(hr) || !active.capture) {
         m_fatalError.store(hr, std::memory_order_release);
         return false;
@@ -322,12 +322,12 @@ void CaptureStream::CaptureLoop() {
     }
 
     // Init succeeded — unblock Start().
-    if (m_initEvent.m_h != nullptr) {
-        ::SetEvent(m_initEvent);
+    if (m_initEvent) {
+        m_initEvent.SetEvent();
     }
 
     while (!m_stop.load(std::memory_order_acquire)) {
-        const auto wait = ::WaitForSingleObject(active.event, AudioFormat::kEventTimeoutMs);
+        const auto wait = ::WaitForSingleObject(active.event.get(), AudioFormat::kEventTimeoutMs);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT) {
             break;
         }

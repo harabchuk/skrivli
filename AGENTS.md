@@ -18,7 +18,8 @@ Read the relevant section of the spec before implementing a feature. If you chan
 | Audio | WASAPI shared mode, event-driven; mic = `eCapture`, system = loopback on `eRender` |
 | Media | miniaudio 0.11 (WAV encode/decode, resample, mix); Media Foundation for M4A encode/decode |
 | Transcription | whisper.cpp (ggml, CPU, static) — default model `ggml-base-q5_1.bin` |
-| Build | CMake ≥ 3.24, `FetchContent` for WTL, Glaze, whisper.cpp, miniaudio, GoogleTest |
+| Build | CMake ≥ 3.24, `FetchContent` for WTL, Glaze, whisper.cpp, miniaudio, GoogleTest, WIL |
+| Win32 / COM | WIL v1.0.260126.7 with `WIL_SUPPRESS_EXCEPTIONS` (header-only; throwing helpers off) |
 | Generator | Visual Studio 18 2026 x64 (`CMakePresets.json` preset `default`), output in `build/` |
 | Target OS | Windows 10 1903+ x64 |
 
@@ -44,7 +45,7 @@ Other commands:
 ```powershell
 cmake --preset default                         # configure (only if build/ is missing)
 cmake --build build --config Release           # build only
-ctest --test-dir build -C Release              # unit tests (once tests/ exists)
+ctest --test-dir build -C Release              # unit tests (scripts\test.bat)
 ```
 
 If you add CMake options or FetchContent dependencies, delete `build/CMakeCache.txt` (or
@@ -52,27 +53,109 @@ reconfigure) so `start.bat` picks them up.
 
 ---
 
-## Project layout (target)
+## Project layout
 
 ```
 src/
-  main.cpp, Application.*, pch.hpp, Ids.hpp
-  ui/            MainWindow, RecordView, RecordingsView, TranscriptWindow,
-                 SettingsDialog, TrayIcon, LevelMeter, RecordButton,
-                 ShellDialogs, DeviceCombo
-  audio/         DeviceManager, CaptureStream, SilentRenderKeepAlive, RingBuffer,
-                 Mixer, WavWriter, M4aEncoder, RecordingSession, LevelMonitor
-  transcription/ AudioFileReader, Resampler, WhisperEngine, ModelManager,
-                 MarkdownFormatter, TranscriptionService
-  storage/       Settings, RecordingLibrary
-  util/          COM/HRESULT helpers, Clipboard, Paths, Log, Text, FileIo, Scoped, PostOwned
-resources/       MeetingBuddy.rc, resource.h, icons, MeetingBuddy.manifest
-tests/           GoogleTest unit tests (no audio hardware required)
-.specs/          design documents
+  main.cpp, pch.hpp, Ids.hpp, Version.hpp
+  app/             Application
+  core/            AudioFormat, RingBuffer, ChunkPlan, MarkdownFormatter,
+                   Recording, Transcript
+  services/        RecordingSession, LevelMonitor, TranscriptionService
+  infrastructure/
+    audio/         DeviceManager, CaptureStream, SilentRenderKeepAlive, Mixer,
+                   AudioResampler, MaConverter, MiniAudio.hpp, WavHeader, Resampler
+    ai/            WhisperEngine, ModelManager
+    storage/       Settings, RecordingLibrary, RecordingSidecar, DirectoryWatcher
+    files/         WavWriter, M4aEncoder, AudioFileReader
+    system/        Autostart, Hotkey, Clipboard
+    common/        Log, HResult, Paths, Text, FileIo, Scoped.hpp, PostOwned.hpp
+  ui/              TabCtrl, DeviceCombo, LevelMeter, RecordButton, TrayIcon,
+                   ShellDialogs, Theme.hpp
+  views/           MainWindow, RecordView, RecordingsView, TranscriptWindow,
+                   SettingsDialog, ModelPrompt
+resources/         MeetingBuddy.rc, resource.h, icons, MeetingBuddy.manifest
+.specs/            design documents
 ```
 
-Every new `.cpp` must be added to `add_executable` in `CMakeLists.txt`. Keep DSP and file logic
-free of UI so it can be unit-tested.
+Each module keeps a `tests/` folder beside its sources (for example `src/core/tests/RingBufferTests.cpp`). Includes in those files stay rooted at `src`. Add each test `.cpp` only to the `MeetingBuddyTests` target in `CMakeLists.txt`, not to a `MEETINGBUDDY_*_SOURCES` list.
+
+Every new production `.cpp` must be added to the matching `MEETINGBUDDY_*_SOURCES` list in `CMakeLists.txt`.
+Keep DSP and file logic free of UI so it can be unit-tested.
+
+## Source layers
+
+Put a new file by answering the questions in order. If a class does work that belongs in two layers, split it rather than stretching one file across both.
+
+Include paths stay rooted at `src` (for example `#include "infrastructure/common/Log.hpp"`).
+
+### Include direction
+
+```mermaid
+flowchart TD
+    app --> views
+    views --> ui
+    views --> services
+    services --> infrastructure
+    ui --> infrastructure
+    infrastructure --> core
+    core -->|"common only"| infraCommon["infrastructure/common"]
+```
+
+- A file may include its own layer and any layer below it. It may not include a layer above it.
+- `views` may include `ui`, `services`, `infrastructure`, and `core`.
+- `ui` may include `infrastructure` and `core`. It may not include `views` or `services`.
+- `services` may include `infrastructure` and `core`. It may not include `ui` or `views`.
+- `infrastructure` may include `core` and `infrastructure/common`. It may not include `services`, `ui`, or `views`.
+- `core` may include only other `core` files plus `infrastructure/common` (`Text`, `FileIo`, `Log`, and similar). It may not include `infrastructure/audio`, `ai`, `storage`, `files`, or `system`.
+- `app` may include anything. In practice it only creates the message loop and `MainWindow`.
+- `main.cpp`, `pch.hpp`, `Ids.hpp`, and `Version.hpp` stay at the `src` root because every layer uses them.
+
+### What belongs in each folder
+
+**`src/` root** — process-wide headers that every layer includes: `main.cpp`, `pch.hpp`, `Ids.hpp` (control IDs and `WM_APP_*` messages), `Version.hpp`. Do not add new types here.
+
+**`app/`** — process lifetime only: COM and common-controls init, the WTL module, the message loop, the single-instance mutex. Today that is `Application`. Do not put windows, recording, or transcription here.
+
+**`core/`** — domain types and in-process logic with no windows, devices, files, network, or third-party SDK headers.
+- Put here: value types (`RecordingEntry`, `RecordingSidecar` fields, `TranscriptSegment`, `TranscriptStatus`), constants (`AudioFormat`, `kDefaultWhisperModel`), pure algorithms (`ChunkPlan`, `MarkdownFormatter`, `RingBuffer`).
+- Do not put here: WASAPI capture, WinHTTP, Glaze I/O, whisper.cpp, miniaudio, Media Foundation, or any `HWND`.
+- `AudioFormat.hpp` stays in `core`: it only describes the internal 48 kHz layout, even though that description uses the Windows wave-format headers.
+- `Mixer` and `Resampler` stay out of `core` because they include miniaudio.
+
+**`services/`** — application workflows that orchestrate infrastructure for one user-facing job. They own threads, queues, and session state machines. They talk to the UI only through `PostMessage(WM_APP_*)`.
+- Put here: `RecordingSession` (one take: start, mix, write, stop), `LevelMonitor` (idle metering), `TranscriptionService` (FIFO queue, one job at a time).
+- Do not put here: WASAPI open/close details, whisper.cpp calls, WAV encode, or window classes. Call those through infrastructure.
+- Do not rename a class to a `Service` suffix to match the folder. A later workflow such as summaries would be a new file here.
+
+**`infrastructure/`** — OS and library integrations. Each subfolder is one kind of adapter. If a helper is used from more than one subfolder, it goes in `common/`.
+
+- **`infrastructure/audio/`** — capture devices and DSP that talks to WASAPI or miniaudio: `DeviceManager`, `CaptureStream`, `SilentRenderKeepAlive`, `Mixer`, `AudioResampler`, `MaConverter`, `MiniAudio.hpp`, `WavHeader`, `Resampler`.
+- **`infrastructure/ai/`** — whisper.cpp and model files on disk: `WhisperEngine`, `ModelManager` (catalog, paths, SHA-256, download with no `HWND`).
+- **`infrastructure/storage/`** — settings and recording metadata on disk: `Settings`, `RecordingLibrary`, `RecordingSidecar` (Glaze load/save), `DirectoryWatcher`.
+- **`infrastructure/files/`** — audio file encode and decode: `WavWriter`, `M4aEncoder`, `AudioFileReader`.
+- **`infrastructure/system/`** — Windows shell features that are not audio or files: `Autostart`, `Hotkey`, `Clipboard`.
+- **`infrastructure/common/`** — small helpers any layer may use: `Log`, `HResult`, `Paths`, `Text`, `FileIo`, `Scoped.hpp`, `PostOwned.hpp`.
+
+Do not put WTL windows or tab pages in `infrastructure`. Do not put domain structs here if they have no I/O; those belong in `core`.
+
+**`ui/`** — reusable WTL/Win32 components with no knowledge of a specific screen.
+- Put here: owner-drawn controls (`TabCtrl`, `DeviceCombo`, `LevelMeter`, `RecordButton`), tray icon wrapper, shared file dialogs (`ShellDialogs`), `Theme.hpp`.
+- Do not put here: `MainWindow`, tab pages, settings or transcript windows, or any class that names a recording or a transcription job.
+
+**`views/`** — windows, tab pages, and dialogs that compose `ui/` controls and call `services/`.
+- Put here: `MainWindow`, `RecordView`, `RecordingsView`, `TranscriptWindow`, `SettingsDialog`, and dialog-only helpers such as `ModelPrompt`.
+- A view may include `ui`, `services`, `infrastructure`, and `core`. It must not own WASAPI or whisper.cpp handles.
+
+### Split when mixed
+
+If one class both talks to an SDK and shows UI, split it:
+
+- Keep the SDK or disk work in `infrastructure` with a callback or a result type, no `HWND`.
+- Put the dialog, progress window, or file picker in `views`.
+- `ModelManager` (infrastructure) downloads with no `HWND`. `ModelPrompt` (views) owns the progress window and file picker. `TranscriptionService::Enqueue` takes a `modelPath`; the view calls `ModelPrompt::EnsureModel` first.
+
+Unit tests live in a `tests/` folder next to the type they cover and include the same layered paths as production code. DSP, file, and formatting tests should keep targeting `core` and `infrastructure` types that do not need audio hardware. Test translation units are not part of the production source lists.
 
 Pending cleanup (milestone M0): delete the unused `src/Window.hpp`, pin WTL to a tag or commit
 instead of `main`, use `project(... LANGUAGES C CXX)` (needed by ggml), and add the `.rc` file and
@@ -92,7 +175,7 @@ like `HRESULT`, `LRESULT`, `bool` keep the prefix form.
 crackers (`MSG_WM_*`, `COMMAND_ID_HANDLER_EX`).
 - Put all control, menu, and resource IDs and `WM_APP + n` messages in `Ids.hpp` / `resource.h`.
 Never use magic numbers.
-- COM: `Microsoft::WRL::ComPtr`, and check every `HRESULT` (log + propagate). No naked `Release()`.
+- COM: `wil::com_ptr_nothrow`, and check every `HRESULT` (log + propagate). No naked `Release()`.
 - No exceptions crossing COM, window-procedure, or thread boundaries.
 - Write comments only for constraints the code can't express.
 - Unit tests: mark distinct phases with `// Arrange`, `// Act`, and `// Assert` only when

@@ -1,7 +1,9 @@
 #include "ui/ShellDialogs.hpp"
 
 #include <shobjidl.h>
-#include <wrl/client.h>
+
+#include <wil/com.h>
+#include <wil/resource.h>
 
 #include <vector>
 
@@ -13,17 +15,15 @@ auto ShowAndGetPath(IFileDialog* dialog, HWND owner) -> std::optional<std::wstri
     if (FAILED(dialog->Show(owner))) {
         return std::nullopt;
     }
-    Microsoft::WRL::ComPtr<IShellItem> item;
-    if (FAILED(dialog->GetResult(&item)) || !item) {
+    wil::com_ptr_nothrow<IShellItem> item;
+    if (FAILED(dialog->GetResult(item.put())) || !item) {
         return std::nullopt;
     }
-    PWSTR path = nullptr;
-    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) || path == nullptr) {
+    wil::unique_cotaskmem_string path;
+    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, path.put())) || !path) {
         return std::nullopt;
     }
-    std::wstring result = path;
-    ::CoTaskMemFree(path);
-    return result;
+    return std::wstring(path.get());
 }
 
 void ApplyFilters(IFileDialog* dialog, std::span<const FileFilter> filters) {
@@ -41,31 +41,31 @@ void ApplyFilters(IFileDialog* dialog, std::span<const FileFilter> filters) {
 }  // namespace
 
 auto PickFolder(HWND owner) -> std::optional<std::wstring> {
-    Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
-    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&dialog));
+    wil::com_ptr_nothrow<IFileOpenDialog> dialog;
+    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(dialog.put()));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }
     DWORD options = 0;
     dialog->GetOptions(&options);
     dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
-    return ShowAndGetPath(dialog.Get(), owner);
+    return ShowAndGetPath(dialog.get(), owner);
 }
 
 auto PickOpenFile(
     HWND owner,
     std::span<const FileFilter> filters,
     const wchar_t* title) -> std::optional<std::wstring> {
-    Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
-    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
+    wil::com_ptr_nothrow<IFileOpenDialog> dialog;
+    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dialog.put()));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }
-    ApplyFilters(dialog.Get(), filters);
+    ApplyFilters(dialog.get(), filters);
     if (title != nullptr) {
         dialog->SetTitle(title);
     }
-    return ShowAndGetPath(dialog.Get(), owner);
+    return ShowAndGetPath(dialog.get(), owner);
 }
 
 auto PickSaveFile(
@@ -73,19 +73,19 @@ auto PickSaveFile(
     std::span<const FileFilter> filters,
     const wchar_t* defaultExt,
     const std::wstring& fileName) -> std::optional<std::wstring> {
-    Microsoft::WRL::ComPtr<IFileSaveDialog> dialog;
-    const auto hr = ::CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
+    wil::com_ptr_nothrow<IFileSaveDialog> dialog;
+    const auto hr = ::CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dialog.put()));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }
-    ApplyFilters(dialog.Get(), filters);
+    ApplyFilters(dialog.get(), filters);
     if (defaultExt != nullptr) {
         dialog->SetDefaultExtension(defaultExt);
     }
     if (!fileName.empty()) {
         dialog->SetFileName(fileName.c_str());
     }
-    return ShowAndGetPath(dialog.Get(), owner);
+    return ShowAndGetPath(dialog.get(), owner);
 }
 
 }  // namespace ui

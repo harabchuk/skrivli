@@ -1,6 +1,6 @@
 #pragma once
 
-#include "transcription/ModelManager.hpp"
+#include "core/Transcript.hpp"
 
 #include <optional>
 #include <string>
@@ -32,7 +32,7 @@ struct SettingsData {
     bool keepWav = true;
     bool communicationsProcessing = false;
 
-    std::wstring model = ModelManager::kDefaultModel;
+    std::wstring model = kDefaultWhisperModel;
     std::wstring language = L"auto";
     bool autoTranscribe = false;
     int threads = 0;

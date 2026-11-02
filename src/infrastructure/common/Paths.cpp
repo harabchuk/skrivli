@@ -1,20 +1,20 @@
-#include "util/Paths.hpp"
+#include "infrastructure/common/Paths.hpp"
 
 #include <filesystem>
 #include <shlobj.h>
 #include <windows.h>
 
+#include <wil/resource.h>
+
 namespace {
 
 auto KnownFolder(REFKNOWNFOLDERID id) -> std::wstring {
-    PWSTR raw = nullptr;
-    const auto hr = ::SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, nullptr, &raw);
-    if (FAILED(hr) || raw == nullptr) {
+    wil::unique_cotaskmem_string raw;
+    const auto hr = ::SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, nullptr, raw.put());
+    if (FAILED(hr) || !raw) {
         return {};
     }
-    std::wstring path(raw);
-    ::CoTaskMemFree(raw);
-    return path;
+    return std::wstring(raw.get());
 }
 
 auto Join(const std::wstring& root, const wchar_t* leaf) -> std::wstring {

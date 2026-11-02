@@ -1,7 +1,7 @@
-#include "transcription/MarkdownFormatter.hpp"
+#include "core/MarkdownFormatter.hpp"
 
-#include "util/FileIo.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/common/FileIo.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <algorithm>
 #include <cmath>

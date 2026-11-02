@@ -1,4 +1,4 @@
-#include "audio/WavHeader.hpp"
+#include "infrastructure/audio/WavHeader.hpp"
 
 #include <cstring>
 

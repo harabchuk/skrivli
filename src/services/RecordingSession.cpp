@@ -1,12 +1,12 @@
-#include "audio/RecordingSession.hpp"
+#include "services/RecordingSession.hpp"
 
 #include "Ids.hpp"
-#include "util/FileIo.hpp"
-#include "util/Log.hpp"
-#include "util/Paths.hpp"
-#include "util/PostOwned.hpp"
-#include "util/Scoped.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/common/FileIo.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Paths.hpp"
+#include "infrastructure/common/PostOwned.hpp"
+#include "infrastructure/common/Scoped.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <audioclient.h>
 #include <windows.h>
@@ -89,7 +89,7 @@ void RecordingSession::CaptureSource::Stop() {
 }
 
 auto RecordingSession::CaptureSource::Resolve(
-    const DeviceManager& devices) const -> Microsoft::WRL::ComPtr<IMMDevice> {
+    const DeviceManager& devices) const -> wil::com_ptr_nothrow<IMMDevice> {
     const auto id = usesDefault ? std::wstring{} : deviceId;
     return mode == CaptureStream::Mode::Microphone
         ? devices.ResolveCaptureDevice(id)
@@ -333,7 +333,7 @@ bool RecordingSession::OpenSources(RecordingStartResult& result) {
         AddDeviceNote(L"Started without system audio");
     }
 
-    if (sysPresent && !m_sys.Open(renderDevice.Get(), nullptr)) {
+    if (sysPresent && !m_sys.Open(renderDevice.get(), nullptr)) {
         const auto hr = m_sys.stream.FatalError();
         Log::Warn(DescribeCaptureError(hr, false));
         if (IsDeviceBusy(hr) && micPresent) {
@@ -348,7 +348,7 @@ bool RecordingSession::OpenSources(RecordingStartResult& result) {
         }
     }
 
-    if (micPresent && !m_mic.Open(micDevice.Get(), nullptr)) {
+    if (micPresent && !m_mic.Open(micDevice.get(), nullptr)) {
         const auto hr = m_mic.stream.FatalError();
         if (IsPrivacyDenied(hr)) {
             TeardownCapture();
@@ -515,7 +515,7 @@ bool RecordingSession::Reopen(CaptureSource& source, const wchar_t* reason) {
         AddDeviceNote(std::wstring(source.label) + L" lost (" + reason + L") — no replacement");
         return false;
     }
-    return source.Open(device.Get(), reason);
+    return source.Open(device.get(), reason);
 }
 
 void RecordingSession::ServiceDevices() {

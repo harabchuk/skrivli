@@ -1,8 +1,11 @@
 #pragma once
 
+#include <windows.h>
+
+#include <wil/com.h>
+
 #include <atomic>
 #include <thread>
-#include <wrl/client.h>
 
 struct IMMDevice;
 
@@ -24,7 +27,7 @@ private:
     void ThreadMain();
     void RenderLoop();
 
-    Microsoft::WRL::ComPtr<IMMDevice> m_device;
+    wil::com_ptr_nothrow<IMMDevice> m_device;
     std::thread m_thread;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_stop{false};

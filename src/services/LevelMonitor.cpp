@@ -1,8 +1,8 @@
-#include "audio/LevelMonitor.hpp"
+#include "services/LevelMonitor.hpp"
 
-#include "audio/AudioFormat.hpp"
-#include "util/Log.hpp"
-#include "util/Scoped.hpp"
+#include "core/AudioFormat.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Scoped.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -70,10 +70,10 @@ void LevelMonitor::Start(
     bool any = false;
 
     if (renderDevice) {
-        if (!m_keepAlive.Start(renderDevice.Get())) {
+        if (!m_keepAlive.Start(renderDevice.get())) {
             Log::Warn(L"LevelMonitor: system keep-alive failed");
         }
-        if (m_sysCapture.Start(renderDevice.Get(), CaptureStream::Mode::Loopback, m_sysRing, false)) {
+        if (m_sysCapture.Start(renderDevice.get(), CaptureStream::Mode::Loopback, m_sysRing, false)) {
             any = true;
         } else {
             m_keepAlive.Stop();
@@ -83,7 +83,7 @@ void LevelMonitor::Start(
 
     if (micDevice) {
         if (m_micCapture.Start(
-                micDevice.Get(),
+                micDevice.get(),
                 CaptureStream::Mode::Microphone,
                 m_micRing,
                 communicationsProcessing)) {

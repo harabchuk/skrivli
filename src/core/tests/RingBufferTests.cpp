@@ -1,4 +1,4 @@
-#include "audio/RingBuffer.hpp"
+#include "core/RingBuffer.hpp"
 
 #include <gtest/gtest.h>
 

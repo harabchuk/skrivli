@@ -1,18 +1,17 @@
-#include "ui/RecordView.hpp"
+#include "views/RecordView.hpp"
 
-#include "storage/Settings.hpp"
+#include "infrastructure/storage/Settings.hpp"
 #include "ui/ShellDialogs.hpp"
 #include "ui/Theme.hpp"
-#include "util/FileIo.hpp"
-#include "util/Log.hpp"
-#include "util/Paths.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/common/FileIo.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Paths.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <commctrl.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <uxtheme.h>
-#include <wrl/client.h>
 
 #include <algorithm>
 #include <cmath>

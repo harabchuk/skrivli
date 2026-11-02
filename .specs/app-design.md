@@ -98,50 +98,43 @@ UI ↔ worker communication is via `PostMessage` with `WM_APP + n` messages carr
 
 ## 5. Source layout
 
+Placement rules (what belongs in each folder, and which layers may include which) live in `AGENTS.md`.
+
 ```
 src/
-  main.cpp
-  Application.{hpp,cpp}           # module, message loop, single-instance mutex, COM init
-  pch.hpp
-  Ids.hpp                         # control IDs, WM_APP_* messages, menu IDs
-  ui/
-    MainWindow.{hpp,cpp}          # frame + tab control + tray wiring
-    RecordView.{hpp,cpp}          # tab 1
-    RecordingsView.{hpp,cpp}      # tab 2
-    TranscriptWindow.{hpp,cpp}    # Markdown viewer
-    SettingsDialog.{hpp,cpp}
-    TrayIcon.{hpp,cpp}
-    LevelMeter.{hpp,cpp}          # owner-drawn peak meter control
-  audio/
-    DeviceManager.{hpp,cpp}       # enumerate endpoints, IMMNotificationClient
-    CaptureStream.{hpp,cpp}       # one WASAPI capture (mic or loopback)
-    SilentRenderKeepAlive.{hpp,cpp}
-    RingBuffer.hpp                # SPSC lock-free float ring buffer
-    Mixer.{hpp,cpp}               # alignment, gain, drift, mixdown
-    WavWriter.{hpp,cpp}
-    M4aEncoder.{hpp,cpp}          # optional, Media Foundation
-    RecordingSession.{hpp,cpp}    # owns all of the above for one recording
-    LevelMonitor.{hpp,cpp}        # idle mic/system peak metering (no disk I/O)
-  transcription/
-    AudioFileReader.{hpp,cpp}     # WAV via miniaudio; M4A via MF Source Reader → 48 kHz float
-    Resampler.{hpp,cpp}           # 48k stereo → 16k mono (miniaudio low-pass + linear resample)
-    WhisperEngine.{hpp,cpp}       # thin wrapper over whisper.cpp
-    ModelManager.{hpp,cpp}        # model discovery, download, checksum
+  main.cpp, pch.hpp, Ids.hpp, Version.hpp
+  app/
+    Application.{hpp,cpp}                  # module, message loop, single-instance mutex
+  core/
+    AudioFormat.hpp, RingBuffer.hpp        # format constants; SPSC lock-free float ring
+    ChunkPlan.hpp
     MarkdownFormatter.{hpp,cpp}
-    TranscriptionService.{hpp,cpp}
-  storage/
-    Settings.{hpp,cpp}
-    RecordingLibrary.{hpp,cpp}    # scan folder, metadata sidecars, watch for changes
-  util/
-    ComPtr / HResult helpers, Clipboard, Paths, Log
+    Recording.hpp                          # RecordingEntry, RecordingSidecar fields
+    Transcript.hpp                         # TranscriptSegment, TranscriptMeta, TranscriptStatus
+  services/
+    RecordingSession.{hpp,cpp}             # one take: start, mix, write, stop
+    LevelMonitor.{hpp,cpp}                 # idle mic/system peak metering (no disk I/O)
+    TranscriptionService.{hpp,cpp}         # FIFO queue, one job at a time
+  infrastructure/
+    audio/    DeviceManager, CaptureStream, SilentRenderKeepAlive, Mixer,
+              AudioResampler, MaConverter, MiniAudio.hpp, WavHeader, Resampler
+    ai/       WhisperEngine, ModelManager  # whisper.cpp, model catalog, download (no HWND)
+    storage/  Settings, RecordingLibrary, RecordingSidecar, DirectoryWatcher
+    files/    WavWriter, M4aEncoder, AudioFileReader
+    system/   Autostart, Hotkey, Clipboard
+    common/   wil::com_ptr_nothrow, Log, HResult, Paths, Text, FileIo, Scoped.hpp, PostOwned.hpp
+  ui/                                      # reusable controls, no screen knowledge
+    TabCtrl, DeviceCombo, LevelMeter, RecordButton, TrayIcon, ShellDialogs, Theme.hpp
+  views/                                   # windows, tab pages, dialogs
+    MainWindow, RecordView, RecordingsView, TranscriptWindow, SettingsDialog
+    ModelPrompt                            # progress window and model file picker
 resources/
   MeetingBuddy.rc, resource.h
   app.ico, tray_idle.ico, tray_recording.ico
   MeetingBuddy.manifest
-tests/
-  RingBufferTests.cpp, MixerTests.cpp, WavWriterTests.cpp,
-  ResamplerTests.cpp, MarkdownFormatterTests.cpp, RecordingLibraryTests.cpp
 ```
+
+GoogleTest sources sit in a `tests/` folder beside the type they cover (`src/core/tests/`, `src/infrastructure/audio/tests/`, `src/infrastructure/files/tests/`, `src/infrastructure/storage/tests/`, `src/infrastructure/common/tests/`). They are compiled only into `MeetingBuddyTests`.
 
 ---
 

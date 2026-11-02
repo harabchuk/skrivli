@@ -1,17 +1,18 @@
-#include "transcription/TranscriptionService.hpp"
+#include "services/TranscriptionService.hpp"
 
 #include "Ids.hpp"
-#include "storage/RecordingLibrary.hpp"
-#include "storage/Settings.hpp"
-#include "transcription/AudioFileReader.hpp"
-#include "transcription/ChunkPlan.hpp"
-#include "transcription/MarkdownFormatter.hpp"
-#include "transcription/ModelManager.hpp"
-#include "transcription/Resampler.hpp"
-#include "util/Log.hpp"
-#include "util/PostOwned.hpp"
-#include "util/Scoped.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/storage/RecordingLibrary.hpp"
+#include "infrastructure/storage/RecordingSidecar.hpp"
+#include "infrastructure/storage/Settings.hpp"
+#include "infrastructure/files/AudioFileReader.hpp"
+#include "core/ChunkPlan.hpp"
+#include "core/MarkdownFormatter.hpp"
+#include "infrastructure/ai/ModelManager.hpp"
+#include "infrastructure/audio/Resampler.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/PostOwned.hpp"
+#include "infrastructure/common/Scoped.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <objbase.h>
 
@@ -85,20 +86,15 @@ void TranscriptionService::Stop() {
     m_engine.Unload();
 }
 
-bool TranscriptionService::Enqueue(HWND ownerForModelUi, const std::wstring& audioPath) {
-    if (audioPath.empty()) {
+bool TranscriptionService::Enqueue(const std::wstring& audioPath, const std::wstring& modelPath) {
+    if (audioPath.empty() || modelPath.empty()) {
         return false;
     }
 
     Start();
 
     const auto& settings = Settings::Instance().Data();
-    auto modelFile = settings.model.empty() ? ModelManager::kDefaultModel : settings.model;
-    const auto modelPath = ModelManager::EnsureModel(ownerForModelUi, modelFile);
-    if (modelPath.empty()) {
-        return false;
-    }
-    modelFile = std::filesystem::path(modelPath).filename().wstring();
+    const auto modelFile = std::filesystem::path(modelPath).filename().wstring();
 
     Job job{};
     job.audioPath = audioPath;
@@ -185,7 +181,7 @@ void TranscriptionService::UpdateSidecarStatus(
     RecordingSidecar side{};
     const auto jsonPath = RecordingLibrary::JsonPathForAudio(audioPath);
     if (!Sidecar::Load(jsonPath, side)) {
-        side = RecordingSidecar::ForAudio(audioPath);
+        side = Sidecar::ForAudio(audioPath);
     }
     side.transcriptStatus = status;
     side.transcriptError = error;

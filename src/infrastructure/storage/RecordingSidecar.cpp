@@ -1,10 +1,10 @@
-#include "storage/RecordingSidecar.hpp"
+#include "infrastructure/storage/RecordingSidecar.hpp"
 
-#include "audio/AudioFormat.hpp"
-#include "storage/RecordingLibrary.hpp"
-#include "util/FileIo.hpp"
-#include "util/Log.hpp"
-#include "util/Text.hpp"
+#include "core/AudioFormat.hpp"
+#include "infrastructure/storage/RecordingLibrary.hpp"
+#include "infrastructure/common/FileIo.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Text.hpp"
 
 #include <glaze/glaze.hpp>
 
@@ -32,9 +32,11 @@ struct glz::meta<TranscriptStatus> {
         TranscriptStatus::Cancelled};
 };
 
-RecordingSidecar RecordingSidecar::ForAudio(const std::wstring& audioPath) {
+namespace Sidecar {
+
+auto ForAudio(const std::wstring& audioPath) -> RecordingSidecar {
     RecordingSidecar side{};
-    side.startLocal = Sidecar::FormatLocalTimestampNow();
+    side.startLocal = FormatLocalTimestampNow();
     side.endLocal = side.startLocal;
     side.durationSeconds = RecordingLibrary::ReadWavDurationSeconds(audioPath);
     side.sampleRate = static_cast<int>(AudioFormat::kSampleRate);
@@ -42,7 +44,6 @@ RecordingSidecar RecordingSidecar::ForAudio(const std::wstring& audioPath) {
     return side;
 }
 
-namespace Sidecar {
 
 auto FormatLocalTimestamp(const SYSTEMTIME& local) -> std::string {
     char buf[32]{};

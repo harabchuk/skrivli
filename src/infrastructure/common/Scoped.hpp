@@ -4,23 +4,20 @@
 #include <objbase.h>
 #include <avrt.h>
 #include <mfapi.h>
-#include <winhttp.h>
 
-#include <memory>
+#include <wil/resource.h>
 
-// Small RAII wrappers for process/thread-scoped Win32 state.
-// For kernel handles prefer ATL `CHandle`; for CoTaskMem strings prefer `CComHeapPtr<wchar_t>`.
+// Process/thread-scoped RAII that WIL's own helpers do not match.
+// A thread already in a different apartment (RPC_E_CHANGED_MODE) is usable, but must not
+// call CoUninitialize. wil::CoInitializeEx() is unavailable under WIL_SUPPRESS_EXCEPTIONS
+// and would uninitialize that other apartment.
 
-// Balances CoInitializeEx on the owning thread. A thread that already runs in a different
-// apartment (RPC_E_CHANGED_MODE) is usable but must not call CoUninitialize.
 class ScopedComInit {
 public:
     explicit ScopedComInit(DWORD coInit = COINIT_MULTITHREADED) noexcept
-        : m_hr(::CoInitializeEx(nullptr, coInit)) {}
-
-    ~ScopedComInit() {
-        if (SUCCEEDED(m_hr)) {
-            ::CoUninitialize();
+        : m_hr(::CoInitializeEx(nullptr, coInit)) {
+        if (FAILED(m_hr)) {
+            m_uninit.release();
         }
     }
 
@@ -34,6 +31,7 @@ public:
 
 private:
     HRESULT m_hr;
+    wil::unique_couninitialize_call m_uninit;
 };
 
 // Registers the calling thread with MMCSS for the given task and reverts it on destruction.
@@ -41,33 +39,27 @@ class ScopedMmcss {
 public:
     explicit ScopedMmcss(const wchar_t* taskName) noexcept {
         DWORD taskIndex = 0;
-        m_handle = ::AvSetMmThreadCharacteristicsW(taskName, &taskIndex);
-    }
-
-    ~ScopedMmcss() {
-        if (m_handle != nullptr) {
-            ::AvRevertMmThreadCharacteristics(m_handle);
-        }
+        m_handle.reset(::AvSetMmThreadCharacteristicsW(taskName, &taskIndex));
     }
 
     ScopedMmcss(const ScopedMmcss&) = delete;
     auto operator=(const ScopedMmcss&) -> ScopedMmcss& = delete;
 
-    bool IsRegistered() const noexcept { return m_handle != nullptr; }
+    bool IsRegistered() const noexcept { return static_cast<bool>(m_handle); }
 
 private:
-    HANDLE m_handle = nullptr;
+    using Handle = wil::unique_any<HANDLE, decltype(&::AvRevertMmThreadCharacteristics), ::AvRevertMmThreadCharacteristics>;
+
+    Handle m_handle;
 };
 
 // Pairs MFStartup with MFShutdown; shutdown only runs when startup succeeded.
 class ScopedMfStartup {
 public:
     explicit ScopedMfStartup(DWORD flags = MFSTARTUP_LITE) noexcept
-        : m_hr(::MFStartup(MF_VERSION, flags)) {}
-
-    ~ScopedMfStartup() {
-        if (SUCCEEDED(m_hr)) {
-            ::MFShutdown();
+        : m_hr(::MFStartup(MF_VERSION, flags)) {
+        if (FAILED(m_hr)) {
+            m_shutdown.release();
         }
     }
 
@@ -78,19 +70,8 @@ public:
     bool IsStarted() const noexcept { return SUCCEEDED(m_hr); }
 
 private:
+    using ShutdownCall = wil::unique_call<decltype(&::MFShutdown), ::MFShutdown>;
+
     HRESULT m_hr;
+    ShutdownCall m_shutdown;
 };
-
-struct WinHttpHandleDeleter {
-    using pointer = HINTERNET;
-
-    void operator()(HINTERNET handle) const noexcept {
-        if (handle != nullptr) {
-            ::WinHttpCloseHandle(handle);
-        }
-    }
-};
-
-// Owns a session, connection, or request HINTERNET. Declare in open order so handles close
-// in reverse (request, connect, session).
-using UniqueWinHttp = std::unique_ptr<void, WinHttpHandleDeleter>;

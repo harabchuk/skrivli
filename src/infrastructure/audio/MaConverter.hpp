@@ -1,6 +1,6 @@
 #pragma once
 
-#include "audio/MiniAudio.hpp"
+#include "infrastructure/audio/MiniAudio.hpp"
 
 #include <cstddef>
 #include <vector>

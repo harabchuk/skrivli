@@ -1,26 +1,9 @@
 #pragma once
 
-#include "storage/RecordingSidecar.hpp"
+#include "core/Recording.hpp"
 
-#include <cstdint>
 #include <string>
 #include <vector>
-
-struct RecordingEntry {
-    std::wstring audioPath;
-    std::wstring jsonPath;
-    std::wstring mdPath;
-    std::wstring stem;      // full path without extension
-    std::wstring fileName;  // leaf name of audio
-    std::wstring displayName;
-    std::wstring startLocal; // for sorting/display
-    double durationSeconds = 0.0;
-    uint64_t sizeBytes = 0;
-    TranscriptStatus transcriptStatus = TranscriptStatus::None;
-    std::wstring transcriptError;
-    int transcriptPercent = -1; // -1 = n/a; set by UI for active job
-    bool hasMarkdown = false;
-};
 
 class RecordingLibrary {
 public:

@@ -1,7 +1,6 @@
 #pragma once
 
-#include "storage/RecordingSidecar.hpp"
-#include "transcription/WhisperEngine.hpp"
+#include "infrastructure/ai/WhisperEngine.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -29,8 +28,8 @@ public:
     void Start();
     void Stop();
 
-    // Enqueues a job. Returns false if the model could not be ensured.
-    bool Enqueue(HWND ownerForModelUi, const std::wstring& audioPath);
+    // Enqueues a job. Returns false when audioPath or modelPath is empty.
+    bool Enqueue(const std::wstring& audioPath, const std::wstring& modelPath);
     // Request cancel for a specific path (or the active job if path matches).
     void Cancel(const std::wstring& audioPath);
     bool IsQueuedOrActive(const std::wstring& audioPath) const;

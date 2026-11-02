@@ -1,6 +1,6 @@
-#include "util/Log.hpp"
+#include "infrastructure/common/Log.hpp"
 
-#include "util/Paths.hpp"
+#include "infrastructure/common/Paths.hpp"
 
 #include <cstdio>
 #include <cwchar>

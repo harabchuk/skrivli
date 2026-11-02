@@ -1,15 +1,17 @@
-#include "storage/RecordingLibrary.hpp"
+#include "infrastructure/storage/RecordingLibrary.hpp"
 
-#include "audio/WavHeader.hpp"
-#include "audio/WavWriter.hpp"
-#include "util/FileIo.hpp"
-#include "util/Log.hpp"
-#include "util/Text.hpp"
+#include "infrastructure/storage/RecordingSidecar.hpp"
+#include "infrastructure/audio/WavHeader.hpp"
+#include "infrastructure/files/WavWriter.hpp"
+#include "infrastructure/common/FileIo.hpp"
+#include "infrastructure/common/Log.hpp"
+#include "infrastructure/common/Text.hpp"
 
-#include <atlbase.h>
 #include <shellapi.h>
 #include <shobjidl.h>
-#include <wrl/client.h>
+
+#include <wil/com.h>
+#include <wil/resource.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -62,7 +64,7 @@ auto FileNameToStartLocal(const std::wstring& fileName) -> std::string {
 }
 
 auto FileTimeToStartLocal(const std::wstring& path) -> std::string {
-    ATL::CHandle file(::CreateFileW(
+    wil::unique_hfile file(::CreateFileW(
         path.c_str(),
         GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -70,15 +72,13 @@ auto FileTimeToStartLocal(const std::wstring& path) -> std::string {
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,
         nullptr));
-    if (file.m_h == INVALID_HANDLE_VALUE) {
-        file.Detach();
+    if (!file) {
         return {};
     }
     FILETIME write{};
-    if (!::GetFileTime(file, nullptr, nullptr, &write)) {
+    if (!::GetFileTime(file.get(), nullptr, nullptr, &write)) {
         return {};
     }
-    file.Close();
     SYSTEMTIME utc{};
     SYSTEMTIME local{};
     if (!::FileTimeToSystemTime(&write, &utc)) {
@@ -91,20 +91,20 @@ auto FileTimeToStartLocal(const std::wstring& path) -> std::string {
 }
 
 bool ShellDelete(const std::vector<std::wstring>& paths) {
-    Microsoft::WRL::ComPtr<IFileOperation> op;
-    auto hr = ::CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&op));
+    wil::com_ptr_nothrow<IFileOperation> op;
+    auto hr = ::CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(op.put()));
     if (FAILED(hr) || !op) {
         return false;
     }
     op->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOFX_RECYCLEONDELETE);
 
     for (const auto& path : paths) {
-        Microsoft::WRL::ComPtr<IShellItem> item;
-        hr = ::SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&item));
+        wil::com_ptr_nothrow<IShellItem> item;
+        hr = ::SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(item.put()));
         if (FAILED(hr) || !item) {
             continue;
         }
-        op->DeleteItem(item.Get(), nullptr);
+        op->DeleteItem(item.get(), nullptr);
     }
     hr = op->PerformOperations();
     return SUCCEEDED(hr);
@@ -121,7 +121,7 @@ auto RecordingLibrary::MdPathForAudio(const std::wstring& audioPath) -> std::wst
 }
 
 double RecordingLibrary::ReadWavDurationSeconds(const std::wstring& wavPath) {
-    ATL::CHandle file(::CreateFileW(
+    wil::unique_hfile file(::CreateFileW(
         wavPath.c_str(),
         GENERIC_READ,
         FILE_SHARE_READ,
@@ -129,12 +129,11 @@ double RecordingLibrary::ReadWavDurationSeconds(const std::wstring& wavPath) {
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,
         nullptr));
-    if (file.m_h == INVALID_HANDLE_VALUE) {
-        file.Detach();
+    if (!file) {
         return 0.0;
     }
 
-    const auto header = WavHeader::Read(file);
+    const auto header = WavHeader::Read(file.get());
     return header ? header->DurationSeconds() : 0.0;
 }
 

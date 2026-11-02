@@ -2,9 +2,9 @@
 
 #include "pch.hpp"
 #include "Ids.hpp"
-#include "audio/DeviceManager.hpp"
-#include "audio/LevelMonitor.hpp"
-#include "audio/RecordingSession.hpp"
+#include "infrastructure/audio/DeviceManager.hpp"
+#include "services/LevelMonitor.hpp"
+#include "services/RecordingSession.hpp"
 #include "ui/DeviceCombo.hpp"
 #include "ui/LevelMeter.hpp"
 #include "ui/RecordButton.hpp"
