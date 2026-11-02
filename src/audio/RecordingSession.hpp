@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -39,7 +40,7 @@ public:
         Discard,
     };
 
-    RecordingSession() = default;
+    RecordingSession();
     ~RecordingSession();
 
     RecordingSession(const RecordingSession&) = delete;
@@ -85,18 +86,69 @@ public:
     double ElapsedSeconds() const;
 
 private:
+    // One capture input (mic or loopback) plus its ring buffer and device bookkeeping.
+    struct CaptureSource {
+        CaptureSource(RecordingSession& session, RingBuffer& sourceRing, CaptureStream::Mode sourceMode);
+
+        // `reason == nullptr` is the initial open at Start; otherwise a reopen after a device change.
+        bool Open(IMMDevice* device, const wchar_t* reason);
+        void NoteBufferFlags();
+        void Stop();
+        Microsoft::WRL::ComPtr<IMMDevice> Resolve(const DeviceManager& devices) const;
+
+        RecordingSession& owner;
+        CaptureStream stream;
+        RingBuffer& ring;
+        std::wstring deviceId;
+        bool usesDefault = true;
+        bool enabled = false;
+        std::wstring name;
+        CaptureStream::Mode mode;
+        const wchar_t* label;
+        std::optional<SilentRenderKeepAlive> keepAlive;
+        bool notedSilent = false;
+        bool notedDiscontinuity = false;
+    };
+
+    // Optional per-source WAV stems written next to the mix.
+    class StemWriters {
+    public:
+        bool Open(const std::wstring& stemBase);
+        bool Write(const float* mic, const float* sys);
+        void Finalize();
+        void Discard();
+        bool IsOpen() const { return m_open; }
+
+    private:
+        WavWriter m_mic;
+        WavWriter m_sys;
+        bool m_open = false;
+    };
+
     void SetState(State next);
     void WriterMain();
-    void PostStarted();
-    void PostFinished(const std::wstring& path);
-    void PostError(const std::wstring& message);
-    void PostDeviceSwitched(const std::wstring& message);
-    void PostLowDisk();
-    void PostRescued(const std::wstring& path);
+    void ServiceDevices();
+    bool CheckDiskSpace(ULONGLONG& lastCheck);
+    bool WriteBlock(
+        const float* block,
+        const float* micStem,
+        const float* sysStem,
+        bool flushing,
+        bool& rescued);
+    void Post(UINT msg, std::optional<std::wstring> payload = {});
     void FailStart(RecordingStartResult& result, const std::wstring& message);
+    void ResetForStart(
+        const std::wstring& micDeviceId,
+        const std::wstring& systemDeviceId,
+        float micGain,
+        bool micAgc,
+        float systemGain,
+        bool communicationsProcessing,
+        bool saveStems);
+    bool OpenOutputFiles(const std::wstring& folder, RecordingStartResult& result);
+    bool OpenSources(RecordingStartResult& result);
     void TeardownCapture();
-    bool TryReopenMic(const wchar_t* reason);
-    bool TryReopenSystem(const wchar_t* reason);
+    bool Reopen(CaptureSource& source, const wchar_t* reason);
     void AddDeviceNote(const std::wstring& note);
     static bool IsPrivacyDenied(HRESULT hr);
     static bool IsDeviceBusy(HRESULT hr);
@@ -114,13 +166,11 @@ private:
 
     RingBuffer m_micRing{48000};
     RingBuffer m_sysRing{48000};
-    CaptureStream m_micCapture;
-    CaptureStream m_sysCapture;
-    SilentRenderKeepAlive m_keepAlive;
+    CaptureSource m_mic;
+    CaptureSource m_sys;
     Mixer m_mixer;
     WavWriter m_writer;
-    WavWriter m_micStemWriter;
-    WavWriter m_sysStemWriter;
+    StemWriters m_stems;
     bool m_saveStems = false;
 
     std::thread m_writerThread;
@@ -128,20 +178,11 @@ private:
     std::mutex m_reopenMutex;
     std::mutex m_notesMutex;
 
-    std::wstring m_micDeviceId;
-    std::wstring m_systemDeviceId;
-    bool m_micUsesDefault = true;
-    bool m_systemUsesDefault = true;
-    bool m_micEnabled = false;
-    bool m_systemEnabled = false;
     bool m_communicationsProcessing = false;
-    bool m_stemWritersOpen = false;
     float m_micGain = 1.0f;
     float m_systemGain = 0.8f;
     bool m_micAgc = false;
 
-    std::wstring m_micName;
-    std::wstring m_systemName;
     std::vector<std::wstring> m_deviceNotes;
     SYSTEMTIME m_startLocal{};
 };

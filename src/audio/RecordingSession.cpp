@@ -4,6 +4,7 @@
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/PostOwned.hpp"
 #include "util/Scoped.hpp"
 #include "util/Text.hpp"
 
@@ -19,6 +20,123 @@ constexpr DWORD kDiskCheckIntervalMs = 30000;
 
 }  // namespace
 
+RecordingSession::CaptureSource::CaptureSource(
+    RecordingSession& session,
+    RingBuffer& sourceRing,
+    CaptureStream::Mode sourceMode)
+    : owner(session)
+    , ring(sourceRing)
+    , mode(sourceMode)
+    , label(sourceMode == CaptureStream::Mode::Microphone ? L"Microphone" : L"System audio") {
+    if (sourceMode == CaptureStream::Mode::Loopback) {
+        keepAlive.emplace();
+    }
+}
+
+bool RecordingSession::CaptureSource::Open(IMMDevice* device, const wchar_t* reason) {
+    const bool reopen = reason != nullptr;
+
+    if (keepAlive && !keepAlive->Start(device)) {
+        if (reopen) {
+            owner.AddDeviceNote(L"Keep-alive failed after system device switch");
+        } else {
+            Log::Warn(L"Failed to start system-audio keep-alive; continuing without it");
+            owner.AddDeviceNote(L"System keep-alive failed to start");
+        }
+    }
+
+    const bool communications =
+        mode == CaptureStream::Mode::Microphone && owner.m_communicationsProcessing;
+    if (!stream.Start(device, mode, ring, communications)) {
+        enabled = false;
+        if (keepAlive) {
+            keepAlive->Stop();
+        }
+        if (reopen) {
+            owner.AddDeviceNote(std::wstring(label) + L" reopen failed (" + reason + L")");
+        }
+        return false;
+    }
+
+    enabled = true;
+    name = owner.m_devices->FriendlyName(device);
+    if (reopen) {
+        owner.AddDeviceNote(std::wstring(label) + L" switched (" + reason + L") → " + name);
+        owner.Post(WM_APP_DEVICE_SWITCHED, L"Device lost — recording continues on " + name);
+    } else if (stream.UsedResampler()) {
+        owner.AddDeviceNote(std::wstring(label) + L" used Media Foundation resampler fallback");
+    }
+    return true;
+}
+
+void RecordingSession::CaptureSource::NoteBufferFlags() {
+    // Once each; not on the capture hot path.
+    if (!notedSilent && stream.SawSilentPacket()) {
+        notedSilent = true;
+        owner.AddDeviceNote(std::wstring(label) + L" delivered silent packets (AUDCLNT_BUFFERFLAGS_SILENT)");
+    }
+    if (!notedDiscontinuity && stream.SawDiscontinuity()) {
+        notedDiscontinuity = true;
+        owner.AddDeviceNote(std::wstring(label) + L" reported DATA_DISCONTINUITY");
+    }
+}
+
+void RecordingSession::CaptureSource::Stop() {
+    stream.Stop();
+    if (keepAlive) {
+        keepAlive->Stop();
+    }
+}
+
+Microsoft::WRL::ComPtr<IMMDevice> RecordingSession::CaptureSource::Resolve(
+    const DeviceManager& devices) const {
+    const std::wstring id = usesDefault ? std::wstring{} : deviceId;
+    return mode == CaptureStream::Mode::Microphone
+        ? devices.ResolveCaptureDevice(id)
+        : devices.ResolveRenderDevice(id);
+}
+
+bool RecordingSession::StemWriters::Open(const std::wstring& stemBase) {
+    if (!m_mic.OpenFinalPath(stemBase + L".mic.wav")
+        || !m_sys.OpenFinalPath(stemBase + L".system.wav")) {
+        return false;
+    }
+    m_open = true;
+    return true;
+}
+
+bool RecordingSession::StemWriters::Write(const float* mic, const float* sys) {
+    return m_mic.WriteFloatFrames(mic, AudioFormat::kBlockFrames)
+        && m_sys.WriteFloatFrames(sys, AudioFormat::kBlockFrames);
+}
+
+void RecordingSession::StemWriters::Finalize() {
+    if (!m_open) {
+        return;
+    }
+    std::wstring micPath;
+    std::wstring sysPath;
+    if (!m_mic.Finalize(micPath)) {
+        m_mic.Abandon();
+        Log::Warn(L"Failed to finalize mic stem");
+    }
+    if (!m_sys.Finalize(sysPath)) {
+        m_sys.Abandon();
+        Log::Warn(L"Failed to finalize system stem");
+    }
+    m_open = false;
+}
+
+void RecordingSession::StemWriters::Discard() {
+    m_mic.Discard();
+    m_sys.Discard();
+    m_open = false;
+}
+
+RecordingSession::RecordingSession()
+    : m_mic(*this, m_micRing, CaptureStream::Mode::Microphone)
+    , m_sys(*this, m_sysRing, CaptureStream::Mode::Loopback) {}
+
 RecordingSession::~RecordingSession() {
     Stop(StopMode::Save);
 }
@@ -27,56 +145,12 @@ void RecordingSession::SetState(State next) {
     m_state.store(next, std::memory_order_release);
 }
 
-void RecordingSession::PostStarted() {
-    if (m_notifyHwnd != nullptr && ::IsWindow(m_notifyHwnd)) {
-        ::PostMessageW(m_notifyHwnd, WM_APP_RECORDING_STARTED, 0, 0);
+void RecordingSession::Post(UINT msg, std::optional<std::wstring> payload) {
+    std::unique_ptr<std::wstring> owned;
+    if (payload) {
+        owned = std::make_unique<std::wstring>(std::move(*payload));
     }
-}
-
-void RecordingSession::PostFinished(const std::wstring& path) {
-    if (m_notifyHwnd == nullptr || !::IsWindow(m_notifyHwnd)) {
-        return;
-    }
-    auto* heapPath = new std::wstring(path);
-    if (!::PostMessageW(m_notifyHwnd, WM_APP_RECORDING_FINISHED, 0, reinterpret_cast<LPARAM>(heapPath))) {
-        delete heapPath;
-    }
-}
-
-void RecordingSession::PostError(const std::wstring& message) {
-    if (m_notifyHwnd == nullptr || !::IsWindow(m_notifyHwnd)) {
-        return;
-    }
-    auto* heapMessage = new std::wstring(message);
-    if (!::PostMessageW(m_notifyHwnd, WM_APP_RECORDING_ERROR, 0, reinterpret_cast<LPARAM>(heapMessage))) {
-        delete heapMessage;
-    }
-}
-
-void RecordingSession::PostDeviceSwitched(const std::wstring& message) {
-    if (m_notifyHwnd == nullptr || !::IsWindow(m_notifyHwnd)) {
-        return;
-    }
-    auto* heapMessage = new std::wstring(message);
-    if (!::PostMessageW(m_notifyHwnd, WM_APP_DEVICE_SWITCHED, 0, reinterpret_cast<LPARAM>(heapMessage))) {
-        delete heapMessage;
-    }
-}
-
-void RecordingSession::PostLowDisk() {
-    if (m_notifyHwnd != nullptr && ::IsWindow(m_notifyHwnd)) {
-        ::PostMessageW(m_notifyHwnd, WM_APP_LOW_DISK, 0, 0);
-    }
-}
-
-void RecordingSession::PostRescued(const std::wstring& path) {
-    if (m_notifyHwnd == nullptr || !::IsWindow(m_notifyHwnd)) {
-        return;
-    }
-    auto* heapPath = new std::wstring(path);
-    if (!::PostMessageW(m_notifyHwnd, WM_APP_RECORDING_RESCUED, 0, reinterpret_cast<LPARAM>(heapPath))) {
-        delete heapPath;
-    }
+    PostOwned(m_notifyHwnd, msg, std::move(owned));
 }
 
 bool RecordingSession::IsPrivacyDenied(HRESULT hr) {
@@ -116,11 +190,11 @@ std::vector<std::wstring> RecordingSession::TakeDeviceNotes() {
 }
 
 std::wstring RecordingSession::MicDeviceName() const {
-    return m_micName;
+    return m_mic.name;
 }
 
 std::wstring RecordingSession::SystemDeviceName() const {
-    return m_systemName;
+    return m_sys.name;
 }
 
 double RecordingSession::ElapsedSeconds() const {
@@ -142,9 +216,7 @@ double RecordingSession::ElapsedSeconds() const {
 void RecordingSession::FailStart(RecordingStartResult& result, const std::wstring& message) {
     Log::Error(message);
     TeardownCapture();
-    m_micStemWriter.Discard();
-    m_sysStemWriter.Discard();
-    m_stemWritersOpen = false;
+    m_stems.Discard();
     m_writer.Discard();
     SetState(State::Error);
     result.started = false;
@@ -153,9 +225,8 @@ void RecordingSession::FailStart(RecordingStartResult& result, const std::wstrin
 }
 
 void RecordingSession::TeardownCapture() {
-    m_micCapture.Stop();
-    m_sysCapture.Stop();
-    m_keepAlive.Stop();
+    m_mic.Stop();
+    m_sys.Stop();
 }
 
 void RecordingSession::OnDevicesChanged() {
@@ -175,6 +246,140 @@ void RecordingSession::SetMicGain(float micGain) {
 void RecordingSession::SetMicAgc(bool enabled) {
     m_micAgc = enabled;
     m_mixer.SetMicAgc(enabled);
+}
+
+void RecordingSession::ResetForStart(
+    const std::wstring& micDeviceId,
+    const std::wstring& systemDeviceId,
+    float micGain,
+    bool micAgc,
+    float systemGain,
+    bool communicationsProcessing,
+    bool saveStems) {
+    m_stopWriter.store(false, std::memory_order_release);
+    m_devicesChanged.store(false, std::memory_order_release);
+    m_lowDiskStop.store(false, std::memory_order_release);
+    m_writeFailed.store(false, std::memory_order_release);
+    m_micRing.Reset();
+    m_sysRing.Reset();
+    {
+        std::lock_guard<std::mutex> notesLock(m_notesMutex);
+        m_deviceNotes.clear();
+    }
+
+    m_mic.deviceId = micDeviceId;
+    m_sys.deviceId = systemDeviceId;
+    m_mic.usesDefault = micDeviceId.empty();
+    m_sys.usesDefault = systemDeviceId.empty();
+    m_communicationsProcessing = communicationsProcessing;
+    m_saveStems = saveStems;
+    m_micGain = micGain;
+    m_micAgc = micAgc;
+    m_systemGain = systemGain;
+    for (CaptureSource* source : {&m_mic, &m_sys}) {
+        source->enabled = false;
+        source->name.clear();
+        source->notedSilent = false;
+        source->notedDiscontinuity = false;
+    }
+}
+
+bool RecordingSession::OpenOutputFiles(const std::wstring& folder, RecordingStartResult& result) {
+    if (!FileIo::IsWritableDirectory(folder)) {
+        FailStart(result, L"The recordings folder is missing or not writable.");
+        return false;
+    }
+    if (!WavWriter::FolderHasFreeSpace(folder)) {
+        FailStart(result, L"Not enough free disk space to start recording (need at least 200 MB).");
+        return false;
+    }
+
+    if (!m_writer.Open(folder)) {
+        FailStart(result, L"Could not create a recording file in the chosen folder.");
+        return false;
+    }
+
+    if (m_saveStems) {
+        std::wstring stemBase = m_writer.FinalPath();
+        const std::wstring wavExt = L".wav";
+        if (Text::EndsWithIgnoreCase(stemBase, wavExt)) {
+            stemBase.erase(stemBase.size() - wavExt.size());
+        }
+        if (!m_stems.Open(stemBase)) {
+            FailStart(result, L"Could not create stem recording files.");
+            return false;
+        }
+    }
+    return true;
+}
+
+bool RecordingSession::OpenSources(RecordingStartResult& result) {
+    auto micDevice = m_devices->ResolveCaptureDevice(m_mic.deviceId);
+    auto renderDevice = m_devices->ResolveRenderDevice(m_sys.deviceId);
+    const bool micPresent = static_cast<bool>(micDevice);
+    const bool sysPresent = static_cast<bool>(renderDevice);
+
+    if (!micPresent && !sysPresent) {
+        FailStart(result, L"No microphone or system audio device is available.");
+        return false;
+    }
+
+    if (!micPresent) {
+        result.micMissing = true;
+        result.warning = L"No microphone — recording system audio only.";
+        AddDeviceNote(L"Started without microphone");
+    }
+    if (!sysPresent) {
+        result.systemMissing = true;
+        result.warning = result.warning.empty()
+            ? L"No system audio device — recording microphone only."
+            : result.warning;
+        AddDeviceNote(L"Started without system audio");
+    }
+
+    if (sysPresent && !m_sys.Open(renderDevice.Get(), nullptr)) {
+        const HRESULT hr = m_sys.stream.FatalError();
+        Log::Warn(DescribeCaptureError(hr, false));
+        if (IsDeviceBusy(hr) && micPresent) {
+            result.warning = L"System audio unavailable (in use). Recording microphone only.";
+            AddDeviceNote(L"System audio exclusive/busy at start — mic only");
+        } else if (!micPresent) {
+            FailStart(result, DescribeCaptureError(hr, false));
+            return false;
+        } else {
+            result.warning = L"System audio failed to open. Recording microphone only.";
+            AddDeviceNote(L"System audio failed to open at start — mic only");
+        }
+    }
+
+    if (micPresent && !m_mic.Open(micDevice.Get(), nullptr)) {
+        const HRESULT hr = m_mic.stream.FatalError();
+        if (IsPrivacyDenied(hr)) {
+            TeardownCapture();
+            m_stems.Discard();
+            m_writer.Discard();
+            SetState(State::Idle);
+            result.privacyDenied = true;
+            result.error = DescribeCaptureError(hr, true);
+            return false;
+        }
+        if (IsDeviceBusy(hr) && m_sys.enabled) {
+            result.warning = L"Microphone unavailable (in use). Recording system audio only.";
+            AddDeviceNote(L"Microphone exclusive/busy at start — system only");
+        } else if (!m_sys.enabled) {
+            FailStart(result, DescribeCaptureError(hr, true));
+            return false;
+        } else {
+            result.warning = L"Microphone failed to open. Recording system audio only.";
+            AddDeviceNote(L"Microphone failed to open at start — system only");
+        }
+    }
+
+    if (!m_mic.enabled && !m_sys.enabled) {
+        FailStart(result, L"Could not open any audio device.");
+        return false;
+    }
+    return true;
 }
 
 RecordingStartResult RecordingSession::Start(
@@ -201,152 +406,16 @@ RecordingStartResult RecordingSession::Start(
     }
 
     SetState(State::Starting);
-    m_stopWriter.store(false, std::memory_order_release);
-    m_devicesChanged.store(false, std::memory_order_release);
-    m_lowDiskStop.store(false, std::memory_order_release);
-    m_writeFailed.store(false, std::memory_order_release);
-    m_micRing.Reset();
-    m_sysRing.Reset();
-    {
-        std::lock_guard<std::mutex> notesLock(m_notesMutex);
-        m_deviceNotes.clear();
-    }
+    ResetForStart(
+        micDeviceId,
+        systemDeviceId,
+        micGain,
+        micAgc,
+        systemGain,
+        communicationsProcessing,
+        saveStems);
 
-    m_micDeviceId = micDeviceId;
-    m_systemDeviceId = systemDeviceId;
-    m_micUsesDefault = micDeviceId.empty();
-    m_systemUsesDefault = systemDeviceId.empty();
-    m_communicationsProcessing = communicationsProcessing;
-    m_saveStems = saveStems;
-    m_stemWritersOpen = false;
-    m_micGain = micGain;
-    m_micAgc = micAgc;
-    m_systemGain = systemGain;
-    m_micEnabled = false;
-    m_systemEnabled = false;
-    m_micName.clear();
-    m_systemName.clear();
-
-    if (!FileIo::IsWritableDirectory(folder)) {
-        FailStart(result, L"The recordings folder is missing or not writable.");
-        return result;
-    }
-    if (!WavWriter::FolderHasFreeSpace(folder)) {
-        FailStart(result, L"Not enough free disk space to start recording (need at least 200 MB).");
-        return result;
-    }
-
-    if (!m_writer.Open(folder)) {
-        FailStart(result, L"Could not create a recording file in the chosen folder.");
-        return result;
-    }
-
-    if (m_saveStems) {
-        const std::wstring mixFinal = m_writer.FinalPath();
-        std::wstring stemBase = mixFinal;
-        const std::wstring wavExt = L".wav";
-        if (Text::EndsWithIgnoreCase(stemBase, wavExt)) {
-            stemBase.erase(stemBase.size() - wavExt.size());
-        }
-        if (!m_micStemWriter.OpenFinalPath(stemBase + L".mic.wav")
-            || !m_sysStemWriter.OpenFinalPath(stemBase + L".system.wav")) {
-            FailStart(result, L"Could not create stem recording files.");
-            return result;
-        }
-        m_stemWritersOpen = true;
-    }
-
-    auto micDevice = m_devices->ResolveCaptureDevice(micDeviceId);
-    auto renderDevice = m_devices->ResolveRenderDevice(systemDeviceId);
-    const bool micPresent = static_cast<bool>(micDevice);
-    const bool sysPresent = static_cast<bool>(renderDevice);
-
-    if (!micPresent && !sysPresent) {
-        FailStart(result, L"No microphone or system audio device is available.");
-        return result;
-    }
-
-    if (!micPresent) {
-        result.micMissing = true;
-        result.warning = L"No microphone — recording system audio only.";
-        AddDeviceNote(L"Started without microphone");
-    }
-    if (!sysPresent) {
-        result.systemMissing = true;
-        result.warning = result.warning.empty()
-            ? L"No system audio device — recording microphone only."
-            : result.warning;
-        AddDeviceNote(L"Started without system audio");
-    }
-
-    if (sysPresent) {
-        if (!m_keepAlive.Start(renderDevice.Get())) {
-            Log::Warn(L"Failed to start system-audio keep-alive; continuing without it");
-            AddDeviceNote(L"System keep-alive failed to start");
-        }
-
-        if (!m_sysCapture.Start(renderDevice.Get(), CaptureStream::Mode::Loopback, m_sysRing, false)) {
-            const HRESULT hr = m_sysCapture.FatalError();
-            Log::Warn(DescribeCaptureError(hr, false));
-            m_keepAlive.Stop();
-            if (IsDeviceBusy(hr) && micPresent) {
-                result.warning = L"System audio unavailable (in use). Recording microphone only.";
-                AddDeviceNote(L"System audio exclusive/busy at start — mic only");
-            } else if (!micPresent) {
-                FailStart(result, DescribeCaptureError(hr, false));
-                return result;
-            } else {
-                result.warning = L"System audio failed to open. Recording microphone only.";
-                AddDeviceNote(L"System audio failed to open at start — mic only");
-            }
-        } else {
-            m_systemEnabled = true;
-            m_systemName = m_devices->FriendlyName(renderDevice.Get());
-            if (m_sysCapture.UsedResampler()) {
-                AddDeviceNote(L"System audio used Media Foundation resampler fallback");
-            }
-        }
-    }
-
-    if (micPresent) {
-        if (!m_micCapture.Start(
-                micDevice.Get(),
-                CaptureStream::Mode::Microphone,
-                m_micRing,
-                communicationsProcessing)) {
-            const HRESULT hr = m_micCapture.FatalError();
-            if (IsPrivacyDenied(hr)) {
-                TeardownCapture();
-                m_micStemWriter.Discard();
-                m_sysStemWriter.Discard();
-                m_stemWritersOpen = false;
-                m_writer.Discard();
-                SetState(State::Idle);
-                result.privacyDenied = true;
-                result.error = DescribeCaptureError(hr, true);
-                return result;
-            }
-            if (IsDeviceBusy(hr) && m_systemEnabled) {
-                result.warning = L"Microphone unavailable (in use). Recording system audio only.";
-                AddDeviceNote(L"Microphone exclusive/busy at start — system only");
-            } else if (!m_systemEnabled) {
-                FailStart(result, DescribeCaptureError(hr, true));
-                return result;
-            } else {
-                result.warning = L"Microphone failed to open. Recording system audio only.";
-                AddDeviceNote(L"Microphone failed to open at start — system only");
-            }
-        } else {
-            m_micEnabled = true;
-            m_micName = m_devices->FriendlyName(micDevice.Get());
-            if (m_micCapture.UsedResampler()) {
-                AddDeviceNote(L"Microphone used Media Foundation resampler fallback");
-            }
-        }
-    }
-
-    if (!m_micEnabled && !m_systemEnabled) {
-        FailStart(result, L"Could not open any audio device.");
+    if (!OpenOutputFiles(folder, result) || !OpenSources(result)) {
         return result;
     }
 
@@ -372,7 +441,7 @@ RecordingStartResult RecordingSession::Start(
     }
 
     SetState(State::Recording);
-    PostStarted();
+    Post(WM_APP_RECORDING_STARTED);
     result.started = true;
     return result;
 }
@@ -387,9 +456,7 @@ void RecordingSession::Stop(StopMode mode) {
             m_writerThread.join();
         }
         if (mode == StopMode::Discard) {
-            m_micStemWriter.Discard();
-            m_sysStemWriter.Discard();
-            m_stemWritersOpen = false;
+            m_stems.Discard();
             m_writer.Discard();
         }
         return;
@@ -404,35 +471,16 @@ void RecordingSession::Stop(StopMode mode) {
     }
 
     if (mode == StopMode::Discard) {
-        m_micStemWriter.Discard();
-        m_sysStemWriter.Discard();
-        m_stemWritersOpen = false;
+        m_stems.Discard();
         m_writer.Discard();
         SetState(State::Idle);
         return;
     }
 
-    if (m_stemWritersOpen) {
-        std::wstring micPath;
-        std::wstring sysPath;
-        if (!m_micStemWriter.Finalize(micPath)) {
-            m_micStemWriter.Abandon();
-            Log::Warn(L"Failed to finalize mic stem");
-        }
-        if (!m_sysStemWriter.Finalize(sysPath)) {
-            m_sysStemWriter.Abandon();
-            Log::Warn(L"Failed to finalize system stem");
-        }
-        m_stemWritersOpen = false;
-    }
+    m_stems.Finalize();
 
     // Prefer rescue if the writer already moved the file.
     if (!m_writer.IsOpen()) {
-        if (m_stemWritersOpen) {
-            m_micStemWriter.Discard();
-            m_sysStemWriter.Discard();
-            m_stemWritersOpen = false;
-        }
         SetState(State::Idle);
         return;
     }
@@ -440,7 +488,7 @@ void RecordingSession::Stop(StopMode mode) {
     std::wstring finalPath;
     if (m_writer.Finalize(finalPath)) {
         SetState(State::Idle);
-        PostFinished(finalPath);
+        Post(WM_APP_RECORDING_FINISHED, finalPath);
         return;
     }
 
@@ -448,82 +496,101 @@ void RecordingSession::Stop(StopMode mode) {
     std::wstring rescued;
     if (m_writer.IsOpen() && m_writer.RescueTo(Paths::RescueDir(), rescued)) {
         SetState(State::Idle);
-        PostRescued(rescued);
+        Post(WM_APP_RECORDING_RESCUED, rescued);
         return;
     }
 
     m_writer.Abandon();
     SetState(State::Error);
-    PostError(L"Failed to finalize the recording file.");
+    Post(WM_APP_RECORDING_ERROR, L"Failed to finalize the recording file.");
     SetState(State::Idle);
 }
 
-bool RecordingSession::TryReopenMic(const wchar_t* reason) {
+bool RecordingSession::Reopen(CaptureSource& source, const wchar_t* reason) {
     std::lock_guard<std::mutex> lock(m_reopenMutex);
     if (m_devices == nullptr || m_stopWriter.load(std::memory_order_acquire)) {
         return false;
     }
 
-    m_micCapture.Stop();
-    auto device = m_devices->ResolveCaptureDevice(m_micUsesDefault ? std::wstring{} : m_micDeviceId);
+    source.Stop();
+    auto device = source.Resolve(*m_devices);
     if (!device) {
-        m_micEnabled = false;
-        AddDeviceNote(std::wstring(L"Microphone lost (") + reason + L") — no replacement");
+        source.enabled = false;
+        AddDeviceNote(std::wstring(source.label) + L" lost (" + reason + L") — no replacement");
         return false;
     }
+    return source.Open(device.Get(), reason);
+}
 
-    if (!m_micCapture.Start(
-            device.Get(),
-            CaptureStream::Mode::Microphone,
-            m_micRing,
-            m_communicationsProcessing)) {
-        m_micEnabled = false;
-        AddDeviceNote(std::wstring(L"Microphone reopen failed (") + reason + L")");
-        return false;
+void RecordingSession::ServiceDevices() {
+    if (m_mic.enabled && m_mic.stream.DeviceInvalidated()) {
+        Reopen(m_mic, L"invalidated");
+    }
+    if (m_sys.enabled && m_sys.stream.DeviceInvalidated()) {
+        Reopen(m_sys, L"invalidated");
     }
 
-    m_micEnabled = true;
-    m_micName = m_devices->FriendlyName(device.Get());
-    const std::wstring note =
-        std::wstring(L"Microphone switched (") + reason + L") → " + m_micName;
-    AddDeviceNote(note);
-    PostDeviceSwitched(L"Device lost — recording continues on " + m_micName);
+    if (m_devicesChanged.exchange(false, std::memory_order_acq_rel)) {
+        if (m_mic.usesDefault) {
+            Reopen(m_mic, L"default changed");
+        }
+        if (m_sys.usesDefault) {
+            Reopen(m_sys, L"default changed");
+        }
+    }
+
+    m_mic.NoteBufferFlags();
+    m_sys.NoteBufferFlags();
+}
+
+bool RecordingSession::CheckDiskSpace(ULONGLONG& lastCheck) {
+    const ULONGLONG nowTick = ::GetTickCount64();
+    if (nowTick - lastCheck < kDiskCheckIntervalMs) {
+        return true;
+    }
+    lastCheck = nowTick;
+    const std::wstring folder = m_writer.Folder();
+    if (!folder.empty() && !WavWriter::FolderHasFreeSpace(folder)) {
+        m_lowDiskStop.store(true, std::memory_order_release);
+        Post(WM_APP_LOW_DISK);
+        m_stopWriter.store(true, std::memory_order_release);
+        return false;
+    }
     return true;
 }
 
-bool RecordingSession::TryReopenSystem(const wchar_t* reason) {
-    std::lock_guard<std::mutex> lock(m_reopenMutex);
-    if (m_devices == nullptr || m_stopWriter.load(std::memory_order_acquire)) {
+bool RecordingSession::WriteBlock(
+    const float* block,
+    const float* micStem,
+    const float* sysStem,
+    bool flushing,
+    bool& rescued) {
+    if (!m_writer.WriteFloatFrames(block, AudioFormat::kBlockFrames)) {
+        if (flushing) {
+            if (!rescued) {
+                std::wstring rescuedPath;
+                if (m_writer.RescueTo(Paths::RescueDir(), rescuedPath)) {
+                    rescued = true;
+                    Post(WM_APP_RECORDING_RESCUED, rescuedPath);
+                }
+            }
+            return false;
+        }
+        m_writeFailed.store(true, std::memory_order_release);
+        std::wstring rescuedPath;
+        if (m_writer.RescueTo(Paths::RescueDir(), rescuedPath)) {
+            rescued = true;
+            Post(WM_APP_RECORDING_RESCUED, rescuedPath);
+        } else {
+            Post(WM_APP_RECORDING_ERROR, L"Failed while writing the recording.");
+        }
+        m_stopWriter.store(true, std::memory_order_release);
         return false;
     }
-
-    m_sysCapture.Stop();
-    m_keepAlive.Stop();
-
-    auto device = m_devices->ResolveRenderDevice(m_systemUsesDefault ? std::wstring{} : m_systemDeviceId);
-    if (!device) {
-        m_systemEnabled = false;
-        AddDeviceNote(std::wstring(L"System audio lost (") + reason + L") — no replacement");
-        return false;
+    if (m_stems.IsOpen() && !m_stems.Write(micStem, sysStem)) {
+        Log::Warn(flushing ? L"Stem flush write failed" : L"Stem write failed; continuing with mix only");
+        m_stems.Discard();
     }
-
-    if (!m_keepAlive.Start(device.Get())) {
-        AddDeviceNote(L"Keep-alive failed after system device switch");
-    }
-
-    if (!m_sysCapture.Start(device.Get(), CaptureStream::Mode::Loopback, m_sysRing, false)) {
-        m_systemEnabled = false;
-        m_keepAlive.Stop();
-        AddDeviceNote(std::wstring(L"System audio reopen failed (") + reason + L")");
-        return false;
-    }
-
-    m_systemEnabled = true;
-    m_systemName = m_devices->FriendlyName(device.Get());
-    const std::wstring note =
-        std::wstring(L"System audio switched (") + reason + L") → " + m_systemName;
-    AddDeviceNote(note);
-    PostDeviceSwitched(L"Device lost — recording continues on " + m_systemName);
     return true;
 }
 
@@ -535,62 +602,17 @@ void RecordingSession::WriterMain() {
     float sysStem[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
     ULONGLONG lastDiskCheck = ::GetTickCount64();
     bool rescued = false;
-    bool notedMicSilent = false;
-    bool notedMicDisc = false;
-    bool notedSysSilent = false;
-    bool notedSysDisc = false;
 
     while (!m_stopWriter.load(std::memory_order_acquire)) {
-        if (m_micEnabled && m_micCapture.DeviceInvalidated()) {
-            TryReopenMic(L"invalidated");
-        }
-        if (m_systemEnabled && m_sysCapture.DeviceInvalidated()) {
-            TryReopenSystem(L"invalidated");
-        }
-
-        if (m_devicesChanged.exchange(false, std::memory_order_acq_rel)) {
-            if (m_micUsesDefault) {
-                TryReopenMic(L"default changed");
-            }
-            if (m_systemUsesDefault) {
-                TryReopenSystem(L"default changed");
-            }
-        }
-
-        // Session notes for buffer flags (once each; not on the capture hot path).
-        if (!notedMicSilent && m_micCapture.SawSilentPacket()) {
-            notedMicSilent = true;
-            AddDeviceNote(L"Microphone delivered silent packets (AUDCLNT_BUFFERFLAGS_SILENT)");
-        }
-        if (!notedMicDisc && m_micCapture.SawDiscontinuity()) {
-            notedMicDisc = true;
-            AddDeviceNote(L"Microphone reported DATA_DISCONTINUITY");
-        }
-        if (!notedSysSilent && m_sysCapture.SawSilentPacket()) {
-            notedSysSilent = true;
-            AddDeviceNote(L"System audio delivered silent packets (AUDCLNT_BUFFERFLAGS_SILENT)");
-        }
-        if (!notedSysDisc && m_sysCapture.SawDiscontinuity()) {
-            notedSysDisc = true;
-            AddDeviceNote(L"System audio reported DATA_DISCONTINUITY");
-        }
-
-        const ULONGLONG nowTick = ::GetTickCount64();
-        if (nowTick - lastDiskCheck >= kDiskCheckIntervalMs) {
-            lastDiskCheck = nowTick;
-            const std::wstring folder = m_writer.Folder();
-            if (!folder.empty() && !WavWriter::FolderHasFreeSpace(folder)) {
-                m_lowDiskStop.store(true, std::memory_order_release);
-                PostLowDisk();
-                m_stopWriter.store(true, std::memory_order_release);
-                break;
-            }
+        ServiceDevices();
+        if (!CheckDiskSpace(lastDiskCheck)) {
+            break;
         }
 
         LARGE_INTEGER now{};
         ::QueryPerformanceCounter(&now);
-        float* micOut = m_stemWritersOpen ? micStem : nullptr;
-        float* sysOut = m_stemWritersOpen ? sysStem : nullptr;
+        float* micOut = m_stems.IsOpen() ? micStem : nullptr;
+        float* sysOut = m_stems.IsOpen() ? sysStem : nullptr;
         if (m_mixer.Process(
                 m_micRing,
                 m_sysRing,
@@ -598,26 +620,8 @@ void RecordingSession::WriterMain() {
                 block,
                 micOut,
                 sysOut)) {
-            if (!m_writer.WriteFloatFrames(block, AudioFormat::kBlockFrames)) {
-                m_writeFailed.store(true, std::memory_order_release);
-                std::wstring rescuedPath;
-                if (m_writer.RescueTo(Paths::RescueDir(), rescuedPath)) {
-                    rescued = true;
-                    PostRescued(rescuedPath);
-                } else {
-                    PostError(L"Failed while writing the recording.");
-                }
-                m_stopWriter.store(true, std::memory_order_release);
+            if (!WriteBlock(block, micStem, sysStem, false, rescued)) {
                 break;
-            }
-            if (m_stemWritersOpen) {
-                if (!m_micStemWriter.WriteFloatFrames(micStem, AudioFormat::kBlockFrames)
-                    || !m_sysStemWriter.WriteFloatFrames(sysStem, AudioFormat::kBlockFrames)) {
-                    Log::Warn(L"Stem write failed; continuing with mix only");
-                    m_micStemWriter.Discard();
-                    m_sysStemWriter.Discard();
-                    m_stemWritersOpen = false;
-                }
             }
         } else {
             ::Sleep(2);
@@ -628,29 +632,13 @@ void RecordingSession::WriterMain() {
         m_micRing,
         m_sysRing,
         block,
-        m_stemWritersOpen ? micStem : nullptr,
-        m_stemWritersOpen ? sysStem : nullptr)) {
+        m_stems.IsOpen() ? micStem : nullptr,
+        m_stems.IsOpen() ? sysStem : nullptr)) {
         if (!m_writer.IsOpen()) {
             break;
         }
-        if (!m_writer.WriteFloatFrames(block, AudioFormat::kBlockFrames)) {
-            if (!rescued) {
-                std::wstring rescuedPath;
-                if (m_writer.RescueTo(Paths::RescueDir(), rescuedPath)) {
-                    rescued = true;
-                    PostRescued(rescuedPath);
-                }
-            }
+        if (!WriteBlock(block, micStem, sysStem, true, rescued)) {
             break;
-        }
-        if (m_stemWritersOpen) {
-            if (!m_micStemWriter.WriteFloatFrames(micStem, AudioFormat::kBlockFrames)
-                || !m_sysStemWriter.WriteFloatFrames(sysStem, AudioFormat::kBlockFrames)) {
-                Log::Warn(L"Stem flush write failed");
-                m_micStemWriter.Discard();
-                m_sysStemWriter.Discard();
-                m_stemWritersOpen = false;
-            }
         }
     }
 }
