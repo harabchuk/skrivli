@@ -113,7 +113,6 @@ private:
     void InitTooltips();
     void UpdateDeviceTooltips();
     bool BrowseForFolder(std::wstring& path);
-    bool FolderIsWritable(const std::wstring& folder) const;
     std::wstring SelectedDeviceId(int comboId) const;
     void SelectDeviceId(int comboId, const std::wstring& id);
     void ClearComboItemData(WTL::CComboBox& combo);

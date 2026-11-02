@@ -1,7 +1,9 @@
 #include "storage/RecordingLibrary.hpp"
 
 #include "audio/WavWriter.hpp"
+#include "util/FileIo.hpp"
 #include "util/Log.hpp"
+#include "util/Text.hpp"
 
 #include <shellapi.h>
 #include <shobjidl.h>
@@ -15,19 +17,11 @@
 
 namespace {
 
-bool EndsWithIgnoreCase(const std::wstring& value, const wchar_t* suffix) {
-    const size_t len = wcslen(suffix);
-    if (value.size() < len) {
-        return false;
-    }
-    return _wcsicmp(value.c_str() + (value.size() - len), suffix) == 0;
-}
-
 bool IsStemAudioFile(const std::wstring& fileName) {
-    return EndsWithIgnoreCase(fileName, L".mic.wav")
-        || EndsWithIgnoreCase(fileName, L".system.wav")
-        || EndsWithIgnoreCase(fileName, L".mic.recovered.wav")
-        || EndsWithIgnoreCase(fileName, L".system.recovered.wav");
+    return Text::EndsWithIgnoreCase(fileName, L".mic.wav")
+        || Text::EndsWithIgnoreCase(fileName, L".system.wav")
+        || Text::EndsWithIgnoreCase(fileName, L".mic.recovered.wav")
+        || Text::EndsWithIgnoreCase(fileName, L".system.recovered.wav");
 }
 
 std::wstring StemAudioPath(const std::wstring& stem, const wchar_t* suffix) {
@@ -38,7 +32,7 @@ std::wstring StemPath(const std::filesystem::path& audioPath) {
     auto path = audioPath;
     // Handle .recovered.wav → stem without .recovered
     const std::wstring file = path.filename().wstring();
-    if (EndsWithIgnoreCase(file, L".recovered.wav")) {
+    if (Text::EndsWithIgnoreCase(file, L".recovered.wav")) {
         std::wstring full = path.wstring();
         full.erase(full.size() - wcslen(L".recovered.wav"));
         return full;
@@ -62,7 +56,7 @@ std::string FileNameToStartLocal(const std::wstring& fileName) {
     iso[10] = L'T';
     iso[13] = L':';
     iso[16] = L':';
-    return Sidecar::WideToUtf8(iso);
+    return Text::WideToUtf8(iso);
 }
 
 std::string FileTimeToStartLocal(const std::wstring& path) {
@@ -125,17 +119,6 @@ std::wstring RecordingLibrary::JsonPathForAudio(const std::wstring& audioPath) {
 
 std::wstring RecordingLibrary::MdPathForAudio(const std::wstring& audioPath) {
     return StemPath(audioPath) + L".md";
-}
-
-uint64_t RecordingLibrary::FileSizeBytes(const std::wstring& path) {
-    WIN32_FILE_ATTRIBUTE_DATA data{};
-    if (!::GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) {
-        return 0;
-    }
-    ULARGE_INTEGER size{};
-    size.HighPart = data.nFileSizeHigh;
-    size.LowPart = data.nFileSizeLow;
-    return size.QuadPart;
 }
 
 double RecordingLibrary::ReadWavDurationSeconds(const std::wstring& wavPath) {
@@ -228,24 +211,24 @@ std::vector<RecordingEntry> RecordingLibrary::Scan(const std::wstring& folder) {
         entry.stem = StemPath(path);
         entry.jsonPath = entry.stem + L".json";
         entry.mdPath = entry.stem + L".md";
-        entry.sizeBytes = FileSizeBytes(entry.audioPath);
+        entry.sizeBytes = FileIo::FileSize(entry.audioPath);
         entry.hasMarkdown = std::filesystem::exists(entry.mdPath);
 
         RecordingSidecar side{};
         if (Sidecar::Load(entry.jsonPath, side)) {
-            entry.startLocal = Sidecar::Utf8ToWide(side.startLocal);
+            entry.startLocal = Text::Utf8ToWide(side.startLocal);
             entry.durationSeconds = side.durationSeconds;
             entry.transcriptStatus = side.transcriptStatus;
-            entry.transcriptError = Sidecar::Utf8ToWide(side.transcriptError);
+            entry.transcriptError = Text::Utf8ToWide(side.transcriptError);
             if (entry.hasMarkdown && entry.transcriptStatus == TranscriptStatus::None) {
                 entry.transcriptStatus = TranscriptStatus::Ready;
             }
         } else {
             const std::string fromName = FileNameToStartLocal(entry.fileName);
             if (!fromName.empty()) {
-                entry.startLocal = Sidecar::Utf8ToWide(fromName);
+                entry.startLocal = Text::Utf8ToWide(fromName);
             } else {
-                entry.startLocal = Sidecar::Utf8ToWide(FileTimeToStartLocal(entry.audioPath));
+                entry.startLocal = Text::Utf8ToWide(FileTimeToStartLocal(entry.audioPath));
             }
             if (_wcsicmp(ext.c_str(), L".wav") == 0) {
                 entry.durationSeconds = ReadWavDurationSeconds(entry.audioPath);
@@ -280,7 +263,7 @@ bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& n
     const std::wstring newJson = (dir / (newStemName + L".json")).wstring();
     const std::wstring newMd = (dir / (newStemName + L".md")).wstring();
 
-    if (_wcsicmp(newAudio.c_str(), entry.audioPath.c_str()) == 0) {
+    if (Text::PathEquals(newAudio, entry.audioPath)) {
         return true;
     }
     if (std::filesystem::exists(newAudio) || std::filesystem::exists(newJson) || std::filesystem::exists(newMd)) {

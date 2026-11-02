@@ -1,8 +1,10 @@
 #include "audio/RecordingSession.hpp"
 
 #include "Ids.hpp"
+#include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/Text.hpp"
 
 #include <audioclient.h>
 #include <windows.h>
@@ -224,7 +226,7 @@ RecordingStartResult RecordingSession::Start(
     m_micName.clear();
     m_systemName.clear();
 
-    if (!WavWriter::IsWritableDirectory(folder)) {
+    if (!FileIo::IsWritableDirectory(folder)) {
         FailStart(result, L"The recordings folder is missing or not writable.");
         return result;
     }
@@ -242,8 +244,7 @@ RecordingStartResult RecordingSession::Start(
         const std::wstring mixFinal = m_writer.FinalPath();
         std::wstring stemBase = mixFinal;
         const std::wstring wavExt = L".wav";
-        if (stemBase.size() >= wavExt.size()
-            && _wcsicmp(stemBase.c_str() + stemBase.size() - wavExt.size(), wavExt.c_str()) == 0) {
+        if (Text::EndsWithIgnoreCase(stemBase, wavExt)) {
             stemBase.erase(stemBase.size() - wavExt.size());
         }
         if (!m_micStemWriter.OpenFinalPath(stemBase + L".mic.wav")

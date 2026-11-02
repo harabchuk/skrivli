@@ -1,6 +1,7 @@
 #include "audio/WavWriter.hpp"
 
 #include "audio/MiniAudio.hpp"
+#include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
@@ -148,26 +149,6 @@ void WavWriter::CloseEncoder() {
     m_encoder.reset();
 }
 
-bool WavWriter::IsWritableDirectory(const std::wstring& folder) {
-    if (!Paths::EnsureDirectory(folder)) {
-        return false;
-    }
-    const std::filesystem::path probe = std::filesystem::path(folder) / L".meetingbuddy_write_test";
-    HANDLE file = ::CreateFileW(
-        probe.c_str(),
-        GENERIC_WRITE,
-        0,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    ::CloseHandle(file);
-    return true;
-}
-
 bool WavWriter::FolderHasFreeSpace(const std::wstring& folder, uint64_t minBytes) {
     ULARGE_INTEGER freeBytesAvailable{};
     if (!::GetDiskFreeSpaceExW(folder.c_str(), &freeBytesAvailable, nullptr, nullptr)) {
@@ -235,7 +216,7 @@ bool WavWriter::OpenFinalPath(const std::wstring& finalWavPath) {
 
     const std::filesystem::path finalPath(finalWavPath);
     const std::wstring folder = finalPath.parent_path().wstring();
-    if (!IsWritableDirectory(folder)) {
+    if (!FileIo::IsWritableDirectory(folder)) {
         Log::Error(L"Recordings folder is not writable");
         return false;
     }
@@ -292,7 +273,7 @@ bool WavWriter::OpenFinalPath(const std::wstring& finalWavPath) {
 
 bool WavWriter::Open(const std::wstring& folder) {
     Abandon();
-    if (!IsWritableDirectory(folder)) {
+    if (!FileIo::IsWritableDirectory(folder)) {
         Log::Error(L"Recordings folder is not writable");
         return false;
     }

@@ -38,8 +38,6 @@ namespace Sidecar {
 bool Load(const std::wstring& jsonPath, RecordingSidecar& out);
 bool Save(const std::wstring& jsonPath, const RecordingSidecar& data);
 
-std::string WideToUtf8(const std::wstring& wide);
-std::wstring Utf8ToWide(const std::string& utf8);
 std::string FormatLocalTimestamp(const SYSTEMTIME& local);
 std::string FormatLocalTimestampNow();
 

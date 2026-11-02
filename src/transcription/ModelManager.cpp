@@ -2,8 +2,10 @@
 #include "transcription/ModelManager.hpp"
 
 #include "storage/RecordingSidecar.hpp"
+#include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/Text.hpp"
 
 #include <bcrypt.h>
 #include <commctrl.h>
@@ -169,16 +171,7 @@ bool HttpDownloadToFile(
     DownloadProgress* progress,
     std::wstring& error) {
     const std::wstring partial = destPath + L".partial";
-    uint64_t existing = 0;
-    {
-        WIN32_FILE_ATTRIBUTE_DATA data{};
-        if (::GetFileAttributesExW(partial.c_str(), GetFileExInfoStandard, &data)) {
-            ULARGE_INTEGER size{};
-            size.HighPart = data.nFileSizeHigh;
-            size.LowPart = data.nFileSizeLow;
-            existing = size.QuadPart;
-        }
-    }
+    uint64_t existing = FileIo::FileSize(partial);
 
     HINTERNET session = ::WinHttpOpen(
         L"MeetingBuddy/1.0",
@@ -454,7 +447,7 @@ std::wstring ModelManager::Sha256Hex(const std::wstring& path) {
     ::BCryptFinishHash(hash, digest.data(), hashLen, 0);
     ::BCryptDestroyHash(hash);
     ::BCryptCloseAlgorithmProvider(alg, 0);
-    return Sidecar::Utf8ToWide(ToLowerHex(digest.data(), hashLen));
+    return Text::Utf8ToWide(ToLowerHex(digest.data(), hashLen));
 }
 
 bool ModelManager::VerifySha256(const std::wstring& path, const char* expectedHex) {
@@ -462,7 +455,7 @@ bool ModelManager::VerifySha256(const std::wstring& path, const char* expectedHe
         return false;
     }
     const std::wstring actual = Sha256Hex(path);
-    const std::wstring expected = Sidecar::Utf8ToWide(expectedHex);
+    const std::wstring expected = Text::Utf8ToWide(expectedHex);
     return _wcsicmp(actual.c_str(), expected.c_str()) == 0;
 }
 
@@ -505,7 +498,7 @@ bool ModelManager::BrowseAndInstall(HWND owner, std::wstring& outFileName) {
     const std::wstring leaf = std::filesystem::path(source).filename().wstring();
     const std::wstring dest = ModelPath(leaf);
     std::error_code ec;
-    if (_wcsicmp(source.c_str(), dest.c_str()) != 0) {
+    if (!Text::PathEquals(source, dest)) {
         std::filesystem::copy_file(source, dest, std::filesystem::copy_options::overwrite_existing, ec);
         if (ec) {
             ::MessageBoxW(owner, L"Could not copy model into the models folder.", L"MeetingBuddy", MB_OK | MB_ICONWARNING);

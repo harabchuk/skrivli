@@ -2,6 +2,7 @@
 
 #include "storage/RecordingSidecar.hpp"
 #include "util/Log.hpp"
+#include "util/Text.hpp"
 
 #include <whisper.h>
 
@@ -63,7 +64,7 @@ bool WhisperEngine::EnsureLoaded(const std::wstring& modelPath, std::wstring& er
         m_modelPath.clear();
     }
 
-    const std::string utf8 = Sidecar::WideToUtf8(modelPath);
+    const std::string utf8 = Text::WideToUtf8(modelPath);
     whisper_context_params cparams = whisper_context_default_params();
     m_ctx = whisper_init_from_file_with_params(utf8.c_str(), cparams);
     if (m_ctx == nullptr) {
@@ -153,7 +154,7 @@ bool WhisperEngine::Transcribe(
     std::string vadUtf8;
     if (useVad) {
         if (!vadModelPath.empty()) {
-            vadUtf8 = Sidecar::WideToUtf8(vadModelPath);
+            vadUtf8 = Text::WideToUtf8(vadModelPath);
             params.vad = true;
             params.vad_model_path = vadUtf8.c_str();
         } else {

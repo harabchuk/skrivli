@@ -3,6 +3,7 @@
 #include "transcription/ModelManager.hpp"
 #include "util/Hotkey.hpp"
 #include "util/Paths.hpp"
+#include "util/Text.hpp"
 
 #include <shobjidl.h>
 #include <uxtheme.h>
@@ -421,7 +422,7 @@ void SettingsDialog::OnOk(UINT /*code*/, int /*id*/, HWND /*control*/) {
     }
 
     m_applied = next;
-    m_folderChanged = _wcsicmp(previousFolder.c_str(), Settings::Instance().RecordingsFolder().c_str()) != 0;
+    m_folderChanged = !Text::PathEquals(previousFolder, Settings::Instance().RecordingsFolder());
     ClearComboItemData(m_mic);
     ClearComboItemData(m_sys);
     ClearComboItemData(m_model);

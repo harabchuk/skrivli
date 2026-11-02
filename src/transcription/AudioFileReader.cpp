@@ -1,6 +1,7 @@
 #include "transcription/AudioFileReader.hpp"
 
 #include "audio/MiniAudio.hpp"
+#include "util/Text.hpp"
 
 #include <mfapi.h>
 #include <mfidl.h>
@@ -13,14 +14,6 @@
 #include <vector>
 
 namespace {
-
-bool EndsWithIgnoreCase(const std::wstring& value, const wchar_t* suffix) {
-    const size_t len = wcslen(suffix);
-    if (value.size() < len) {
-        return false;
-    }
-    return _wcsicmp(value.c_str() + (value.size() - len), suffix) == 0;
-}
 
 bool ConvertToStereo48k(
     const float* interleaved,
@@ -286,10 +279,10 @@ bool AudioFileReader::Read(const std::wstring& path, DecodedAudio& out, std::wst
         return false;
     }
 
-    if (EndsWithIgnoreCase(path, L".wav") || EndsWithIgnoreCase(path, L".flac") || EndsWithIgnoreCase(path, L".mp3")) {
+    if (Text::EndsWithIgnoreCase(path, L".wav") || Text::EndsWithIgnoreCase(path, L".flac") || Text::EndsWithIgnoreCase(path, L".mp3")) {
         return ReadWithMiniaudio(path, out, error);
     }
-    if (EndsWithIgnoreCase(path, L".m4a") || EndsWithIgnoreCase(path, L".mp4") || EndsWithIgnoreCase(path, L".aac")) {
+    if (Text::EndsWithIgnoreCase(path, L".m4a") || Text::EndsWithIgnoreCase(path, L".mp4") || Text::EndsWithIgnoreCase(path, L".aac")) {
         return ReadWithMediaFoundation(path, out, error);
     }
 

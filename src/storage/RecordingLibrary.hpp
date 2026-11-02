@@ -35,7 +35,6 @@ public:
     static bool DeleteToRecycleBin(const RecordingEntry& entry, std::wstring& error);
 
     static double ReadWavDurationSeconds(const std::wstring& wavPath);
-    static uint64_t FileSizeBytes(const std::wstring& path);
     static std::wstring JsonPathForAudio(const std::wstring& audioPath);
     static std::wstring MdPathForAudio(const std::wstring& audioPath);
 };

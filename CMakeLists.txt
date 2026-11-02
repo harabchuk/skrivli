@@ -95,6 +95,8 @@ set(MEETINGBUDDY_UTIL_SOURCES
     src/storage/RecordingLibrary.cpp
     src/storage/DirectoryWatcher.cpp
     src/util/Paths.cpp
+    src/util/Text.cpp
+    src/util/FileIo.cpp
     src/util/Log.cpp
     src/util/HResult.cpp
     src/util/Autostart.cpp
@@ -185,6 +187,8 @@ if(MEETINGBUDDY_BUILD_TESTS)
         tests/MarkdownFormatterTests.cpp
         tests/ChunkPlanTests.cpp
         tests/SettingsTests.cpp
+        tests/TextTests.cpp
+        tests/FileIoTests.cpp
         src/storage/Settings.cpp
         src/audio/Mixer.cpp
         src/audio/WavWriter.cpp
@@ -193,6 +197,8 @@ if(MEETINGBUDDY_BUILD_TESTS)
         src/transcription/Resampler.cpp
         src/transcription/MarkdownFormatter.cpp
         src/util/Paths.cpp
+        src/util/Text.cpp
+        src/util/FileIo.cpp
         src/util/Log.cpp
         src/util/HResult.cpp
     )

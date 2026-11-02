@@ -43,8 +43,6 @@ public:
     // Scan folder for `*.wav.partial`, repair, rename to `*.recovered.wav`.
     static std::vector<std::wstring> RecoverPartialsInFolder(const std::wstring& folder);
     static bool FolderHasFreeSpace(const std::wstring& folder, uint64_t minBytes = kMinFreeBytes);
-    static bool IsWritableDirectory(const std::wstring& folder);
-
 private:
     friend struct WavEncoderCallbacks;
 

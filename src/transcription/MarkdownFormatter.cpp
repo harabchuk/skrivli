@@ -1,6 +1,7 @@
 #include "transcription/MarkdownFormatter.hpp"
 
-#include <windows.h>
+#include "util/FileIo.hpp"
+#include "util/Text.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -24,26 +25,14 @@ std::string FormatTimestamp(int64_t tenthsOfMs) {
     if (tenthsOfMs < 0) {
         tenthsOfMs = 0;
     }
-    const int64_t totalSeconds = tenthsOfMs / 100;
-    const int h = static_cast<int>(totalSeconds / 3600);
-    const int m = static_cast<int>((totalSeconds / 60) % 60);
-    const int s = static_cast<int>(totalSeconds % 60);
-    char buf[32]{};
-    std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
-    return buf;
+    return Text::FormatHms<std::string>(static_cast<uint64_t>(tenthsOfMs / 100));
 }
 
 std::string FormatDuration(double seconds) {
     if (seconds < 0.0) {
         seconds = 0.0;
     }
-    const int total = static_cast<int>(std::llround(seconds));
-    const int h = total / 3600;
-    const int m = (total / 60) % 60;
-    const int s = total % 60;
-    char buf[32]{};
-    std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
-    return buf;
+    return Text::FormatHms<std::string>(static_cast<uint64_t>(std::llround(seconds)));
 }
 
 std::vector<TranscriptSegment> DedupAndTrim(const std::vector<TranscriptSegment>& segments) {
@@ -124,19 +113,5 @@ std::string MarkdownFormatter::Format(const TranscriptMeta& meta, const std::vec
 }
 
 bool MarkdownFormatter::WriteUtf8NoBom(const std::wstring& path, const std::string& utf8) {
-    HANDLE file = ::CreateFileW(
-        path.c_str(),
-        GENERIC_WRITE,
-        FILE_SHARE_READ,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    DWORD written = 0;
-    const BOOL ok = ::WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
-    ::CloseHandle(file);
-    return ok != FALSE && written == utf8.size();
+    return FileIo::WriteFileBytes(path, utf8, FileIo::WriteMode::Direct);
 }

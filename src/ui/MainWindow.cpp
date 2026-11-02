@@ -12,6 +12,7 @@
 #include "util/Hotkey.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/Text.hpp"
 
 #include <iterator>
 #include <cstdio>
@@ -29,13 +30,7 @@ std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
     if (frequency == 0) {
         frequency = 1;
     }
-    const uint64_t totalSeconds = elapsedQpc / frequency;
-    const uint64_t hours = totalSeconds / 3600;
-    const uint64_t minutes = (totalSeconds / 60) % 60;
-    const uint64_t seconds = totalSeconds % 60;
-    wchar_t buffer[32]{};
-    std::swprintf(buffer, 32, L"%02llu:%02llu:%02llu", hours, minutes, seconds);
-    return buffer;
+    return Text::FormatHms(elapsedQpc / frequency);
 }
 
 }  // namespace
@@ -113,10 +108,10 @@ void MainWindow::WriteSidecarForPath(const std::wstring& audioPath) {
     }
     side.sampleRate = 48000;
     side.channels = 2;
-    side.micDevice = Sidecar::WideToUtf8(m_session.MicDeviceName());
-    side.systemDevice = Sidecar::WideToUtf8(m_session.SystemDeviceName());
+    side.micDevice = Text::WideToUtf8(m_session.MicDeviceName());
+    side.systemDevice = Text::WideToUtf8(m_session.SystemDeviceName());
     for (const auto& note : m_session.TakeDeviceNotes()) {
-        side.deviceNotes.push_back(Sidecar::WideToUtf8(note));
+        side.deviceNotes.push_back(Text::WideToUtf8(note));
     }
     side.transcriptStatus = TranscriptStatus::None;
     if (!RecordingLibrary::WriteSidecarForAudio(audioPath, side)) {

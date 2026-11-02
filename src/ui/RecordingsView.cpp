@@ -6,6 +6,7 @@
 #include "ui/TranscriptWindow.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/Text.hpp"
 
 #include <shellapi.h>
 
@@ -104,7 +105,7 @@ void RecordingsView::SetTranscriptProgress(const std::wstring& audioPath, int pe
     m_progressPath = audioPath;
     m_progressPercent = percent;
     for (size_t i = 0; i < m_entries.size(); ++i) {
-        if (_wcsicmp(m_entries[i].audioPath.c_str(), audioPath.c_str()) != 0) {
+        if (!Text::PathEquals(m_entries[i].audioPath, audioPath)) {
             continue;
         }
         m_entries[i].transcriptStatus = TranscriptStatus::Transcribing;
@@ -154,7 +155,7 @@ void RecordingsView::Refresh() {
     if (!m_progressPath.empty()) {
         bool stillActive = false;
         for (auto& entry : m_entries) {
-            if (_wcsicmp(entry.audioPath.c_str(), m_progressPath.c_str()) != 0) {
+            if (!Text::PathEquals(entry.audioPath, m_progressPath)) {
                 continue;
             }
             if (entry.transcriptStatus == TranscriptStatus::Transcribing
@@ -284,13 +285,7 @@ std::wstring RecordingsView::FormatSize(uint64_t bytes) {
 }
 
 std::wstring RecordingsView::FormatDate(const std::wstring& startLocal) {
-    // 2026-11-01T13:18:00 → 2026-11-01 13:18
-    if (startLocal.size() >= 16 && startLocal[10] == L'T') {
-        std::wstring out = startLocal.substr(0, 16);
-        out[10] = L' ';
-        return out;
-    }
-    return startLocal;
+    return Text::IsoToDisplayMinute(startLocal);
 }
 
 std::wstring RecordingsView::TranscriptLabel(const RecordingEntry& entry) {

@@ -3,7 +3,9 @@
 #include "storage/RecordingSidecar.hpp"
 #include "transcription/MarkdownFormatter.hpp"
 #include "util/Clipboard.hpp"
+#include "util/FileIo.hpp"
 #include "util/Log.hpp"
+#include "util/Text.hpp"
 
 #include <commdlg.h>
 #include <richedit.h>
@@ -190,23 +192,14 @@ LRESULT TranscriptWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
 }
 
 bool TranscriptWindow::LoadFile(const std::wstring& mdPath) {
-    std::ifstream file(mdPath, std::ios::binary);
-    if (!file) {
+    auto bytes = FileIo::ReadFileBytes(mdPath, FileIo::StripBom::Yes);
+    if (!bytes.has_value()) {
         Log::Error(L"Could not open transcript: " + mdPath);
         return false;
     }
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    m_utf8Source = ss.str();
-    // Strip BOM if present.
-    if (m_utf8Source.size() >= 3
-        && static_cast<unsigned char>(m_utf8Source[0]) == 0xEF
-        && static_cast<unsigned char>(m_utf8Source[1]) == 0xBB
-        && static_cast<unsigned char>(m_utf8Source[2]) == 0xBF) {
-        m_utf8Source.erase(0, 3);
-    }
+    m_utf8Source = std::move(*bytes);
 
-    const std::wstring wide = Sidecar::Utf8ToWide(m_utf8Source);
+    const std::wstring wide = Text::Utf8ToWide(m_utf8Source);
     m_edit.SetWindowText(wide.c_str());
     ApplyLightStyling();
     UpdateWordCount();

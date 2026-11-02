@@ -2,8 +2,10 @@
 
 #include "storage/Settings.hpp"
 #include "ui/Theme.hpp"
+#include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/Text.hpp"
 
 #include <commctrl.h>
 #include <shellapi.h>
@@ -28,13 +30,7 @@ std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
     if (frequency == 0) {
         frequency = 1;
     }
-    const uint64_t totalSeconds = elapsedQpc / frequency;
-    const uint64_t hours = totalSeconds / 3600;
-    const uint64_t minutes = (totalSeconds / 60) % 60;
-    const uint64_t seconds = totalSeconds % 60;
-    wchar_t buffer[32]{};
-    std::swprintf(buffer, 32, L"%02llu:%02llu:%02llu", hours, minutes, seconds);
-    return buffer;
+    return Text::FormatHms(elapsedQpc / frequency);
 }
 
 std::wstring FormatDb(float db) {
@@ -683,26 +679,6 @@ void RecordView::StopMeterPreview() {
     m_levelMonitor.Stop();
 }
 
-bool RecordView::FolderIsWritable(const std::wstring& folder) const {
-    if (!Paths::EnsureDirectory(folder)) {
-        return false;
-    }
-    const std::wstring probe = folder + L"\\.meetingbuddy_write_test";
-    HANDLE file = ::CreateFileW(
-        probe.c_str(),
-        GENERIC_WRITE,
-        0,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    ::CloseHandle(file);
-    return true;
-}
-
 bool RecordView::BrowseForFolder(std::wstring& path) {
     Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
     HRESULT hr = ::CoCreateInstance(
@@ -747,7 +723,7 @@ void RecordView::OnBrowseFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (!BrowseForFolder(path)) {
         return;
     }
-    if (!FolderIsWritable(path)) {
+    if (!FileIo::IsWritableDirectory(path)) {
         SetWarning(L"That folder is not writable. Choose another location.");
         return;
     }
@@ -833,7 +809,7 @@ bool RecordView::ToggleRecording() {
         folder = Paths::DefaultRecordingsDir();
         m_folderEdit.SetWindowText(folder.c_str());
     }
-    if (!FolderIsWritable(folder)) {
+    if (!FileIo::IsWritableDirectory(folder)) {
         SetWarning(L"The recordings folder is missing or not writable.");
         return false;
     }
