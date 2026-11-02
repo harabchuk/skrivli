@@ -132,7 +132,7 @@ TEST(Settings, OmitsWindowUntilPlacementIsKnown) {
     EXPECT_EQ(ReadFile(path).find("\"window\""), std::string::npos);
 }
 
-TEST(Settings, PartialJsonKeepsDefaultsAndSkipsUnknownKeys) {
+TEST(Settings, PartialFileKeepsDefaultsAndSkipsUnknownKeys) {
     // Arrange
     const std::wstring path = (std::filesystem::path(TempDir(L"Partial")) / L"settings.json").wstring();
     WriteFile(path, R"({
@@ -170,9 +170,9 @@ TEST(Settings, DropsWindowWithNonPositiveSize) {
     EXPECT_FALSE(Settings::Instance().Data().windowPlacement.has_value());
 }
 
-TEST(Settings, UnreadableJsonResetsToDefaults) {
+TEST(Settings, UnreadableFileResetsToDefaults) {
     // Arrange
-    const std::wstring path = (std::filesystem::path(TempDir(L"BadJson")) / L"settings.json").wstring();
+    const std::wstring path = (std::filesystem::path(TempDir(L"Unreadable")) / L"settings.json").wstring();
     WriteFile(path, "{");
 
     // Act

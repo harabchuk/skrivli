@@ -11,26 +11,26 @@
 #include <sstream>
 #include <utility>
 
-namespace settings_json {
+namespace settings_file {
 
-struct WindowJson {
+struct WindowPlacement {
     int x = 0;
     int y = 0;
     int width = 0;
     int height = 0;
 };
 
-struct GeneralJson {
+struct GeneralSettings {
     bool closeToTray = true;
     bool startWithWindows = false;
     bool startMinimized = false;
     bool hotkeyEnabled = true;
     std::string hotkey = "Ctrl+Alt+R";
     bool firstRunTrayHintShown = false;
-    std::optional<WindowJson> window;
+    std::optional<WindowPlacement> window;
 };
 
-struct RecordingJson {
+struct RecordingSettings {
     std::string folder;
     std::string micDeviceId;
     std::string systemDeviceId;
@@ -43,7 +43,7 @@ struct RecordingJson {
     bool communicationsProcessing = false;
 };
 
-struct TranscriptionJson {
+struct TranscriptionSettings {
     std::string model = "ggml-base-q5_1.bin";
     std::string language = "auto";
     bool autoTranscribe = false;
@@ -51,21 +51,11 @@ struct TranscriptionJson {
     bool useVad = false;
 };
 
-struct SettingsJson {
-    GeneralJson general{};
-    RecordingJson recording{};
-    TranscriptionJson transcription{};
+struct SettingsFile {
+    GeneralSettings general{};
+    RecordingSettings recording{};
+    TranscriptionSettings transcription{};
 };
-
-}  // namespace settings_json
-
-namespace {
-
-using settings_json::GeneralJson;
-using settings_json::RecordingJson;
-using settings_json::SettingsJson;
-using settings_json::TranscriptionJson;
-using settings_json::WindowJson;
 
 constexpr glz::opts kReadOpts{
     .comments = true,
@@ -107,97 +97,137 @@ bool FileExists(const std::wstring& path) {
     return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
-SettingsJson ToJson(const SettingsData& data) {
-    SettingsJson json{};
-    json.general.closeToTray = data.closeToTray;
-    json.general.startWithWindows = data.startWithWindows;
-    json.general.startMinimized = data.startMinimized;
-    json.general.hotkeyEnabled = data.hotkeyEnabled;
-    json.general.hotkey = WideToUtf8(data.hotkey);
-    json.general.firstRunTrayHintShown = data.firstRunTrayHintShown;
+SettingsFile ToFile(const SettingsData& data) {
+    SettingsFile file{};
+    file.general.closeToTray = data.closeToTray;
+    file.general.startWithWindows = data.startWithWindows;
+    file.general.startMinimized = data.startMinimized;
+    file.general.hotkeyEnabled = data.hotkeyEnabled;
+    file.general.hotkey = WideToUtf8(data.hotkey);
+    file.general.firstRunTrayHintShown = data.firstRunTrayHintShown;
     if (data.windowPlacement.has_value()) {
         const auto& placement = *data.windowPlacement;
-        json.general.window = WindowJson{placement.x, placement.y, placement.width, placement.height};
+        file.general.window = WindowPlacement{placement.x, placement.y, placement.width, placement.height};
     }
 
-    json.recording.folder = WideToUtf8(data.folder);
-    json.recording.micDeviceId = WideToUtf8(data.micDeviceId);
-    json.recording.systemDeviceId = WideToUtf8(data.systemDeviceId);
-    json.recording.micGain = data.micGain;
-    json.recording.micAgc = data.micAgc;
-    json.recording.systemGain = data.systemGain;
-    json.recording.saveStems = data.saveStems;
-    json.recording.compressToM4a = data.compressToM4a;
-    json.recording.keepWav = data.keepWav;
-    json.recording.communicationsProcessing = data.communicationsProcessing;
+    file.recording.folder = WideToUtf8(data.folder);
+    file.recording.micDeviceId = WideToUtf8(data.micDeviceId);
+    file.recording.systemDeviceId = WideToUtf8(data.systemDeviceId);
+    file.recording.micGain = data.micGain;
+    file.recording.micAgc = data.micAgc;
+    file.recording.systemGain = data.systemGain;
+    file.recording.saveStems = data.saveStems;
+    file.recording.compressToM4a = data.compressToM4a;
+    file.recording.keepWav = data.keepWav;
+    file.recording.communicationsProcessing = data.communicationsProcessing;
 
-    json.transcription.model = WideToUtf8(data.model);
-    json.transcription.language = WideToUtf8(data.language);
-    json.transcription.autoTranscribe = data.autoTranscribe;
-    json.transcription.threads = data.threads;
-    json.transcription.useVad = data.useVad;
-    return json;
+    file.transcription.model = WideToUtf8(data.model);
+    file.transcription.language = WideToUtf8(data.language);
+    file.transcription.autoTranscribe = data.autoTranscribe;
+    file.transcription.threads = data.threads;
+    file.transcription.useVad = data.useVad;
+    return file;
 }
 
-SettingsData FromJson(const SettingsJson& json) {
+SettingsData FromFile(const SettingsFile& file) {
     SettingsData data{};
-    data.closeToTray = json.general.closeToTray;
-    data.startWithWindows = json.general.startWithWindows;
-    data.startMinimized = json.general.startMinimized;
-    data.hotkeyEnabled = json.general.hotkeyEnabled;
-    data.hotkey = Utf8ToWide(json.general.hotkey);
-    data.firstRunTrayHintShown = json.general.firstRunTrayHintShown;
-    if (json.general.window.has_value()) {
-        const auto& window = *json.general.window;
+    data.closeToTray = file.general.closeToTray;
+    data.startWithWindows = file.general.startWithWindows;
+    data.startMinimized = file.general.startMinimized;
+    data.hotkeyEnabled = file.general.hotkeyEnabled;
+    data.hotkey = Utf8ToWide(file.general.hotkey);
+    data.firstRunTrayHintShown = file.general.firstRunTrayHintShown;
+    if (file.general.window.has_value()) {
+        const auto& window = *file.general.window;
         if (window.width > 0 && window.height > 0) {
             data.windowPlacement = WindowPlacementSettings{window.x, window.y, window.width, window.height};
         }
     }
 
-    data.folder = Utf8ToWide(json.recording.folder);
-    data.micDeviceId = Utf8ToWide(json.recording.micDeviceId);
-    data.systemDeviceId = Utf8ToWide(json.recording.systemDeviceId);
-    data.micGain = json.recording.micGain;
-    data.micAgc = json.recording.micAgc;
-    data.systemGain = json.recording.systemGain;
-    data.saveStems = json.recording.saveStems;
-    data.compressToM4a = json.recording.compressToM4a;
-    data.keepWav = json.recording.keepWav;
-    data.communicationsProcessing = json.recording.communicationsProcessing;
+    data.folder = Utf8ToWide(file.recording.folder);
+    data.micDeviceId = Utf8ToWide(file.recording.micDeviceId);
+    data.systemDeviceId = Utf8ToWide(file.recording.systemDeviceId);
+    data.micGain = file.recording.micGain;
+    data.micAgc = file.recording.micAgc;
+    data.systemGain = file.recording.systemGain;
+    data.saveStems = file.recording.saveStems;
+    data.compressToM4a = file.recording.compressToM4a;
+    data.keepWav = file.recording.keepWav;
+    data.communicationsProcessing = file.recording.communicationsProcessing;
 
-    data.model = Utf8ToWide(json.transcription.model);
-    data.language = Utf8ToWide(json.transcription.language);
-    data.autoTranscribe = json.transcription.autoTranscribe;
-    data.threads = json.transcription.threads;
-    data.useVad = json.transcription.useVad;
+    data.model = Utf8ToWide(file.transcription.model);
+    data.language = Utf8ToWide(file.transcription.language);
+    data.autoTranscribe = file.transcription.autoTranscribe;
+    data.threads = file.transcription.threads;
+    data.useVad = file.transcription.useVad;
     return data;
 }
 
-bool ReadJson(const std::wstring& path, SettingsData& out) {
+bool LoadDocument(const std::wstring& path, SettingsData& out) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         return false;
     }
     std::ostringstream ss;
     ss << file.rdbuf();
-    std::string json = ss.str();
-    if (json.size() >= 3
-        && static_cast<unsigned char>(json[0]) == 0xEF
-        && static_cast<unsigned char>(json[1]) == 0xBB
-        && static_cast<unsigned char>(json[2]) == 0xBF) {
-        json.erase(0, 3);
+    std::string text = ss.str();
+    if (text.size() >= 3
+        && static_cast<unsigned char>(text[0]) == 0xEF
+        && static_cast<unsigned char>(text[1]) == 0xBB
+        && static_cast<unsigned char>(text[2]) == 0xBF) {
+        text.erase(0, 3);
     }
-    if (json.empty()) {
+    if (text.empty()) {
         Log::Error(L"Settings file is empty: " + path);
         return false;
     }
 
-    SettingsJson data{};
-    if (const auto ec = glz::read<kReadOpts>(data, json)) {
-        Log::Error(L"Failed to parse settings JSON: " + Utf8ToWide(glz::format_error(ec, json)));
+    SettingsFile data{};
+    if (const auto ec = glz::read<kReadOpts>(data, text)) {
+        Log::Error(L"Failed to parse settings: " + Utf8ToWide(glz::format_error(ec, text)));
         return false;
     }
-    out = FromJson(data);
+    out = FromFile(data);
+    return true;
+}
+
+bool StoreDocument(const std::wstring& path, const SettingsData& data) {
+    std::string body;
+    const SettingsFile file = ToFile(data);
+    if (const auto ec = glz::write<kWriteOpts>(file, body)) {
+        Log::Error(L"Failed to serialize settings");
+        return false;
+    }
+    if (!body.empty() && body.back() != '\n') {
+        body.push_back('\n');
+    }
+
+    const std::wstring temp = path + L".tmp";
+    HANDLE handle = ::CreateFileW(
+        temp.c_str(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        Log::Error(L"Failed to write settings");
+        return false;
+    }
+    DWORD written = 0;
+    const BOOL writeOk = ::WriteFile(handle, body.data(), static_cast<DWORD>(body.size()), &written, nullptr);
+    ::CloseHandle(handle);
+    if (writeOk == FALSE || written != body.size()) {
+        ::DeleteFileW(temp.c_str());
+        Log::Error(L"Failed to write settings");
+        return false;
+    }
+    if (::MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE) {
+        ::DeleteFileW(temp.c_str());
+        Log::Error(L"Failed to replace settings");
+        return false;
+    }
     return true;
 }
 
@@ -208,7 +238,12 @@ void ArchiveUnreadable(const std::wstring& path) {
     }
 }
 
-}  // namespace
+}  // namespace settings_file
+
+using settings_file::ArchiveUnreadable;
+using settings_file::FileExists;
+using settings_file::LoadDocument;
+using settings_file::StoreDocument;
 
 Settings& Settings::Instance() {
     static Settings settings;
@@ -217,10 +252,10 @@ Settings& Settings::Instance() {
 
 bool Settings::Load() {
     Paths::EnsureDirectory(Paths::SettingsDir());
-    const std::wstring jsonPath = Paths::SettingsFile();
-    if (FileExists(jsonPath)) {
-        if (!LoadFromFile(jsonPath)) {
-            ArchiveUnreadable(jsonPath);
+    const std::wstring path = Paths::SettingsFile();
+    if (FileExists(path)) {
+        if (!LoadFromFile(path)) {
+            ArchiveUnreadable(path);
             return false;
         }
         return true;
@@ -242,49 +277,13 @@ bool Settings::LoadFromFile(const std::wstring& path) {
     }
 
     SettingsData data{};
-    const bool ok = ReadJson(path, data);
+    const bool ok = LoadDocument(path, data);
     m_data = ok ? std::move(data) : SettingsData{};
     return ok;
 }
 
 bool Settings::SaveToFile(const std::wstring& path) const {
-    std::string body;
-    const SettingsJson json = ToJson(m_data);
-    if (const auto ec = glz::write<kWriteOpts>(json, body)) {
-        Log::Error(L"Failed to serialize settings JSON");
-        return false;
-    }
-    if (!body.empty() && body.back() != '\n') {
-        body.push_back('\n');
-    }
-
-    const std::wstring temp = path + L".tmp";
-    HANDLE file = ::CreateFileW(
-        temp.c_str(),
-        GENERIC_WRITE,
-        FILE_SHARE_READ,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        Log::Error(L"Failed to write settings JSON");
-        return false;
-    }
-    DWORD written = 0;
-    const BOOL writeOk = ::WriteFile(file, body.data(), static_cast<DWORD>(body.size()), &written, nullptr);
-    ::CloseHandle(file);
-    if (writeOk == FALSE || written != body.size()) {
-        ::DeleteFileW(temp.c_str());
-        Log::Error(L"Failed to write settings JSON");
-        return false;
-    }
-    if (::MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE) {
-        ::DeleteFileW(temp.c_str());
-        Log::Error(L"Failed to replace settings JSON");
-        return false;
-    }
-    return true;
+    return StoreDocument(path, m_data);
 }
 
 std::wstring Settings::RecordingsFolder() const {

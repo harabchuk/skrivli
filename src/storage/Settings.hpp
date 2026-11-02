@@ -41,12 +41,12 @@ class Settings {
 public:
     static Settings& Instance();
 
-    // `%APPDATA%\MeetingBuddy\settings.json`. A missing file yields defaults.
+    // Loads the settings file. A missing file yields defaults.
     bool Load();
     bool Save() const;
 
-    // A missing file resets to defaults and returns true. Unreadable JSON resets to
-    // defaults and returns false.
+    // A missing file resets to defaults and returns true. An unreadable file resets
+    // to defaults and returns false.
     bool LoadFromFile(const std::wstring& path);
     bool SaveToFile(const std::wstring& path) const;
 
