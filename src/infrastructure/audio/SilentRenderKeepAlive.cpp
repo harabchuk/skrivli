@@ -3,14 +3,12 @@
 #include "core/AudioFormat.hpp"
 #include "infrastructure/common/Scoped.hpp"
 
+#include <algorithm>
 #include <audioclient.h>
 #include <avrt.h>
 #include <mmdeviceapi.h>
-
-#include <wil/resource.h>
-
-#include <algorithm>
 #include <vector>
+#include <wil/resource.h>
 
 SilentRenderKeepAlive::~SilentRenderKeepAlive() {
     Stop();
@@ -60,7 +58,8 @@ void SilentRenderKeepAlive::RenderLoop() {
     }
 
     wil::com_ptr_nothrow<IAudioClient> audioClient;
-    auto hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, audioClient.put_void());
+    auto hr =
+        m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, audioClient.put_void());
     if (FAILED(hr) || !audioClient) {
         return;
     }
@@ -68,13 +67,9 @@ void SilentRenderKeepAlive::RenderLoop() {
     auto format = AudioFormat::MakeFloatStereo48k();
     hr = audioClient->Initialize(
         AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_EVENTCALLBACK
-            | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
-            | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-        AudioFormat::kBufferDuration,
-        0,
-        reinterpret_cast<WAVEFORMATEX*>(&format),
-        nullptr);
+        AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+            AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+        AudioFormat::kBufferDuration, 0, reinterpret_cast<WAVEFORMATEX*>(&format), nullptr);
     if (FAILED(hr)) {
         return;
     }
@@ -105,10 +100,10 @@ void SilentRenderKeepAlive::RenderLoop() {
     BYTE* buffer = nullptr;
     hr = renderClient->GetBuffer(bufferFrames, &buffer);
     if (SUCCEEDED(hr) && buffer != nullptr) {
-        std::fill(
-            reinterpret_cast<float*>(buffer),
-            reinterpret_cast<float*>(buffer) + (static_cast<size_t>(bufferFrames) * AudioFormat::kChannels),
-            0.0f);
+        std::fill(reinterpret_cast<float*>(buffer),
+                  reinterpret_cast<float*>(buffer) +
+                      (static_cast<size_t>(bufferFrames) * AudioFormat::kChannels),
+                  0.0f);
         renderClient->ReleaseBuffer(bufferFrames, 0);
     }
 
@@ -140,10 +135,10 @@ void SilentRenderKeepAlive::RenderLoop() {
             break;
         }
 
-        std::fill(
-            reinterpret_cast<float*>(buffer),
-            reinterpret_cast<float*>(buffer) + (static_cast<size_t>(framesToWrite) * AudioFormat::kChannels),
-            0.0f);
+        std::fill(reinterpret_cast<float*>(buffer),
+                  reinterpret_cast<float*>(buffer) +
+                      (static_cast<size_t>(framesToWrite) * AudioFormat::kChannels),
+                  0.0f);
         renderClient->ReleaseBuffer(framesToWrite, 0);
     }
 

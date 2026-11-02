@@ -1,9 +1,8 @@
 #include "core/MarkdownFormatter.hpp"
 
-#include <gtest/gtest.h>
-
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <string>
 
 TEST(MarkdownFormatter, TimestampAndTitle) {
@@ -60,11 +59,8 @@ TEST(MarkdownFormatter, DropsTripleRepeats) {
     meta.modelFile = "m.bin";
     meta.languageConfigured = "en";
     std::vector<TranscriptSegment> segments = {
-        {0, 10, "thanks"},
-        {20, 30, "thanks"},
-        {40, 50, "thanks"},
-        {60, 70, "thanks"},
-        {80, 90, "done"},
+        {0, 10, "thanks"},  {20, 30, "thanks"}, {40, 50, "thanks"},
+        {60, 70, "thanks"}, {80, 90, "done"},
     };
 
     // Act

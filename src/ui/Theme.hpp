@@ -36,4 +36,4 @@ constexpr COLORREF kAccent = RGB(0x00, 0x5F, 0xB8);
 // Hairline separators under section headers.
 constexpr COLORREF kDivider = RGB(0xD0, 0xD0, 0xD0);
 
-}  // namespace ui
+} // namespace ui

@@ -1,11 +1,11 @@
 #include "infrastructure/files/WavWriter.hpp"
 
-#include <gtest/gtest.h>
+#include <windows.h>
 
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <vector>
-#include <windows.h>
 
 namespace {
 
@@ -18,7 +18,7 @@ std::wstring TempDir() {
     return dir.wstring();
 }
 
-}  // namespace
+} // namespace
 
 TEST(WavWriter, WritesHeaderAndPatchesSizes) {
     // Arrange

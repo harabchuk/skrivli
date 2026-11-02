@@ -1,7 +1,8 @@
 #pragma once
 
-#include <string>
 #include <windows.h>
+
+#include <string>
 
 namespace Log {
 
@@ -22,4 +23,4 @@ void Error(const std::wstring& message);
 void Write(Level level, const wchar_t* message);
 void WriteHResult(Level level, const wchar_t* message, HRESULT hr);
 
-}  // namespace Log
+} // namespace Log

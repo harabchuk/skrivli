@@ -1,60 +1,61 @@
 #pragma once
 
 #include "pch.hpp"
+
 #include "Ids.hpp"
 #include "infrastructure/audio/DeviceManager.hpp"
-#include "services/RecordingSession.hpp"
 #include "infrastructure/storage/Settings.hpp"
+#include "services/RecordingSession.hpp"
 #include "services/TranscriptionService.hpp"
-#include "views/RecordView.hpp"
-#include "views/RecordingsView.hpp"
 #include "ui/TabCtrl.hpp"
 #include "ui/TrayIcon.hpp"
+#include "views/RecordView.hpp"
+#include "views/RecordingsView.hpp"
 
 class MainWindow : public WTL::CFrameWindowImpl<MainWindow> {
-public:
+  public:
     DECLARE_FRAME_WND_CLASS(L"MeetingBuddy.MainWindow", IDR_MAINFRAME)
 
     BEGIN_MSG_MAP_EX(MainWindow)
-        MSG_WM_CREATE(OnCreate)
-        MSG_WM_PAINT(OnPaint)
-        MSG_WM_SIZE(OnSize)
-        MSG_WM_CLOSE(OnClose)
-        MSG_WM_DESTROY(OnDestroy)
-        MSG_WM_GETMINMAXINFO(OnGetMinMaxInfo)
-        MSG_WM_SYSCOMMAND(OnSysCommand)
-        MSG_WM_DPICHANGED(OnDpiChanged)
-        MSG_WM_EXITSIZEMOVE(OnExitSizeMove)
-        MSG_WM_TIMER(OnTimer)
-        MSG_WM_QUERYENDSESSION(OnQueryEndSession)
-        MSG_WM_ENDSESSION(OnEndSession)
-        MSG_WM_HOTKEY(OnHotKey)
-        MESSAGE_RANGE_HANDLER(0xC000, 0xFFFF, OnRegisteredMessage)
-        MESSAGE_HANDLER(WM_APP_TRAYICON, OnTrayIcon)
-        MESSAGE_HANDLER(WM_APP_RECORDING_STARTED, OnRecordingStarted)
-        MESSAGE_HANDLER(WM_APP_RECORDING_FINISHED, OnRecordingFinished)
-        MESSAGE_HANDLER(WM_APP_RECORDING_ERROR, OnRecordingError)
-        MESSAGE_HANDLER(WM_APP_DEVICES_CHANGED, OnDevicesChanged)
-        MESSAGE_HANDLER(WM_APP_DEVICE_SWITCHED, OnDeviceSwitched)
-        MESSAGE_HANDLER(WM_APP_LOW_DISK, OnLowDisk)
-        MESSAGE_HANDLER(WM_APP_RECORDING_RESCUED, OnRecordingRescued)
-        MESSAGE_HANDLER(WM_APP_TRANSCRIBE_QUEUED, OnTranscribeQueued)
-        MESSAGE_HANDLER(WM_APP_TRANSCRIBE_PROGRESS, OnTranscribeProgress)
-        MESSAGE_HANDLER(WM_APP_TRANSCRIBE_FINISHED, OnTranscribeFinished)
-        MESSAGE_HANDLER(WM_APP_TRANSCRIBE_FAILED, OnTranscribeFailed)
-        MESSAGE_HANDLER(WM_APP_M4A_FINISHED, OnM4aFinished)
-        MESSAGE_HANDLER(WM_APP_M4A_FAILED, OnM4aFailed)
-        COMMAND_ID_HANDLER_EX(ID_APP_EXIT, OnFileExit)
-        COMMAND_ID_HANDLER_EX(ID_FILE_OPENFOLDER, OnOpenRecordingsFolder)
-        COMMAND_ID_HANDLER_EX(ID_FILE_SETTINGS, OnSettings)
-        COMMAND_ID_HANDLER_EX(ID_APP_ABOUT, OnAbout)
-        COMMAND_ID_HANDLER_EX(ID_TRAY_SHOW, OnTrayShow)
-        COMMAND_ID_HANDLER_EX(ID_TRAY_STARTSTOP, OnTrayStartStop)
-        COMMAND_ID_HANDLER_EX(ID_TRAY_OPENFOLDER, OnOpenRecordingsFolder)
-        COMMAND_ID_HANDLER_EX(ID_TRAY_SETTINGS, OnSettings)
-        COMMAND_ID_HANDLER_EX(ID_TRAY_EXIT, OnFileExit)
-        NOTIFY_HANDLER_EX(IDC_TAB_MAIN, TCN_SELCHANGE, OnTabSelChange)
-        CHAIN_MSG_MAP(WTL::CFrameWindowImpl<MainWindow>)
+    MSG_WM_CREATE(OnCreate)
+    MSG_WM_PAINT(OnPaint)
+    MSG_WM_SIZE(OnSize)
+    MSG_WM_CLOSE(OnClose)
+    MSG_WM_DESTROY(OnDestroy)
+    MSG_WM_GETMINMAXINFO(OnGetMinMaxInfo)
+    MSG_WM_SYSCOMMAND(OnSysCommand)
+    MSG_WM_DPICHANGED(OnDpiChanged)
+    MSG_WM_EXITSIZEMOVE(OnExitSizeMove)
+    MSG_WM_TIMER(OnTimer)
+    MSG_WM_QUERYENDSESSION(OnQueryEndSession)
+    MSG_WM_ENDSESSION(OnEndSession)
+    MSG_WM_HOTKEY(OnHotKey)
+    MESSAGE_RANGE_HANDLER(0xC000, 0xFFFF, OnRegisteredMessage)
+    MESSAGE_HANDLER(WM_APP_TRAYICON, OnTrayIcon)
+    MESSAGE_HANDLER(WM_APP_RECORDING_STARTED, OnRecordingStarted)
+    MESSAGE_HANDLER(WM_APP_RECORDING_FINISHED, OnRecordingFinished)
+    MESSAGE_HANDLER(WM_APP_RECORDING_ERROR, OnRecordingError)
+    MESSAGE_HANDLER(WM_APP_DEVICES_CHANGED, OnDevicesChanged)
+    MESSAGE_HANDLER(WM_APP_DEVICE_SWITCHED, OnDeviceSwitched)
+    MESSAGE_HANDLER(WM_APP_LOW_DISK, OnLowDisk)
+    MESSAGE_HANDLER(WM_APP_RECORDING_RESCUED, OnRecordingRescued)
+    MESSAGE_HANDLER(WM_APP_TRANSCRIBE_QUEUED, OnTranscribeQueued)
+    MESSAGE_HANDLER(WM_APP_TRANSCRIBE_PROGRESS, OnTranscribeProgress)
+    MESSAGE_HANDLER(WM_APP_TRANSCRIBE_FINISHED, OnTranscribeFinished)
+    MESSAGE_HANDLER(WM_APP_TRANSCRIBE_FAILED, OnTranscribeFailed)
+    MESSAGE_HANDLER(WM_APP_M4A_FINISHED, OnM4aFinished)
+    MESSAGE_HANDLER(WM_APP_M4A_FAILED, OnM4aFailed)
+    COMMAND_ID_HANDLER_EX(ID_APP_EXIT, OnFileExit)
+    COMMAND_ID_HANDLER_EX(ID_FILE_OPENFOLDER, OnOpenRecordingsFolder)
+    COMMAND_ID_HANDLER_EX(ID_FILE_SETTINGS, OnSettings)
+    COMMAND_ID_HANDLER_EX(ID_APP_ABOUT, OnAbout)
+    COMMAND_ID_HANDLER_EX(ID_TRAY_SHOW, OnTrayShow)
+    COMMAND_ID_HANDLER_EX(ID_TRAY_STARTSTOP, OnTrayStartStop)
+    COMMAND_ID_HANDLER_EX(ID_TRAY_OPENFOLDER, OnOpenRecordingsFolder)
+    COMMAND_ID_HANDLER_EX(ID_TRAY_SETTINGS, OnSettings)
+    COMMAND_ID_HANDLER_EX(ID_TRAY_EXIT, OnFileExit)
+    NOTIFY_HANDLER_EX(IDC_TAB_MAIN, TCN_SELCHANGE, OnTabSelChange)
+    CHAIN_MSG_MAP(WTL::CFrameWindowImpl<MainWindow>)
     END_MSG_MAP()
 
     void RequestExit();
@@ -62,7 +63,7 @@ public:
     void RestoreWindowPlacement();
     void ApplyStartupVisibility(bool startHidden);
 
-private:
+  private:
     static constexpr int kMinClientWidth = 560;
     static constexpr int kMinClientHeight = 420;
     static constexpr int kDefaultClientWidth = 720;
@@ -121,7 +122,8 @@ private:
     void UpdateRecordingUi();
     // Kills the elapsed timer and returns the UI to idle. When `error` is set it reports the error
     // instead of OnRecordingFinished(path).
-    void EnterIdleUi(const std::wstring& path, bool refreshList, const std::wstring* error = nullptr);
+    void EnterIdleUi(const std::wstring& path, bool refreshList,
+                     const std::wstring* error = nullptr);
     void RecoverPartialRecordings();
     void WriteSidecarForPath(const std::wstring& audioPath);
     void RefreshRecordingsList();

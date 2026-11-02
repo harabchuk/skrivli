@@ -34,17 +34,8 @@ auto Timestamp() -> std::wstring {
     SYSTEMTIME st{};
     ::GetLocalTime(&st);
     wchar_t buffer[64]{};
-    std::swprintf(
-        buffer,
-        64,
-        L"%04u-%02u-%02u %02u:%02u:%02u.%03u",
-        st.wYear,
-        st.wMonth,
-        st.wDay,
-        st.wHour,
-        st.wMinute,
-        st.wSecond,
-        st.wMilliseconds);
+    std::swprintf(buffer, 64, L"%04u-%02u-%02u %02u:%02u:%02u.%03u", st.wYear, st.wMonth, st.wDay,
+                  st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
     return buffer;
 }
 
@@ -70,7 +61,7 @@ void RotateIfNeeded(const std::filesystem::path& logPath) {
     std::filesystem::rename(logPath, first, ec);
 }
 
-}  // namespace
+} // namespace
 
 namespace Log {
 
@@ -96,12 +87,8 @@ void Write(Level level, const wchar_t* message) {
 
 void WriteHResult(Level level, const wchar_t* message, HRESULT hr) {
     wchar_t buffer[512]{};
-    std::swprintf(
-        buffer,
-        512,
-        L"%s (hr=0x%08X)",
-        message != nullptr ? message : L"",
-        static_cast<unsigned>(hr));
+    std::swprintf(buffer, 512, L"%s (hr=0x%08X)", message != nullptr ? message : L"",
+                  static_cast<unsigned>(hr));
     Write(level, buffer);
 }
 
@@ -129,4 +116,4 @@ void Error(const std::wstring& message) {
     Write(Level::Error, message.c_str());
 }
 
-}  // namespace Log
+} // namespace Log

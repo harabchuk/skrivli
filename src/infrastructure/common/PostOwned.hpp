@@ -19,7 +19,6 @@ bool PostOwned(HWND hwnd, UINT msg, std::unique_ptr<T> payload, WPARAM wParam = 
 }
 
 // Reclaims ownership of a payload posted with PostOwned<T>.
-template <typename T>
-auto TakeOwned(LPARAM lParam) -> std::unique_ptr<T> {
+template <typename T> auto TakeOwned(LPARAM lParam) -> std::unique_ptr<T> {
     return std::unique_ptr<T>(reinterpret_cast<T*>(lParam));
 }

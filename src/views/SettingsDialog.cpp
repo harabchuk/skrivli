@@ -1,19 +1,18 @@
 #include "views/SettingsDialog.hpp"
 
 #include "infrastructure/ai/ModelManager.hpp"
-#include "views/ModelPrompt.hpp"
-#include "ui/ShellDialogs.hpp"
-#include "ui/Theme.hpp"
-#include "infrastructure/system/Hotkey.hpp"
 #include "infrastructure/common/Paths.hpp"
 #include "infrastructure/common/Text.hpp"
-
-#include <shobjidl.h>
-#include <uxtheme.h>
+#include "infrastructure/system/Hotkey.hpp"
+#include "ui/ShellDialogs.hpp"
+#include "ui/Theme.hpp"
+#include "views/ModelPrompt.hpp"
 
 #include <cmath>
 #include <cstdio>
+#include <shobjidl.h>
 #include <string>
+#include <uxtheme.h>
 
 namespace {
 
@@ -47,10 +46,9 @@ auto FormatGain(float value) -> std::wstring {
     return buf;
 }
 
-}  // namespace
+} // namespace
 
-SettingsDialog::SettingsDialog(DeviceManager* devices)
-    : m_devices(devices) {}
+SettingsDialog::SettingsDialog(DeviceManager* devices) : m_devices(devices) {}
 
 BOOL SettingsDialog::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     CenterWindow(GetParent());
@@ -77,7 +75,7 @@ BOOL SettingsDialog::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_hotkey.Attach(GetDlgItem(IDC_SET_HOTKEY));
 
     // Same flat dropdown look as the Record view.
-    for (auto* combo : { &m_mic.Combo(), &m_sys.Combo(), &m_model.Combo(), &m_language }) {
+    for (auto* combo : {&m_mic.Combo(), &m_sys.Combo(), &m_model.Combo(), &m_language}) {
         if (combo->IsWindow()) {
             ::SetWindowTheme(combo->m_hWnd, L"CFD", nullptr);
         }
@@ -92,9 +90,9 @@ BOOL SettingsDialog::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
 
 void SettingsDialog::FillLanguageCombo() {
     m_language.ResetContent();
-    static const wchar_t* kLangs[] = {
-        L"auto", L"en", L"de", L"fr", L"es", L"it", L"pt", L"nl", L"pl", L"ru",
-        L"uk", L"zh", L"ja", L"ko", L"sv", L"no", L"da", L"fi", L"tr", L"cs"};
+    static const wchar_t* kLangs[] = {L"auto", L"en", L"de", L"fr", L"es", L"it", L"pt",
+                                      L"nl",   L"pl", L"ru", L"uk", L"zh", L"ja", L"ko",
+                                      L"sv",   L"no", L"da", L"fi", L"tr", L"cs"};
     for (const auto* lang : kLangs) {
         m_language.AddString(lang);
     }
@@ -112,11 +110,9 @@ void SettingsDialog::FillModelCombo() {
     m_model.Fill(items);
 }
 
-void SettingsDialog::FillDeviceCombo(
-    DeviceCombo& combo,
-    const std::vector<AudioDeviceInfo>& devices,
-    const std::wstring& selectedId,
-    bool capture) {
+void SettingsDialog::FillDeviceCombo(DeviceCombo& combo,
+                                     const std::vector<AudioDeviceInfo>& devices,
+                                     const std::wstring& selectedId, bool capture) {
     std::vector<DeviceCombo::Item> items;
     items.push_back({capture ? L"Default communications device" : L"Default output device", {}});
     for (const auto& device : devices) {
@@ -252,8 +248,8 @@ bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) {
     m_sysGain.GetWindowText(sysGainText);
     out.micGain = ParseFloat(micGainText, 1.0f);
     out.systemGain = ParseFloat(sysGainText, 0.8f);
-    if (!std::isfinite(out.micGain) || out.micGain < 0.0f || out.micGain > 4.0f
-        || !std::isfinite(out.systemGain) || out.systemGain < 0.0f || out.systemGain > 4.0f) {
+    if (!std::isfinite(out.micGain) || out.micGain < 0.0f || out.micGain > 4.0f ||
+        !std::isfinite(out.systemGain) || out.systemGain < 0.0f || out.systemGain > 4.0f) {
         error = L"Gains must be between 0 and 4.";
         return false;
     }

@@ -37,7 +37,7 @@ void DrawFocusRing(CDCHandle dc, const CRect& rect, int radius) {
     dc.SelectPen(oldPen);
 }
 
-}  // namespace
+} // namespace
 
 void RecordButton::SetRecording(bool recording) {
     if (m_recording == recording) {
@@ -109,7 +109,7 @@ void RecordButton::PaintTo(CDCHandle dc) {
     FillRoundRect(dc, pill, radius, FillColor());
 
     const bool showFocus = (GetFocus() == m_hWnd) &&
-        ((::SendMessageW(m_hWnd, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS) == 0);
+                           ((::SendMessageW(m_hWnd, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS) == 0);
     if (showFocus) {
         DrawFocusRing(dc, pill, radius);
     }
@@ -139,11 +139,7 @@ void RecordButton::PaintTo(CDCHandle dc) {
     const int midY = pill.top + pill.Height() / 2;
 
     if (m_recording) {
-        CRect square(
-            x,
-            midY - glyphSize / 2,
-            x + glyphSize,
-            midY + glyphSize / 2);
+        CRect square(x, midY - glyphSize / 2, x + glyphSize, midY + glyphSize / 2);
         dc.FillSolidRect(&square, TextColor());
     } else {
         WTL::CBrush brush;
@@ -158,7 +154,8 @@ void RecordButton::PaintTo(CDCHandle dc) {
     x += glyphSize + gap;
 
     CRect textRect(x, pill.top, pill.right - ui::Scale(8, dpi), pill.bottom);
-    dc.DrawText(text, text.GetLength(), &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    dc.DrawText(text, text.GetLength(), &textRect,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
     if (oldFont != nullptr) {
         dc.SelectFont(oldFont);
@@ -215,7 +212,8 @@ void RecordButton::OnLButtonUp(UINT /*flags*/, CPoint point) {
     CRect rect;
     GetClientRect(&rect);
     if (wasPressed && rect.PtInRect(point) && IsWindowEnabled()) {
-        ::SendMessageW(GetParent(), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(), BN_CLICKED), reinterpret_cast<LPARAM>(m_hWnd));
+        ::SendMessageW(GetParent(), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(), BN_CLICKED),
+                       reinterpret_cast<LPARAM>(m_hWnd));
     }
 }
 
@@ -262,11 +260,8 @@ void RecordButton::OnKeyUp(UINT virtualKey, UINT /*repeat*/, UINT /*flags*/) {
         m_pressed = false;
         Invalidate(FALSE);
         if (wasPressed && IsWindowEnabled()) {
-            ::SendMessageW(
-                GetParent(),
-                WM_COMMAND,
-                MAKEWPARAM(GetDlgCtrlID(), BN_CLICKED),
-                reinterpret_cast<LPARAM>(m_hWnd));
+            ::SendMessageW(GetParent(), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(), BN_CLICKED),
+                           reinterpret_cast<LPARAM>(m_hWnd));
         }
         return;
     }

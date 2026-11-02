@@ -1,12 +1,11 @@
 #include "Application.hpp"
 
-#include "infrastructure/storage/Settings.hpp"
-#include "infrastructure/system/Autostart.hpp"
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Paths.hpp"
+#include "infrastructure/storage/Settings.hpp"
+#include "infrastructure/system/Autostart.hpp"
 
 #include <shellapi.h>
-
 #include <wil/resource.h>
 
 namespace {
@@ -15,7 +14,7 @@ constexpr wchar_t kMutexName[] = L"Local\\MeetingBuddy.SingleInstance";
 constexpr wchar_t kMainWindowClass[] = L"MeetingBuddy.MainWindow";
 constexpr wchar_t kShowYourselfMessage[] = L"MeetingBuddy.ShowYourself";
 
-}  // namespace
+} // namespace
 
 bool Application::HasTrayArgument() {
     int argc = 0;
@@ -73,9 +72,8 @@ int Application::Run(HINSTANCE /*instance*/, int showCommand) {
     Log::Info(L"MeetingBuddy starting");
 
     // Keep the Run key in sync with saved settings (repairs path after moves).
-    Autostart::Apply(
-        Settings::Instance().Data().startWithWindows,
-        Settings::Instance().Data().startMinimized);
+    Autostart::Apply(Settings::Instance().Data().startWithWindows,
+                     Settings::Instance().Data().startMinimized);
 
     WTL::CMessageLoop messageLoop;
     _Module.AddMessageLoop(&messageLoop);

@@ -62,5 +62,6 @@ TEST(Text, IsoToDisplayMinuteTruncatesAndReplacesSeparator) {
 TEST(Text, IsoToDisplayMinuteReturnsOtherInputUnchanged) {
     EXPECT_EQ(Text::IsoToDisplayMinute(std::string("")), "");
     EXPECT_EQ(Text::IsoToDisplayMinute(std::string("2026-11-01")), "2026-11-01");
-    EXPECT_EQ(Text::IsoToDisplayMinute(std::wstring(L"2026-11-01 13:18:00")), L"2026-11-01 13:18:00");
+    EXPECT_EQ(Text::IsoToDisplayMinute(std::wstring(L"2026-11-01 13:18:00")),
+              L"2026-11-01 13:18:00");
 }

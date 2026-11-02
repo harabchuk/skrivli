@@ -1,24 +1,24 @@
 #include "views/MainWindow.hpp"
 
 #include "Version.hpp"
-#include "infrastructure/files/M4aEncoder.hpp"
-#include "infrastructure/files/WavWriter.hpp"
-#include "infrastructure/storage/RecordingLibrary.hpp"
-#include "infrastructure/storage/RecordingSidecar.hpp"
-#include "views/ModelPrompt.hpp"
-#include "views/SettingsDialog.hpp"
-#include "ui/Theme.hpp"
-#include "views/TranscriptWindow.hpp"
-#include "infrastructure/system/Autostart.hpp"
-#include "infrastructure/system/Hotkey.hpp"
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Paths.hpp"
 #include "infrastructure/common/PostOwned.hpp"
 #include "infrastructure/common/Scoped.hpp"
 #include "infrastructure/common/Text.hpp"
+#include "infrastructure/files/M4aEncoder.hpp"
+#include "infrastructure/files/WavWriter.hpp"
+#include "infrastructure/storage/RecordingLibrary.hpp"
+#include "infrastructure/storage/RecordingSidecar.hpp"
+#include "infrastructure/system/Autostart.hpp"
+#include "infrastructure/system/Hotkey.hpp"
+#include "ui/Theme.hpp"
+#include "views/ModelPrompt.hpp"
+#include "views/SettingsDialog.hpp"
+#include "views/TranscriptWindow.hpp"
 
-#include <iterator>
 #include <cstdio>
+#include <iterator>
 #include <memory>
 #include <thread>
 
@@ -36,7 +36,7 @@ auto FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) -> std::wstring {
     return Text::FormatHms(elapsedQpc / frequency);
 }
 
-}  // namespace
+} // namespace
 
 LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     m_taskbarCreatedMsg = ::RegisterWindowMessageW(L"TaskbarCreated");
@@ -122,10 +122,7 @@ void MainWindow::CreateStatusBar() {
     m_hWndStatusBar = m_status.m_hWnd;
 
     // Left→right: state, elapsed, then stretching transcription progress.
-    int panes[] = {
-        IDC_STATUS_PANE_STATE,
-        IDC_STATUS_PANE_TIME,
-        IDC_STATUS_PANE_TRANSCRIBE};
+    int panes[] = {IDC_STATUS_PANE_STATE, IDC_STATUS_PANE_TIME, IDC_STATUS_PANE_TRANSCRIBE};
     m_status.SetPanes(panes, static_cast<int>(std::size(panes)), false);
     ApplyStatusPaneWidths();
 }
@@ -228,14 +225,15 @@ void MainWindow::UpdateRecordingUi() {
     LARGE_INTEGER freq{};
     ::QueryPerformanceCounter(&now);
     ::QueryPerformanceFrequency(&freq);
-    const auto elapsed =
-        FormatElapsed(static_cast<uint64_t>(now.QuadPart) - start, static_cast<uint64_t>(freq.QuadPart));
+    const auto elapsed = FormatElapsed(static_cast<uint64_t>(now.QuadPart) - start,
+                                       static_cast<uint64_t>(freq.QuadPart));
     const auto tip = L"Recording " + elapsed;
     m_tray.SetTip(tip.c_str());
     m_status.SetPaneText(IDC_STATUS_PANE_TIME, elapsed.c_str());
 }
 
-void MainWindow::EnterIdleUi(const std::wstring& path, bool refreshList, const std::wstring* error) {
+void MainWindow::EnterIdleUi(const std::wstring& path, bool refreshList,
+                             const std::wstring* error) {
     KillTimer(IDT_RECORD_ELAPSED);
     if (error != nullptr) {
         m_recordView.OnRecordingError(*error);
@@ -259,7 +257,8 @@ void MainWindow::LayoutChildren() {
     CRect client;
     GetClientRect(&client);
 
-    if (m_hWndStatusBar != nullptr && ::IsWindow(m_hWndStatusBar) && ::IsWindowVisible(m_hWndStatusBar)) {
+    if (m_hWndStatusBar != nullptr && ::IsWindow(m_hWndStatusBar) &&
+        ::IsWindowVisible(m_hWndStatusBar)) {
         CRect statusRect;
         ::GetWindowRect(m_hWndStatusBar, &statusRect);
         client.bottom -= statusRect.Height();
@@ -267,7 +266,8 @@ void MainWindow::LayoutChildren() {
 
     if (m_tabs.IsWindow()) {
         // The stock control left-aligns its items, so size it to the strip and center that window.
-        m_tabs.SetWindowPos(nullptr, client.left, client.top, client.Width(), client.Height(), SWP_NOZORDER | SWP_NOACTIVATE);
+        m_tabs.SetWindowPos(nullptr, client.left, client.top, client.Width(), client.Height(),
+                            SWP_NOZORDER | SWP_NOACTIVATE);
 
         CRect span{};
         const int count = m_tabs.GetItemCount();
@@ -302,16 +302,19 @@ void MainWindow::LayoutChildren() {
             }
         }
 
-        m_tabs.SetWindowPos(nullptr, tabX, client.top, tabWidth, tabHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+        m_tabs.SetWindowPos(nullptr, tabX, client.top, tabWidth, tabHeight,
+                            SWP_NOZORDER | SWP_NOACTIVATE);
 
         const CRect pageRect(client.left, client.top + tabHeight, client.right, client.bottom);
         CRect strip(client.left, client.top, client.right, pageRect.top);
         InvalidateRect(&strip, TRUE);
         if (m_recordView.IsWindow()) {
-            m_recordView.SetWindowPos(HWND_TOP, pageRect.left, pageRect.top, pageRect.Width(), pageRect.Height(), SWP_NOACTIVATE);
+            m_recordView.SetWindowPos(HWND_TOP, pageRect.left, pageRect.top, pageRect.Width(),
+                                      pageRect.Height(), SWP_NOACTIVATE);
         }
         if (m_recordingsView.IsWindow()) {
-            m_recordingsView.SetWindowPos(HWND_TOP, pageRect.left, pageRect.top, pageRect.Width(), pageRect.Height(), SWP_NOACTIVATE);
+            m_recordingsView.SetWindowPos(HWND_TOP, pageRect.left, pageRect.top, pageRect.Width(),
+                                          pageRect.Height(), SWP_NOACTIVATE);
         }
     }
 }
@@ -393,13 +396,8 @@ void MainWindow::OnDpiChanged(UINT dpiX, UINT /*dpiY*/, PRECT suggested) {
         m_recordView.OnDpiChanged(dpiX);
     }
     if (suggested != nullptr) {
-        SetWindowPos(
-            nullptr,
-            suggested->left,
-            suggested->top,
-            suggested->right - suggested->left,
-            suggested->bottom - suggested->top,
-            SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
+                     suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
     }
     LayoutChildren();
 }
@@ -436,10 +434,8 @@ bool MainWindow::ConfirmStopRecordingForExit() {
         return true;
     }
 
-    const int answer = ui::ShowMessage(
-        m_hWnd,
-        L"Stop and save recording?",
-        MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON1);
+    const int answer = ui::ShowMessage(m_hWnd, L"Stop and save recording?",
+                                       MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON1);
 
     if (answer == IDCANCEL) {
         return false;
@@ -507,21 +503,20 @@ void MainWindow::RegisterConfiguredHotkey() {
     if (!chord.valid) {
         if (!m_hotkeyWarned) {
             m_hotkeyWarned = true;
-            ui::ShowMessage(
-                m_hWnd,
-                L"The configured hotkey is invalid. Recording remains available from the window and tray.",
-                MB_OK | MB_ICONWARNING);
+            ui::ShowMessage(m_hWnd,
+                            L"The configured hotkey is invalid. Recording remains available from "
+                            L"the window and tray.",
+                            MB_OK | MB_ICONWARNING);
         }
         return;
     }
     if (!Hotkey::Register(m_hWnd, ID_HOTKEY_TOGGLE_RECORD, chord)) {
         if (!m_hotkeyWarned) {
             m_hotkeyWarned = true;
-            ui::ShowMessage(
-                m_hWnd,
-                L"Could not register the global hotkey (it may already be in use). "
-                L"Recording remains available from the window and tray.",
-                MB_OK | MB_ICONWARNING);
+            ui::ShowMessage(m_hWnd,
+                            L"Could not register the global hotkey (it may already be in use). "
+                            L"Recording remains available from the window and tray.",
+                            MB_OK | MB_ICONWARNING);
         }
         return;
     }
@@ -564,8 +559,7 @@ void MainWindow::StartM4aCompression(const std::wstring& wavPath) {
             PostOwned(hwnd, WM_APP_M4A_FINISHED, std::make_unique<std::wstring>(m4aPath));
         } else {
             PostOwned(
-                hwnd,
-                WM_APP_M4A_FAILED,
+                hwnd, WM_APP_M4A_FAILED,
                 std::make_unique<std::wstring>(error.empty() ? L"M4A compression failed." : error));
         }
     }).detach();
@@ -587,7 +581,8 @@ bool MainWindow::EnqueueTranscription(const std::wstring& audioPath) {
         return false;
     }
     const auto& settings = Settings::Instance().Data();
-    const auto modelFile = settings.model.empty() ? std::wstring(kDefaultWhisperModel) : settings.model;
+    const auto modelFile =
+        settings.model.empty() ? std::wstring(kDefaultWhisperModel) : settings.model;
     const auto modelPath = ModelPrompt::EnsureModel(m_hWnd, modelFile);
     if (modelPath.empty()) {
         return false;
@@ -666,19 +661,15 @@ void MainWindow::RestoreWindowPlacement() {
     }
 
     RECT rect = MakeRect(placement->x, placement->y, placement->width, placement->height);
-    if (!IsPlacementOnAnyMonitor(rect) || placement->width < kMinClientWidth || placement->height < kMinClientHeight) {
+    if (!IsPlacementOnAnyMonitor(rect) || placement->width < kMinClientWidth ||
+        placement->height < kMinClientHeight) {
         ResizeClient(kDefaultClientWidth, kDefaultClientHeight);
         CenterWindow();
         return;
     }
 
-    SetWindowPos(
-        nullptr,
-        placement->x,
-        placement->y,
-        placement->width,
-        placement->height,
-        SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(nullptr, placement->x, placement->y, placement->width, placement->height,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 bool MainWindow::IsPlacementOnAnyMonitor(const RECT& windowRect) const {
@@ -686,7 +677,8 @@ bool MainWindow::IsPlacementOnAnyMonitor(const RECT& windowRect) const {
     return monitor != nullptr;
 }
 
-LRESULT MainWindow::OnRegisteredMessage(UINT msg, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
+LRESULT MainWindow::OnRegisteredMessage(UINT msg, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                        BOOL& handled) {
     if (msg == m_taskbarCreatedMsg) {
         m_tray.ReAdd();
         handled = TRUE;
@@ -740,7 +732,8 @@ LRESULT MainWindow::OnTrayIcon(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, B
     return 0;
 }
 
-LRESULT MainWindow::OnRecordingStarted(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
+LRESULT MainWindow::OnRecordingStarted(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                       BOOL& handled) {
     handled = TRUE;
     m_recordView.OnRecordingStarted();
     SetStatusRecording();
@@ -750,7 +743,8 @@ LRESULT MainWindow::OnRecordingStarted(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /
     return 0;
 }
 
-LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam,
+                                        BOOL& handled) {
     handled = TRUE;
     const auto path = TakeOwned<std::wstring>(lParam);
     if (path && !path->empty()) {
@@ -797,7 +791,8 @@ LRESULT MainWindow::OnM4aFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, 
     return 0;
 }
 
-LRESULT MainWindow::OnRecordingError(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+LRESULT MainWindow::OnRecordingError(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam,
+                                     BOOL& handled) {
     handled = TRUE;
     const auto message = TakeOwned<std::wstring>(lParam);
     if (m_session.IsActive()) {
@@ -808,13 +803,15 @@ LRESULT MainWindow::OnRecordingError(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lPa
     return 0;
 }
 
-LRESULT MainWindow::OnDevicesChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
+LRESULT MainWindow::OnDevicesChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                     BOOL& handled) {
     handled = TRUE;
     m_recordView.OnDevicesChanged();
     return 0;
 }
 
-LRESULT MainWindow::OnDeviceSwitched(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+LRESULT MainWindow::OnDeviceSwitched(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam,
+                                     BOOL& handled) {
     handled = TRUE;
     const auto message = TakeOwned<std::wstring>(lParam);
     if (message && !message->empty()) {
@@ -837,7 +834,8 @@ LRESULT MainWindow::OnLowDisk(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/
     return 0;
 }
 
-LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam,
+                                       BOOL& handled) {
     handled = TRUE;
     const auto path = TakeOwned<std::wstring>(lParam);
     if (m_session.IsActive()) {
@@ -866,11 +864,8 @@ void MainWindow::ShowTrayContextMenu() {
 
     const bool recording = m_session.IsActive();
     popup.EnableMenuItem(ID_TRAY_STARTSTOP, MF_BYCOMMAND | MF_ENABLED);
-    popup.ModifyMenu(
-        ID_TRAY_STARTSTOP,
-        MF_BYCOMMAND | MF_STRING,
-        ID_TRAY_STARTSTOP,
-        recording ? L"&Stop recording" : L"&Start recording");
+    popup.ModifyMenu(ID_TRAY_STARTSTOP, MF_BYCOMMAND | MF_STRING, ID_TRAY_STARTSTOP,
+                     recording ? L"&Stop recording" : L"&Start recording");
 
     POINT cursor{};
     ::GetCursorPos(&cursor);
@@ -895,9 +890,8 @@ void MainWindow::OnSettings(UINT /*code*/, int /*id*/, HWND /*control*/) {
         return;
     }
 
-    Autostart::Apply(
-        Settings::Instance().Data().startWithWindows,
-        Settings::Instance().Data().startMinimized);
+    Autostart::Apply(Settings::Instance().Data().startWithWindows,
+                     Settings::Instance().Data().startMinimized);
     RegisterConfiguredHotkey();
 
     if (m_recordView.IsWindow()) {
@@ -913,9 +907,9 @@ void MainWindow::OnSettings(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void MainWindow::OnAbout(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    auto text = std::wstring(kAppName) + L" " + kAppVersion + L"\n\n"
-        + L"Local meeting recorder and optional transcription.\n\n"
-        + L"Transcription is local. The only network use is a model download you start.";
+    auto text = std::wstring(kAppName) + L" " + kAppVersion + L"\n\n" +
+                L"Local meeting recorder and optional transcription.\n\n" +
+                L"Transcription is local. The only network use is a model download you start.";
     ::MessageBoxW(m_hWnd, text.c_str(), L"About MeetingBuddy", MB_OK | MB_ICONINFORMATION);
 }
 
@@ -933,7 +927,8 @@ LRESULT MainWindow::OnTabSelChange(LPNMHDR /*header*/) {
     return 0;
 }
 
-LRESULT MainWindow::OnTranscribeQueued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+LRESULT MainWindow::OnTranscribeQueued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam,
+                                       BOOL& handled) {
     handled = TRUE;
     const auto notify = TakeOwned<TranscribeNotify>(lParam);
     SetTranscribeStatusText(L"Queued");
@@ -942,7 +937,8 @@ LRESULT MainWindow::OnTranscribeQueued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM l
     return 0;
 }
 
-LRESULT MainWindow::OnTranscribeProgress(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+LRESULT MainWindow::OnTranscribeProgress(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam,
+                                         BOOL& handled) {
     handled = TRUE;
     const auto notify = TakeOwned<TranscribeNotify>(lParam);
     if (notify) {
@@ -956,7 +952,8 @@ LRESULT MainWindow::OnTranscribeProgress(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
     return 0;
 }
 
-LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam,
+                                         BOOL& handled) {
     handled = TRUE;
     const auto notify = TakeOwned<TranscribeNotify>(lParam);
     SetTranscribeStatusText(L"Ready");
@@ -972,7 +969,8 @@ LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
     return 0;
 }
 
-LRESULT MainWindow::OnTranscribeFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
+LRESULT MainWindow::OnTranscribeFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam,
+                                       BOOL& handled) {
     handled = TRUE;
     const auto notify = TakeOwned<TranscribeNotify>(lParam);
     if (notify && !notify->message.empty()) {

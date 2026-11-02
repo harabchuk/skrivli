@@ -4,7 +4,7 @@ namespace {
 
 constexpr size_t kGrowthFrames = 64;
 
-}  // namespace
+} // namespace
 
 MaConverter::~MaConverter() {
     Uninit();
@@ -37,14 +37,15 @@ ma_uint64 MaConverter::InputLatency() const {
 
 ma_uint64 MaConverter::ExpectedOutputFrames(ma_uint64 inputFrames, ma_uint64 fallback) const {
     ma_uint64 expected = 0;
-    if (!m_live
-        || ma_data_converter_get_expected_output_frame_count(&m_converter, inputFrames, &expected) != MA_SUCCESS) {
+    if (!m_live || ma_data_converter_get_expected_output_frame_count(&m_converter, inputFrames,
+                                                                     &expected) != MA_SUCCESS) {
         return fallback;
     }
     return expected;
 }
 
-bool MaConverter::Push(const void* input, ma_uint64 frames, std::vector<float>& out, size_t& produced) {
+bool MaConverter::Push(const void* input, ma_uint64 frames, std::vector<float>& out,
+                       size_t& produced) {
     if (!m_live) {
         return false;
     }
@@ -55,15 +56,12 @@ bool MaConverter::Push(const void* input, ma_uint64 frames, std::vector<float>& 
         ma_uint64 inCount = framesLeft;
         ma_uint64 outSpace = (out.size() / m_channelsOut) - produced;
         if (outSpace == 0) {
-            out.resize((produced + static_cast<size_t>(framesLeft) + kGrowthFrames) * m_channelsOut);
+            out.resize((produced + static_cast<size_t>(framesLeft) + kGrowthFrames) *
+                       m_channelsOut);
             outSpace = (out.size() / m_channelsOut) - produced;
         }
         const ma_result result = ma_data_converter_process_pcm_frames(
-            &m_converter,
-            cursor,
-            &inCount,
-            out.data() + produced * m_channelsOut,
-            &outSpace);
+            &m_converter, cursor, &inCount, out.data() + produced * m_channelsOut, &outSpace);
         if (result != MA_SUCCESS) {
             return false;
         }
@@ -82,6 +80,7 @@ bool MaConverter::FlushLatency(std::vector<float>& out, size_t& produced) {
     if (latency == 0) {
         return true;
     }
-    const std::vector<std::byte> silence(static_cast<size_t>(latency) * m_bytesPerInputFrame, std::byte{0});
+    const std::vector<std::byte> silence(static_cast<size_t>(latency) * m_bytesPerInputFrame,
+                                         std::byte{0});
     return Push(silence.data(), latency, out, produced);
 }

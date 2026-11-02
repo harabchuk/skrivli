@@ -4,11 +4,10 @@
 
 #include <windows.h>
 
-#include <wil/resource.h>
-
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <wil/resource.h>
 
 namespace FileIo {
 
@@ -17,23 +16,18 @@ namespace {
 constexpr unsigned char kBomBytes[] = {0xEF, 0xBB, 0xBF};
 
 bool WriteDirect(const std::wstring& path, std::string_view data) {
-    wil::unique_hfile file(::CreateFileW(
-        path.c_str(),
-        GENERIC_WRITE,
-        FILE_SHARE_READ,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr));
+    wil::unique_hfile file(::CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) {
         return false;
     }
     DWORD written = 0;
-    const BOOL ok = ::WriteFile(file.get(), data.data(), static_cast<DWORD>(data.size()), &written, nullptr);
+    const BOOL ok =
+        ::WriteFile(file.get(), data.data(), static_cast<DWORD>(data.size()), &written, nullptr);
     return ok != FALSE && written == data.size();
 }
 
-}  // namespace
+} // namespace
 
 auto ReadFileBytes(const std::wstring& path, StripBom stripBom) -> std::optional<std::string> {
     std::ifstream file(path, std::ios::binary);
@@ -43,11 +37,10 @@ auto ReadFileBytes(const std::wstring& path, StripBom stripBom) -> std::optional
     std::ostringstream ss;
     ss << file.rdbuf();
     auto bytes = ss.str();
-    if (stripBom == StripBom::Yes
-        && bytes.size() >= sizeof(kBomBytes)
-        && static_cast<unsigned char>(bytes[0]) == kBomBytes[0]
-        && static_cast<unsigned char>(bytes[1]) == kBomBytes[1]
-        && static_cast<unsigned char>(bytes[2]) == kBomBytes[2]) {
+    if (stripBom == StripBom::Yes && bytes.size() >= sizeof(kBomBytes) &&
+        static_cast<unsigned char>(bytes[0]) == kBomBytes[0] &&
+        static_cast<unsigned char>(bytes[1]) == kBomBytes[1] &&
+        static_cast<unsigned char>(bytes[2]) == kBomBytes[2]) {
         bytes.erase(0, sizeof(kBomBytes));
     }
     return bytes;
@@ -63,7 +56,8 @@ bool WriteFileBytes(const std::wstring& path, std::string_view data, WriteMode m
         ::DeleteFileW(temp.c_str());
         return false;
     }
-    if (::MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE) {
+    if (::MoveFileExW(temp.c_str(), path.c_str(),
+                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE) {
         ::DeleteFileW(temp.c_str());
         return false;
     }
@@ -75,14 +69,9 @@ bool IsWritableDirectory(const std::wstring& folder) {
         return false;
     }
     const auto probe = std::filesystem::path(folder) / L".meetingbuddy_write_test";
-    const wil::unique_hfile file(::CreateFileW(
-        probe.c_str(),
-        GENERIC_WRITE,
-        0,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-        nullptr));
+    const wil::unique_hfile file(
+        ::CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                      FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr));
     return static_cast<bool>(file);
 }
 
@@ -97,4 +86,4 @@ uint64_t FileSize(const std::wstring& path) {
     return size.QuadPart;
 }
 
-}  // namespace FileIo
+} // namespace FileIo

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pch.hpp"
+
 #include "Ids.hpp"
 #include "infrastructure/audio/DeviceManager.hpp"
 #include "services/LevelMonitor.hpp"
@@ -11,47 +12,49 @@
 
 #include <string>
 
-class RecordView
-    : public CDialogImpl<RecordView>
-    , public WTL::CDialogResize<RecordView> {
-public:
-    enum { IDD = IDD_RECORD_PAGE };
+class RecordView : public CDialogImpl<RecordView>, public WTL::CDialogResize<RecordView> {
+  public:
+    enum {
+        IDD = IDD_RECORD_PAGE
+    };
 
     BEGIN_MSG_MAP_EX(RecordView)
-        MSG_WM_INITDIALOG(OnInitDialog)
-        MSG_WM_SIZE(OnSize)
-        MSG_WM_TIMER(OnTimer)
-        MSG_WM_DESTROY(OnDestroy)
-        MSG_WM_HSCROLL(OnHScroll)
-        MSG_WM_CTLCOLORDLG(OnCtlColorDlg)
-        MSG_WM_CTLCOLORSTATIC(OnCtlColorStatic)
-        MSG_WM_DRAWITEM(OnDrawItem)
-        COMMAND_HANDLER_EX(IDC_RECORD_BUTTON, BN_CLICKED, OnRecordClicked)
-        COMMAND_HANDLER_EX(IDC_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
-        COMMAND_HANDLER_EX(IDC_MIC_DEVICE, CBN_SELCHANGE, OnDeviceSelChange)
-        COMMAND_HANDLER_EX(IDC_SYSTEM_DEVICE, CBN_SELCHANGE, OnDeviceSelChange)
-        COMMAND_HANDLER_EX(IDC_MIC_GAIN_AUTO, BN_CLICKED, OnMicGainUiChanged)
-        CHAIN_MSG_MAP(WTL::CDialogResize<RecordView>)
+    MSG_WM_INITDIALOG(OnInitDialog)
+    MSG_WM_SIZE(OnSize)
+    MSG_WM_TIMER(OnTimer)
+    MSG_WM_DESTROY(OnDestroy)
+    MSG_WM_HSCROLL(OnHScroll)
+    MSG_WM_CTLCOLORDLG(OnCtlColorDlg)
+    MSG_WM_CTLCOLORSTATIC(OnCtlColorStatic)
+    MSG_WM_DRAWITEM(OnDrawItem)
+    COMMAND_HANDLER_EX(IDC_RECORD_BUTTON, BN_CLICKED, OnRecordClicked)
+    COMMAND_HANDLER_EX(IDC_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
+    COMMAND_HANDLER_EX(IDC_MIC_DEVICE, CBN_SELCHANGE, OnDeviceSelChange)
+    COMMAND_HANDLER_EX(IDC_SYSTEM_DEVICE, CBN_SELCHANGE, OnDeviceSelChange)
+    COMMAND_HANDLER_EX(IDC_MIC_GAIN_AUTO, BN_CLICKED, OnMicGainUiChanged)
+    CHAIN_MSG_MAP(WTL::CDialogResize<RecordView>)
     END_MSG_MAP()
 
     BEGIN_DLGRESIZE_MAP(RecordView)
-        DLGRESIZE_CONTROL(IDC_INPUT_SECTION, DLSZ_SIZE_X)
-        DLGRESIZE_CONTROL(IDC_OUTPUT_SECTION, DLSZ_SIZE_X)
-        DLGRESIZE_CONTROL(IDC_MIC_DEVICE, DLSZ_SIZE_X)
-        DLGRESIZE_CONTROL(IDC_SYSTEM_DEVICE, DLSZ_SIZE_X)
-        DLGRESIZE_CONTROL(IDC_FOLDER_PATH, DLSZ_SIZE_X)
-        DLGRESIZE_CONTROL(IDC_BROWSE_FOLDER, DLSZ_MOVE_X)
-        DLGRESIZE_CONTROL(IDC_RECORD_BUTTON, DLSZ_CENTER_X)
-        DLGRESIZE_CONTROL(IDC_ELAPSED, DLSZ_CENTER_X)
-        DLGRESIZE_CONTROL(IDC_REC_INDICATOR, DLSZ_CENTER_X)
-        DLGRESIZE_CONTROL(IDC_METER_MIC, DLSZ_SIZE_X)
-        DLGRESIZE_CONTROL(IDC_METER_SYSTEM, DLSZ_SIZE_X)
-        DLGRESIZE_CONTROL(IDC_MIC_DB, DLSZ_MOVE_X)
-        DLGRESIZE_CONTROL(IDC_SYSTEM_DB, DLSZ_MOVE_X)
-        DLGRESIZE_CONTROL(IDC_DEVICE_WARNING, DLSZ_SIZE_X)
+    DLGRESIZE_CONTROL(IDC_INPUT_SECTION, DLSZ_SIZE_X)
+    DLGRESIZE_CONTROL(IDC_OUTPUT_SECTION, DLSZ_SIZE_X)
+    DLGRESIZE_CONTROL(IDC_MIC_DEVICE, DLSZ_SIZE_X)
+    DLGRESIZE_CONTROL(IDC_SYSTEM_DEVICE, DLSZ_SIZE_X)
+    DLGRESIZE_CONTROL(IDC_FOLDER_PATH, DLSZ_SIZE_X)
+    DLGRESIZE_CONTROL(IDC_BROWSE_FOLDER, DLSZ_MOVE_X)
+    DLGRESIZE_CONTROL(IDC_RECORD_BUTTON, DLSZ_CENTER_X)
+    DLGRESIZE_CONTROL(IDC_ELAPSED, DLSZ_CENTER_X)
+    DLGRESIZE_CONTROL(IDC_REC_INDICATOR, DLSZ_CENTER_X)
+    DLGRESIZE_CONTROL(IDC_METER_MIC, DLSZ_SIZE_X)
+    DLGRESIZE_CONTROL(IDC_METER_SYSTEM, DLSZ_SIZE_X)
+    DLGRESIZE_CONTROL(IDC_MIC_DB, DLSZ_MOVE_X)
+    DLGRESIZE_CONTROL(IDC_SYSTEM_DB, DLSZ_MOVE_X)
+    DLGRESIZE_CONTROL(IDC_DEVICE_WARNING, DLSZ_SIZE_X)
     END_DLGRESIZE_MAP()
 
-    void SetSession(RecordingSession* session) { m_session = session; }
+    void SetSession(RecordingSession* session) {
+        m_session = session;
+    }
     void SetDeviceManager(DeviceManager* devices) {
         m_devices = devices;
         m_levelMonitor.SetDeviceManager(devices);
@@ -70,7 +73,7 @@ public:
     bool ToggleRecording();
     bool IsRecording() const;
 
-private:
+  private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
     void OnDestroy();
     void OnSize(UINT type, CSize size);

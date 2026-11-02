@@ -1,31 +1,29 @@
 #include "infrastructure/storage/RecordingLibrary.hpp"
 
-#include "infrastructure/storage/RecordingSidecar.hpp"
 #include "infrastructure/audio/WavHeader.hpp"
-#include "infrastructure/files/WavWriter.hpp"
 #include "infrastructure/common/FileIo.hpp"
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Text.hpp"
-
-#include <shellapi.h>
-#include <shobjidl.h>
-
-#include <wil/com.h>
-#include <wil/resource.h>
+#include "infrastructure/files/WavWriter.hpp"
+#include "infrastructure/storage/RecordingSidecar.hpp"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <shellapi.h>
+#include <shobjidl.h>
+#include <wil/com.h>
+#include <wil/resource.h>
 
 namespace {
 
 bool IsStemAudioFile(const std::wstring& fileName) {
-    return Text::EndsWithIgnoreCase(fileName, L".mic.wav")
-        || Text::EndsWithIgnoreCase(fileName, L".system.wav")
-        || Text::EndsWithIgnoreCase(fileName, L".mic.recovered.wav")
-        || Text::EndsWithIgnoreCase(fileName, L".system.recovered.wav");
+    return Text::EndsWithIgnoreCase(fileName, L".mic.wav") ||
+           Text::EndsWithIgnoreCase(fileName, L".system.wav") ||
+           Text::EndsWithIgnoreCase(fileName, L".mic.recovered.wav") ||
+           Text::EndsWithIgnoreCase(fileName, L".system.recovered.wav");
 }
 
 auto StemAudioPath(const std::wstring& stem, const wchar_t* suffix) -> std::wstring {
@@ -52,8 +50,8 @@ auto FileNameToStartLocal(const std::wstring& fileName) -> std::string {
     }
     // YYYY-MM-DD_HH-MM-SS → YYYY-MM-DDTHH:MM:SS
     const auto stamp = fileName.substr(prefix.size(), 19);
-    if (stamp.size() != 19 || stamp[10] != L'_' || stamp[4] != L'-' || stamp[7] != L'-'
-        || stamp[13] != L'-' || stamp[16] != L'-') {
+    if (stamp.size() != 19 || stamp[10] != L'_' || stamp[4] != L'-' || stamp[7] != L'-' ||
+        stamp[13] != L'-' || stamp[16] != L'-') {
         return {};
     }
     std::wstring iso = stamp;
@@ -64,14 +62,9 @@ auto FileNameToStartLocal(const std::wstring& fileName) -> std::string {
 }
 
 auto FileTimeToStartLocal(const std::wstring& path) -> std::string {
-    wil::unique_hfile file(::CreateFileW(
-        path.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr));
+    wil::unique_hfile file(::CreateFileW(path.c_str(), GENERIC_READ,
+                                         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                                         FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) {
         return {};
     }
@@ -110,7 +103,7 @@ bool ShellDelete(const std::vector<std::wstring>& paths) {
     return SUCCEEDED(hr);
 }
 
-}  // namespace
+} // namespace
 
 auto RecordingLibrary::JsonPathForAudio(const std::wstring& audioPath) -> std::wstring {
     return StemPath(audioPath) + L".json";
@@ -121,14 +114,8 @@ auto RecordingLibrary::MdPathForAudio(const std::wstring& audioPath) -> std::wst
 }
 
 double RecordingLibrary::ReadWavDurationSeconds(const std::wstring& wavPath) {
-    wil::unique_hfile file(::CreateFileW(
-        wavPath.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr));
+    wil::unique_hfile file(::CreateFileW(wavPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) {
         return 0.0;
     }
@@ -137,7 +124,8 @@ double RecordingLibrary::ReadWavDurationSeconds(const std::wstring& wavPath) {
     return header ? header->DurationSeconds() : 0.0;
 }
 
-bool RecordingLibrary::WriteSidecarForAudio(const std::wstring& audioPath, const RecordingSidecar& data) {
+bool RecordingLibrary::WriteSidecarForAudio(const std::wstring& audioPath,
+                                            const RecordingSidecar& data) {
     return Sidecar::Save(JsonPathForAudio(audioPath), data);
 }
 
@@ -217,7 +205,8 @@ auto RecordingLibrary::Scan(const std::wstring& folder) -> std::vector<Recording
     return entries;
 }
 
-bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& newStemName, std::wstring& error) {
+bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& newStemName,
+                              std::wstring& error) {
     error.clear();
     if (newStemName.empty() || newStemName.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos) {
         error = L"That name is not valid.";
@@ -233,7 +222,8 @@ bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& n
     if (Text::PathEquals(newAudio, entry.audioPath)) {
         return true;
     }
-    if (std::filesystem::exists(newAudio) || std::filesystem::exists(newJson) || std::filesystem::exists(newMd)) {
+    if (std::filesystem::exists(newAudio) || std::filesystem::exists(newJson) ||
+        std::filesystem::exists(newMd)) {
         error = L"A recording with that name already exists.";
         return false;
     }
@@ -244,7 +234,8 @@ bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& n
     const auto newSys = (dir / (newStemName + L".system.wav")).wstring();
     const bool hasMic = std::filesystem::exists(oldMic);
     const bool hasSys = std::filesystem::exists(oldSys);
-    if ((hasMic && std::filesystem::exists(newMic)) || (hasSys && std::filesystem::exists(newSys))) {
+    if ((hasMic && std::filesystem::exists(newMic)) ||
+        (hasSys && std::filesystem::exists(newSys))) {
         error = L"A recording with that name already exists.";
         return false;
     }

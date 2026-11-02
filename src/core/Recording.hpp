@@ -27,8 +27,8 @@ struct RecordingEntry {
     std::wstring audioPath;
     std::wstring jsonPath;
     std::wstring mdPath;
-    std::wstring stem;      // full path without extension
-    std::wstring fileName;  // leaf name of audio
+    std::wstring stem;     // full path without extension
+    std::wstring fileName; // leaf name of audio
     std::wstring displayName;
     std::wstring startLocal; // for sorting/display
     double durationSeconds = 0.0;

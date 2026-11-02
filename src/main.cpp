@@ -8,8 +8,8 @@ int main() {
         return 1;
     }
 
-    AtlInitCommonControls(
-        ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES | ICC_TAB_CLASSES | ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES);
+    AtlInitCommonControls(ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES | ICC_TAB_CLASSES |
+                          ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES);
 
     const auto instance = ::GetModuleHandleW(nullptr);
     _Module.Init(nullptr, instance);

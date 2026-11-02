@@ -1,7 +1,8 @@
 #pragma once
 
-#include <string>
 #include <windows.h>
+
+#include <string>
 
 struct HotkeyChord {
     UINT modifiers = 0; // MOD_* flags
@@ -19,4 +20,4 @@ auto Format(const HotkeyChord& chord) -> std::wstring;
 bool Register(HWND hwnd, int id, const HotkeyChord& chord);
 void Unregister(HWND hwnd, int id);
 
-}  // namespace Hotkey
+} // namespace Hotkey

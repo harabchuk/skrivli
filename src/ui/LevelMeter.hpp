@@ -3,20 +3,22 @@
 #include "pch.hpp"
 
 class LevelMeter : public CWindowImpl<LevelMeter> {
-public:
+  public:
     DECLARE_WND_CLASS(L"MeetingBuddy.LevelMeter")
 
     BEGIN_MSG_MAP_EX(LevelMeter)
-        MSG_WM_PAINT(OnPaint)
-        MSG_WM_ERASEBKGND(OnEraseBkgnd)
-        MSG_WM_SIZE(OnSize)
+    MSG_WM_PAINT(OnPaint)
+    MSG_WM_ERASEBKGND(OnEraseBkgnd)
+    MSG_WM_SIZE(OnSize)
     END_MSG_MAP()
 
     // peak is linear 0..1 amplitude.
     void SetLevel(float peak);
-    float DisplayDb() const { return m_displayDb; }
+    float DisplayDb() const {
+        return m_displayDb;
+    }
 
-private:
+  private:
     void OnPaint(CDCHandle /*dc*/);
     BOOL OnEraseBkgnd(CDCHandle /*dc*/);
     void OnSize(UINT type, CSize size);

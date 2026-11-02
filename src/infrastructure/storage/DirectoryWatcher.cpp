@@ -6,15 +6,12 @@
 
 namespace {
 
-constexpr DWORD kNotifyFilter =
-    FILE_NOTIFY_CHANGE_FILE_NAME
-    | FILE_NOTIFY_CHANGE_DIR_NAME
-    | FILE_NOTIFY_CHANGE_SIZE
-    | FILE_NOTIFY_CHANGE_LAST_WRITE;
+constexpr DWORD kNotifyFilter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+                                FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE;
 
 constexpr DWORD kCoalesceMs = 200;
 
-}  // namespace
+} // namespace
 
 DirectoryWatcher::~DirectoryWatcher() {
     Stop();
@@ -35,13 +32,8 @@ bool DirectoryWatcher::Start(const std::wstring& folder, HWND hwnd, UINT notifyM
     }
 
     m_dirHandle.reset(::CreateFileW(
-        folder.c_str(),
-        FILE_LIST_DIRECTORY,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-        nullptr));
+        folder.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr));
     if (!m_dirHandle) {
         Log::Warn(L"DirectoryWatcher could not open folder: " + folder);
         m_stopEvent.reset();
@@ -86,15 +78,9 @@ void DirectoryWatcher::ThreadMain() {
         overlapped.hEvent = changeEvent.get();
 
         DWORD bytes = 0;
-        const BOOL started = ::ReadDirectoryChangesW(
-            m_dirHandle.get(),
-            buffer.data(),
-            static_cast<DWORD>(buffer.size()),
-            FALSE,
-            kNotifyFilter,
-            &bytes,
-            &overlapped,
-            nullptr);
+        const BOOL started = ::ReadDirectoryChangesW(m_dirHandle.get(), buffer.data(),
+                                                     static_cast<DWORD>(buffer.size()), FALSE,
+                                                     kNotifyFilter, &bytes, &overlapped, nullptr);
 
         if (!started) {
             const auto err = ::GetLastError();

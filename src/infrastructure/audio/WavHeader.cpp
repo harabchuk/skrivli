@@ -11,14 +11,13 @@ constexpr uint32_t kBitsOffset = 34;
 constexpr uint32_t kDataSizeOffset = 40;
 constexpr uint32_t kWaveTagOffset = 8;
 
-template <typename T>
-T ReadField(const char* header, uint32_t offset) {
+template <typename T> T ReadField(const char* header, uint32_t offset) {
     T value{};
     std::memcpy(&value, header + offset, sizeof(value));
     return value;
 }
 
-}  // namespace
+} // namespace
 
 auto WavHeader::Read(HANDLE file) -> std::optional<WavHeader> {
     if (file == INVALID_HANDLE_VALUE || file == nullptr) {
@@ -35,7 +34,8 @@ auto WavHeader::Read(HANDLE file) -> std::optional<WavHeader> {
     if (!::ReadFile(file, header, kHeaderBytes, &read, nullptr) || read != kHeaderBytes) {
         return std::nullopt;
     }
-    if (std::memcmp(header, "RIFF", 4) != 0 || std::memcmp(header + kWaveTagOffset, "WAVE", 4) != 0) {
+    if (std::memcmp(header, "RIFF", 4) != 0 ||
+        std::memcmp(header + kWaveTagOffset, "WAVE", 4) != 0) {
         return std::nullopt;
     }
 

@@ -1,15 +1,14 @@
 #include "infrastructure/common/FileIo.hpp"
 
-#include <gtest/gtest.h>
-
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <string>
 
 namespace {
 
 class FileIoTest : public ::testing::Test {
-protected:
+  protected:
     void SetUp() override {
         m_dir = std::filesystem::temp_directory_path() / L"MeetingBuddyFileIoTests";
         std::filesystem::remove_all(m_dir);
@@ -30,7 +29,7 @@ protected:
 
 const std::string kBom = "\xEF\xBB\xBF";
 
-}  // namespace
+} // namespace
 
 TEST_F(FileIoTest, WriteThenReadRoundTripsBytes) {
     // Arrange

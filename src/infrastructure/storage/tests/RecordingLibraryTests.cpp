@@ -1,13 +1,13 @@
+#include "infrastructure/files/WavWriter.hpp"
 #include "infrastructure/storage/RecordingLibrary.hpp"
 #include "infrastructure/storage/RecordingSidecar.hpp"
-#include "infrastructure/files/WavWriter.hpp"
 
-#include <gtest/gtest.h>
+#include <windows.h>
 
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <vector>
-#include <windows.h>
 
 namespace {
 
@@ -51,7 +51,7 @@ std::wstring WriteTinyWav(const std::wstring& folder, const wchar_t* leaf) {
     return path;
 }
 
-}  // namespace
+} // namespace
 
 TEST(RecordingLibrary, PairsSidecarsAndSortsNewestFirst) {
     // Arrange
@@ -161,9 +161,12 @@ TEST(RecordingLibrary, RenameKeepsSidecarsTogether) {
     ASSERT_TRUE(RecordingLibrary::Rename(entries[0], L"RenamedMeeting", error)) << error;
 
     // Assert
-    EXPECT_TRUE(std::filesystem::exists((std::filesystem::path(folder) / L"RenamedMeeting.wav").wstring()));
-    EXPECT_TRUE(std::filesystem::exists((std::filesystem::path(folder) / L"RenamedMeeting.json").wstring()));
-    EXPECT_TRUE(std::filesystem::exists((std::filesystem::path(folder) / L"RenamedMeeting.md").wstring()));
+    EXPECT_TRUE(
+        std::filesystem::exists((std::filesystem::path(folder) / L"RenamedMeeting.wav").wstring()));
+    EXPECT_TRUE(std::filesystem::exists(
+        (std::filesystem::path(folder) / L"RenamedMeeting.json").wstring()));
+    EXPECT_TRUE(
+        std::filesystem::exists((std::filesystem::path(folder) / L"RenamedMeeting.md").wstring()));
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);

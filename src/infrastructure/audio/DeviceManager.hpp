@@ -1,14 +1,13 @@
 #pragma once
 
 #include <windows.h>
+
+#include <mmdeviceapi.h>
 #include <objbase.h>
 #include <propidl.h>
-#include <mmdeviceapi.h>
-
-#include <wil/com.h>
-
 #include <string>
 #include <vector>
+#include <wil/com.h>
 
 struct AudioDeviceInfo {
     std::wstring id;
@@ -17,7 +16,7 @@ struct AudioDeviceInfo {
 };
 
 class DeviceManager {
-public:
+  public:
     DeviceManager() = default;
     ~DeviceManager();
 
@@ -36,15 +35,13 @@ public:
 
     auto FriendlyName(IMMDevice* device) const -> std::wstring;
 
-private:
+  private:
     class NotificationClient;
 
     auto Enumerate(EDataFlow flow) const -> std::vector<AudioDeviceInfo>;
     auto DefaultId(EDataFlow flow, ERole role) const -> std::wstring;
-    auto Resolve(
-        EDataFlow flow,
-        ERole defaultRole,
-        const std::wstring& savedId) const -> wil::com_ptr_nothrow<IMMDevice>;
+    auto Resolve(EDataFlow flow, ERole defaultRole, const std::wstring& savedId) const
+        -> wil::com_ptr_nothrow<IMMDevice>;
     auto GetDefault(EDataFlow flow, ERole role) const -> wil::com_ptr_nothrow<IMMDevice>;
     auto GetById(const std::wstring& id) const -> wil::com_ptr_nothrow<IMMDevice>;
 

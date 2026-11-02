@@ -1,37 +1,37 @@
 #include "views/RecordingsView.hpp"
 
-#include "infrastructure/storage/Settings.hpp"
-#include "services/TranscriptionService.hpp"
-#include "views/ModelPrompt.hpp"
-#include "ui/Theme.hpp"
-#include "views/TranscriptWindow.hpp"
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Paths.hpp"
 #include "infrastructure/common/Text.hpp"
-
-#include <shellapi.h>
+#include "infrastructure/storage/Settings.hpp"
+#include "services/TranscriptionService.hpp"
+#include "ui/Theme.hpp"
+#include "views/ModelPrompt.hpp"
+#include "views/TranscriptWindow.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <shellapi.h>
 
 namespace {
 
 class RenameDialog : public CDialogImpl<RenameDialog> {
-public:
-    enum { IDD = IDD_RENAME_DIALOG };
+  public:
+    enum {
+        IDD = IDD_RENAME_DIALOG
+    };
 
-    explicit RenameDialog(std::wstring& name)
-        : m_name(name) {}
+    explicit RenameDialog(std::wstring& name) : m_name(name) {}
 
     BEGIN_MSG_MAP_EX(RenameDialog)
-        MSG_WM_INITDIALOG(OnInitDialog)
-        COMMAND_ID_HANDLER_EX(IDOK, OnOk)
-        COMMAND_ID_HANDLER_EX(IDCANCEL, OnCancel)
+    MSG_WM_INITDIALOG(OnInitDialog)
+    COMMAND_ID_HANDLER_EX(IDOK, OnOk)
+    COMMAND_ID_HANDLER_EX(IDCANCEL, OnCancel)
     END_MSG_MAP()
 
-private:
+  private:
     BOOL OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
         CenterWindow(GetParent());
         SetDlgItemText(IDC_RENAME_EDIT, m_name.c_str());
@@ -58,21 +58,17 @@ private:
 };
 
 constexpr int kSelectionActionIds[] = {
-    IDC_REC_PLAY,
-    IDC_REC_TRANSCRIBE,
-    IDC_REC_OPENFOLDER,
-    IDC_REC_RENAME,
-    IDC_REC_DELETE,
+    IDC_REC_PLAY, IDC_REC_TRANSCRIBE, IDC_REC_OPENFOLDER, IDC_REC_RENAME, IDC_REC_DELETE,
 };
 
-}  // namespace
+} // namespace
 
 BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     DlgResize_Init(false, false);
 
     m_list.Attach(GetDlgItem(IDC_RECORDINGS_LIST));
-    m_list.SetExtendedListViewStyle(
-        LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_INFOTIP | LVS_EX_DOUBLEBUFFER);
+    m_list.SetExtendedListViewStyle(LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_INFOTIP |
+                                    LVS_EX_DOUBLEBUFFER);
 
     m_list.InsertColumn(ColName, L"Name", LVCFMT_LEFT, 180);
     m_list.InsertColumn(ColDate, L"Date", LVCFMT_LEFT, 130);
@@ -150,7 +146,8 @@ void RecordingsView::ApplyUiFont(HFONT font) {
         return;
     }
     SetFont(font);
-    for (auto child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr; child = ::GetWindow(child, GW_HWNDNEXT)) {
+    for (auto child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr;
+         child = ::GetWindow(child, GW_HWNDNEXT)) {
         ::SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
     }
     if (m_list.IsWindow()) {
@@ -167,9 +164,9 @@ void RecordingsView::Refresh() {
             if (!Text::PathEquals(entry.audioPath, m_progressPath)) {
                 continue;
             }
-            if (entry.transcriptStatus == TranscriptStatus::Transcribing
-                || entry.transcriptStatus == TranscriptStatus::Preparing
-                || entry.transcriptStatus == TranscriptStatus::Queued) {
+            if (entry.transcriptStatus == TranscriptStatus::Transcribing ||
+                entry.transcriptStatus == TranscriptStatus::Preparing ||
+                entry.transcriptStatus == TranscriptStatus::Queued) {
                 entry.transcriptPercent = m_progressPercent;
                 stillActive = true;
             }
@@ -226,8 +223,8 @@ void RecordingsView::FitColumns() {
         int used = 0;
         for (int column = 0; column < kColumnCount; ++column) {
             const int columnWidth = (column == kColumnCount - 1)
-                ? (width - used)
-                : (width * kWeights[column] / kWeightSum);
+                                        ? (width - used)
+                                        : (width * kWeights[column] / kWeightSum);
             if (m_list.GetColumnWidth(column) != columnWidth) {
                 m_list.SetColumnWidth(column, columnWidth);
             }
@@ -347,19 +344,30 @@ void RecordingsView::ToggleSort(Column column) {
 }
 
 void RecordingsView::ApplySort() {
-    std::sort(m_entries.begin(), m_entries.end(), [this](const RecordingEntry& a, const RecordingEntry& b) {
-        int cmp = 0;
-        switch (m_sortColumn) {
-        case ColName: cmp = _wcsicmp(a.displayName.c_str(), b.displayName.c_str()); break;
-        case ColDate: cmp = a.startLocal.compare(b.startLocal); break;
-        case ColDuration:
-            cmp = (a.durationSeconds < b.durationSeconds) ? -1 : (a.durationSeconds > b.durationSeconds ? 1 : 0);
-            break;
-        case ColSize: cmp = (a.sizeBytes < b.sizeBytes) ? -1 : (a.sizeBytes > b.sizeBytes ? 1 : 0); break;
-        case ColTranscript: cmp = TranscriptLabel(a).compare(TranscriptLabel(b)); break;
-        }
-        return m_sortAscending ? (cmp < 0) : (cmp > 0);
-    });
+    std::sort(m_entries.begin(), m_entries.end(),
+              [this](const RecordingEntry& a, const RecordingEntry& b) {
+                  int cmp = 0;
+                  switch (m_sortColumn) {
+                  case ColName:
+                      cmp = _wcsicmp(a.displayName.c_str(), b.displayName.c_str());
+                      break;
+                  case ColDate:
+                      cmp = a.startLocal.compare(b.startLocal);
+                      break;
+                  case ColDuration:
+                      cmp = (a.durationSeconds < b.durationSeconds)
+                                ? -1
+                                : (a.durationSeconds > b.durationSeconds ? 1 : 0);
+                      break;
+                  case ColSize:
+                      cmp = (a.sizeBytes < b.sizeBytes) ? -1 : (a.sizeBytes > b.sizeBytes ? 1 : 0);
+                      break;
+                  case ColTranscript:
+                      cmp = TranscriptLabel(a).compare(TranscriptLabel(b));
+                      break;
+                  }
+                  return m_sortAscending ? (cmp < 0) : (cmp > 0);
+              });
 }
 
 bool RecordingsView::PromptRename(std::wstring& stemName) {
@@ -386,7 +394,8 @@ void RecordingsView::OnTranscribe(UINT /*code*/, int /*id*/, HWND /*control*/) {
         return;
     }
     const auto& settings = Settings::Instance().Data();
-    const auto modelFile = settings.model.empty() ? std::wstring(kDefaultWhisperModel) : settings.model;
+    const auto modelFile =
+        settings.model.empty() ? std::wstring(kDefaultWhisperModel) : settings.model;
     const auto modelPath = ModelPrompt::EnsureModel(GetParent(), modelFile);
     if (modelPath.empty() || !service.Enqueue(entry->audioPath, modelPath)) {
         return;
@@ -433,10 +442,9 @@ void RecordingsView::OnDelete(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (entry == nullptr) {
         return;
     }
-    const int answer = ui::ShowMessage(
-        m_hWnd,
-        L"Move this recording and its sidecars to the Recycle Bin?",
-        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+    const int answer =
+        ui::ShowMessage(m_hWnd, L"Move this recording and its sidecars to the Recycle Bin?",
+                        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
     if (answer != IDYES) {
         return;
     }
@@ -509,7 +517,8 @@ LRESULT RecordingsView::OnItemChanged(LPNMHDR /*header*/) {
     return 0;
 }
 
-LRESULT RecordingsView::OnLibraryChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
+LRESULT RecordingsView::OnLibraryChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                         BOOL& handled) {
     handled = TRUE;
     Refresh();
     return 0;

@@ -1,35 +1,23 @@
 #include "infrastructure/storage/RecordingSidecar.hpp"
 
 #include "core/AudioFormat.hpp"
-#include "infrastructure/storage/RecordingLibrary.hpp"
 #include "infrastructure/common/FileIo.hpp"
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Text.hpp"
-
-#include <glaze/glaze.hpp>
+#include "infrastructure/storage/RecordingLibrary.hpp"
 
 #include <windows.h>
 
 #include <cstdio>
+#include <glaze/glaze.hpp>
 
-template <>
-struct glz::meta<TranscriptStatus> {
-    static constexpr std::array keys{
-        "none",
-        "queued",
-        "preparing",
-        "transcribing",
-        "ready",
-        "failed",
-        "cancelled"};
-    static constexpr std::array value{
-        TranscriptStatus::None,
-        TranscriptStatus::Queued,
-        TranscriptStatus::Preparing,
-        TranscriptStatus::Transcribing,
-        TranscriptStatus::Ready,
-        TranscriptStatus::Failed,
-        TranscriptStatus::Cancelled};
+template <> struct glz::meta<TranscriptStatus> {
+    static constexpr std::array keys{"none",  "queued", "preparing", "transcribing",
+                                     "ready", "failed", "cancelled"};
+    static constexpr std::array value{TranscriptStatus::None,      TranscriptStatus::Queued,
+                                      TranscriptStatus::Preparing, TranscriptStatus::Transcribing,
+                                      TranscriptStatus::Ready,     TranscriptStatus::Failed,
+                                      TranscriptStatus::Cancelled};
 };
 
 namespace Sidecar {
@@ -44,19 +32,10 @@ auto ForAudio(const std::wstring& audioPath) -> RecordingSidecar {
     return side;
 }
 
-
 auto FormatLocalTimestamp(const SYSTEMTIME& local) -> std::string {
     char buf[32]{};
-    std::snprintf(
-        buf,
-        sizeof(buf),
-        "%04u-%02u-%02uT%02u:%02u:%02u",
-        local.wYear,
-        local.wMonth,
-        local.wDay,
-        local.wHour,
-        local.wMinute,
-        local.wSecond);
+    std::snprintf(buf, sizeof(buf), "%04u-%02u-%02uT%02u:%02u:%02u", local.wYear, local.wMonth,
+                  local.wDay, local.wHour, local.wMinute, local.wSecond);
     return buf;
 }
 
@@ -78,7 +57,8 @@ bool Load(const std::wstring& jsonPath, RecordingSidecar& out) {
 
     RecordingSidecar data{};
     if (const auto ec = glz::read_json(data, json)) {
-        Log::Error(L"Failed to parse sidecar JSON: " + Text::Utf8ToWide(glz::format_error(ec, json)));
+        Log::Error(L"Failed to parse sidecar JSON: " +
+                   Text::Utf8ToWide(glz::format_error(ec, json)));
         return false;
     }
     out = std::move(data);
@@ -102,4 +82,4 @@ bool Save(const std::wstring& jsonPath, const RecordingSidecar& data) {
     return true;
 }
 
-}  // namespace Sidecar
+} // namespace Sidecar

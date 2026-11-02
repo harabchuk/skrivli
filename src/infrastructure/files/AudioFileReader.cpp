@@ -4,26 +4,19 @@
 #include "infrastructure/audio/MiniAudio.hpp"
 #include "infrastructure/common/Text.hpp"
 
-#include <mfapi.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
-
-#include <wil/com.h>
-
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
 #include <vector>
+#include <wil/com.h>
 
 namespace {
 
-bool ConvertToStereo48k(
-    const float* interleaved,
-    size_t frameCount,
-    uint32_t sampleRate,
-    uint32_t channels,
-    std::vector<float>& outStereo,
-    std::wstring& error) {
+bool ConvertToStereo48k(const float* interleaved, size_t frameCount, uint32_t sampleRate,
+                        uint32_t channels, std::vector<float>& outStereo, std::wstring& error) {
     outStereo.clear();
     if (frameCount == 0 || channels == 0 || sampleRate == 0) {
         return true;
@@ -37,13 +30,8 @@ bool ConvertToStereo48k(
         return true;
     }
 
-    ma_data_converter_config config = ma_data_converter_config_init(
-        ma_format_f32,
-        ma_format_f32,
-        channels,
-        2,
-        sampleRate,
-        48000);
+    ma_data_converter_config config =
+        ma_data_converter_config_init(ma_format_f32, ma_format_f32, channels, 2, sampleRate, 48000);
     config.ditherMode = ma_dither_mode_none;
     config.resampling.linear.lpfOrder = 8;
 
@@ -93,11 +81,13 @@ bool ReadWithMiniaudio(const std::wstring& path, DecodedAudio& out, std::wstring
     ma_uint64 total = 0;
     for (;;) {
         ma_uint64 framesRead = 0;
-        const ma_result result = ma_decoder_read_pcm_frames(&decoder, chunk.data(), kChunkFrames, &framesRead);
+        const ma_result result =
+            ma_decoder_read_pcm_frames(&decoder, chunk.data(), kChunkFrames, &framesRead);
         if (framesRead > 0) {
             const size_t samples = static_cast<size_t>(framesRead) * 2;
             out.interleavedStereo.resize(static_cast<size_t>(total) * 2 + samples);
-            std::memcpy(out.interleavedStereo.data() + static_cast<size_t>(total) * 2, chunk.data(), samples * sizeof(float));
+            std::memcpy(out.interleavedStereo.data() + static_cast<size_t>(total) * 2, chunk.data(),
+                        samples * sizeof(float));
             total += framesRead;
         }
         if (framesRead == 0 || framesRead < kChunkFrames || result == MA_AT_END) {
@@ -140,7 +130,8 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
     }
     partial->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
     partial->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_Float);
-    hr = reader->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), nullptr, partial.get());
+    hr = reader->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),
+                                     nullptr, partial.get());
     if (FAILED(hr)) {
         error = L"Could not configure float audio decode.";
         ::MFShutdown();
@@ -148,7 +139,8 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
     }
 
     wil::com_ptr_nothrow<IMFMediaType> current;
-    hr = reader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), current.put());
+    hr = reader->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),
+                                     current.put());
     if (FAILED(hr) || !current) {
         error = L"Could not read decoded audio format.";
         ::MFShutdown();
@@ -171,13 +163,8 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
         DWORD flags = 0;
         LONGLONG timestamp = 0;
         wil::com_ptr_nothrow<IMFSample> sample;
-        hr = reader->ReadSample(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),
-            0,
-            &streamIndex,
-            &flags,
-            &timestamp,
-            sample.put());
+        hr = reader->ReadSample(static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), 0,
+                                &streamIndex, &flags, &timestamp, sample.put());
         if (FAILED(hr)) {
             error = L"ReadSample failed.";
             break;
@@ -215,14 +202,15 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
     }
 
     const size_t frames = interleaved.size() / channels;
-    if (!ConvertToStereo48k(interleaved.data(), frames, sampleRate, channels, out.interleavedStereo, error)) {
+    if (!ConvertToStereo48k(interleaved.data(), frames, sampleRate, channels, out.interleavedStereo,
+                            error)) {
         return false;
     }
     FinishDecoded(out);
     return true;
 }
 
-}  // namespace
+} // namespace
 
 bool AudioFileReader::Read(const std::wstring& path, DecodedAudio& out, std::wstring& error) {
     out = {};
@@ -231,10 +219,12 @@ bool AudioFileReader::Read(const std::wstring& path, DecodedAudio& out, std::wst
         return false;
     }
 
-    if (Text::EndsWithIgnoreCase(path, L".wav") || Text::EndsWithIgnoreCase(path, L".flac") || Text::EndsWithIgnoreCase(path, L".mp3")) {
+    if (Text::EndsWithIgnoreCase(path, L".wav") || Text::EndsWithIgnoreCase(path, L".flac") ||
+        Text::EndsWithIgnoreCase(path, L".mp3")) {
         return ReadWithMiniaudio(path, out, error);
     }
-    if (Text::EndsWithIgnoreCase(path, L".m4a") || Text::EndsWithIgnoreCase(path, L".mp4") || Text::EndsWithIgnoreCase(path, L".aac")) {
+    if (Text::EndsWithIgnoreCase(path, L".m4a") || Text::EndsWithIgnoreCase(path, L".mp4") ||
+        Text::EndsWithIgnoreCase(path, L".aac")) {
         return ReadWithMediaFoundation(path, out, error);
     }
 

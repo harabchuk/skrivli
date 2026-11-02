@@ -1,22 +1,21 @@
 #include "views/TranscriptWindow.hpp"
 
 #include "core/MarkdownFormatter.hpp"
-#include "ui/ShellDialogs.hpp"
-#include "ui/Theme.hpp"
-#include "infrastructure/system/Clipboard.hpp"
 #include "infrastructure/common/FileIo.hpp"
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Text.hpp"
-
-#include <commdlg.h>
-#include <richedit.h>
+#include "infrastructure/system/Clipboard.hpp"
+#include "ui/ShellDialogs.hpp"
+#include "ui/Theme.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <commdlg.h>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <richedit.h>
 #include <sstream>
 #include <vector>
 
@@ -50,7 +49,7 @@ int CountWords(const std::wstring& text) {
     return count;
 }
 
-}  // namespace
+} // namespace
 
 BOOL TranscriptWindow::PreTranslateMessage(MSG* msg) {
     if (msg != nullptr && msg->message == WM_KEYDOWN) {
@@ -130,29 +129,45 @@ LRESULT TranscriptWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     }
 
     m_hWndClient = nullptr;
-    const DWORD toolbarStyle = WS_CHILD | WS_VISIBLE | CCS_TOP | TBSTYLE_LIST | TBSTYLE_WRAPABLE | TBSTYLE_TOOLTIPS;
-    auto toolbarHwnd = ::CreateWindowExW(
-        0,
-        TOOLBARCLASSNAMEW,
-        nullptr,
-        toolbarStyle,
-        0,
-        0,
-        0,
-        0,
-        m_hWnd,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TRANSCRIPT_TOOLBAR)),
-        _Module.GetModuleInstance(),
-        nullptr);
+    const DWORD toolbarStyle =
+        WS_CHILD | WS_VISIBLE | CCS_TOP | TBSTYLE_LIST | TBSTYLE_WRAPABLE | TBSTYLE_TOOLTIPS;
+    auto toolbarHwnd =
+        ::CreateWindowExW(0, TOOLBARCLASSNAMEW, nullptr, toolbarStyle, 0, 0, 0, 0, m_hWnd,
+                          reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TRANSCRIPT_TOOLBAR)),
+                          _Module.GetModuleInstance(), nullptr);
     m_hWndToolBar = toolbarHwnd;
     m_toolbar.Attach(toolbarHwnd);
     m_toolbar.SendMessage(TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
     m_toolbar.SetExtendedStyle(TBSTYLE_EX_MIXEDBUTTONS);
     TBBUTTON buttons[] = {
-        {I_IMAGENONE, ID_TRANSCRIPT_COPYALL, TBSTATE_ENABLED, BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT, {0}, 0, (INT_PTR)L"&Copy all"},
-        {I_IMAGENONE, ID_TRANSCRIPT_SAVEAS, TBSTATE_ENABLED, BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT, {0}, 0, (INT_PTR)L"&Save as…"},
-        {I_IMAGENONE, ID_TRANSCRIPT_OPENEDITOR, TBSTATE_ENABLED, BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT, {0}, 0, (INT_PTR)L"&Open in editor"},
-        {I_IMAGENONE, ID_TRANSCRIPT_FIND, TBSTATE_ENABLED, BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT, {0}, 0, (INT_PTR)L"&Find"},
+        {I_IMAGENONE,
+         ID_TRANSCRIPT_COPYALL,
+         TBSTATE_ENABLED,
+         BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT,
+         {0},
+         0,
+         (INT_PTR)L"&Copy all"},
+        {I_IMAGENONE,
+         ID_TRANSCRIPT_SAVEAS,
+         TBSTATE_ENABLED,
+         BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT,
+         {0},
+         0,
+         (INT_PTR)L"&Save as…"},
+        {I_IMAGENONE,
+         ID_TRANSCRIPT_OPENEDITOR,
+         TBSTATE_ENABLED,
+         BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT,
+         {0},
+         0,
+         (INT_PTR)L"&Open in editor"},
+        {I_IMAGENONE,
+         ID_TRANSCRIPT_FIND,
+         TBSTATE_ENABLED,
+         BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT,
+         {0},
+         0,
+         (INT_PTR)L"&Find"},
     };
     m_toolbar.AddButtons(static_cast<int>(std::size(buttons)), buttons);
     m_toolbar.AutoSize();
@@ -162,20 +177,12 @@ LRESULT TranscriptWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     int panes[] = {0};
     m_status.SetPanes(panes, 1, true);
 
-    const DWORD style = WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_NOHIDESEL;
-    auto edit = ::CreateWindowExW(
-        WS_EX_CLIENTEDGE,
-        MSFTEDIT_CLASS,
-        L"",
-        style,
-        0,
-        0,
-        0,
-        0,
-        m_hWnd,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TRANSCRIPT_EDIT)),
-        _Module.GetModuleInstance(),
-        nullptr);
+    const DWORD style = WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY |
+                        ES_AUTOVSCROLL | ES_NOHIDESEL;
+    auto edit =
+        ::CreateWindowExW(WS_EX_CLIENTEDGE, MSFTEDIT_CLASS, L"", style, 0, 0, 0, 0, m_hWnd,
+                          reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TRANSCRIPT_EDIT)),
+                          _Module.GetModuleInstance(), nullptr);
     if (edit == nullptr) {
         Log::Error(L"Failed to create RichEdit control");
         return -1;
@@ -296,10 +303,12 @@ auto TranscriptWindow::GetSelectionOrAll() const -> std::wstring {
         return GetPlainText();
     }
     const auto all = GetPlainText();
-    if (range.cpMin < 0 || range.cpMax > static_cast<LONG>(all.size()) || range.cpMin > range.cpMax) {
+    if (range.cpMin < 0 || range.cpMax > static_cast<LONG>(all.size()) ||
+        range.cpMin > range.cpMax) {
         return all;
     }
-    return all.substr(static_cast<size_t>(range.cpMin), static_cast<size_t>(range.cpMax - range.cpMin));
+    return all.substr(static_cast<size_t>(range.cpMin),
+                      static_cast<size_t>(range.cpMax - range.cpMin));
 }
 
 bool TranscriptWindow::CopyPlainMarkdown(bool selectionOnly) {
@@ -325,7 +334,8 @@ void TranscriptWindow::LayoutChildren() {
         bottom -= statusRect.Height();
     }
     if (m_edit.IsWindow()) {
-        m_edit.SetWindowPos(nullptr, 0, top, client.Width(), (std::max)(0, bottom - top), SWP_NOZORDER);
+        m_edit.SetWindowPos(nullptr, 0, top, client.Width(), (std::max)(0, bottom - top),
+                            SWP_NOZORDER);
     }
 }
 
@@ -375,7 +385,8 @@ void TranscriptWindow::OnSelectAll(UINT /*code*/, int /*id*/, HWND /*control*/) 
     m_edit.SetSel(0, -1);
 }
 
-LRESULT TranscriptWindow::OnCopyMessage(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& handled) {
+LRESULT TranscriptWindow::OnCopyMessage(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                        BOOL& handled) {
     handled = TRUE;
     CopyPlainMarkdown(true);
     return 0;
@@ -386,7 +397,8 @@ void TranscriptWindow::OnSaveAs(UINT /*code*/, int /*id*/, HWND /*control*/) {
         {L"Markdown (*.md)", L"*.md"},
         {L"All files (*.*)", L"*.*"},
     };
-    const auto picked = ui::PickSaveFile(m_hWnd, kFilters, L"md", std::filesystem::path(m_path).filename().wstring());
+    const auto picked = ui::PickSaveFile(m_hWnd, kFilters, L"md",
+                                         std::filesystem::path(m_path).filename().wstring());
     if (!picked) {
         return;
     }

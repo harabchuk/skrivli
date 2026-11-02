@@ -11,7 +11,9 @@
 namespace {
 
 auto Trim(std::string text) -> std::string {
-    const auto notSpace = [](unsigned char ch) { return ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n'; };
+    const auto notSpace = [](unsigned char ch) {
+        return ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n';
+    };
     while (!text.empty() && !notSpace(static_cast<unsigned char>(text.front()))) {
         text.erase(text.begin());
     }
@@ -35,7 +37,8 @@ auto FormatDuration(double seconds) -> std::string {
     return Text::FormatHms<std::string>(static_cast<uint64_t>(std::llround(seconds)));
 }
 
-auto DedupAndTrim(const std::vector<TranscriptSegment>& segments) -> std::vector<TranscriptSegment> {
+auto DedupAndTrim(const std::vector<TranscriptSegment>& segments)
+    -> std::vector<TranscriptSegment> {
     std::vector<TranscriptSegment> out;
     out.reserve(segments.size());
     int repeat = 0;
@@ -61,9 +64,10 @@ auto DedupAndTrim(const std::vector<TranscriptSegment>& segments) -> std::vector
     return out;
 }
 
-}  // namespace
+} // namespace
 
-auto MarkdownFormatter::Format(const TranscriptMeta& meta, const std::vector<TranscriptSegment>& segments) -> std::string {
+auto MarkdownFormatter::Format(const TranscriptMeta& meta,
+                               const std::vector<TranscriptSegment>& segments) -> std::string {
     const auto cleaned = DedupAndTrim(segments);
 
     std::ostringstream ss;
@@ -82,8 +86,8 @@ auto MarkdownFormatter::Format(const TranscriptMeta& meta, const std::vector<Tra
         return ss.str();
     }
 
-    constexpr int64_t kPauseBreak = 150;   // 1.5 s in 10 ms units
-    constexpr int64_t kMaxSpan = 6000;    // ~60 s
+    constexpr int64_t kPauseBreak = 150; // 1.5 s in 10 ms units
+    constexpr int64_t kMaxSpan = 6000;   // ~60 s
 
     size_t i = 0;
     while (i < cleaned.size()) {

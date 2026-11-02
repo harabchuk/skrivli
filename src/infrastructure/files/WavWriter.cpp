@@ -6,11 +6,12 @@
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Paths.hpp"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <vector>
-#include <windows.h>
 
 namespace {
 
@@ -63,11 +64,12 @@ bool WriteRiffSizes(HANDLE file, uint64_t dataBytes) {
 }
 
 bool OpenExisting(wil::unique_hfile& out, const std::wstring& path, DWORD access, DWORD share) {
-    out.reset(::CreateFileW(path.c_str(), access, share, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    out.reset(::CreateFileW(path.c_str(), access, share, nullptr, OPEN_EXISTING,
+                            FILE_ATTRIBUTE_NORMAL, nullptr));
     return static_cast<bool>(out);
 }
 
-}  // namespace
+} // namespace
 
 struct WavWriter::WavEncoder {
     ma_encoder encoder{};
@@ -86,7 +88,8 @@ void WavWriter::WavEncoderDeleter::operator()(WavEncoder* encoder) const {
 }
 
 struct WavEncoderCallbacks {
-    static ma_result Write(ma_encoder* encoder, const void* data, size_t bytes, size_t* bytesWritten) {
+    static ma_result Write(ma_encoder* encoder, const void* data, size_t bytes,
+                           size_t* bytesWritten) {
         auto* self = static_cast<WavWriter*>(encoder->pUserData);
         size_t written = 0;
         if (self == nullptr || !self->WriteBytes(data, bytes, written)) {
@@ -172,23 +175,15 @@ auto WavWriter::MakeBasePath(const std::wstring& folder) -> std::wstring {
     ::GetLocalTime(&local);
 
     wchar_t stamp[64]{};
-    std::swprintf(
-        stamp,
-        64,
-        L"MeetingBuddy_%04u-%02u-%02u_%02u-%02u-%02u",
-        local.wYear,
-        local.wMonth,
-        local.wDay,
-        local.wHour,
-        local.wMinute,
-        local.wSecond);
+    std::swprintf(stamp, 64, L"MeetingBuddy_%04u-%02u-%02u_%02u-%02u-%02u", local.wYear,
+                  local.wMonth, local.wDay, local.wHour, local.wMinute, local.wSecond);
 
     auto isFree = [](const std::wstring& stem) {
-        return !std::filesystem::exists(stem + L".wav")
-            && !std::filesystem::exists(stem + L".wav.partial")
-            && !std::filesystem::exists(stem + L".m4a")
-            && !std::filesystem::exists(stem + L".mic.wav")
-            && !std::filesystem::exists(stem + L".system.wav");
+        return !std::filesystem::exists(stem + L".wav") &&
+               !std::filesystem::exists(stem + L".wav.partial") &&
+               !std::filesystem::exists(stem + L".m4a") &&
+               !std::filesystem::exists(stem + L".mic.wav") &&
+               !std::filesystem::exists(stem + L".system.wav");
     };
 
     auto base = std::filesystem::path(folder) / stamp;
@@ -209,8 +204,8 @@ auto WavWriter::MakeBasePath(const std::wstring& folder) -> std::wstring {
 auto WavWriter::RecoveredPathFromPartial(const std::wstring& partialPath) -> std::wstring {
     std::wstring path = partialPath;
     const std::wstring suffix = L".wav.partial";
-    if (path.size() >= suffix.size()
-        && path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0) {
+    if (path.size() >= suffix.size() &&
+        path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0) {
         path.erase(path.size() - suffix.size());
         return path + L".recovered.wav";
     }
@@ -240,14 +235,8 @@ bool WavWriter::OpenFinalPath(const std::wstring& finalWavPath) {
     m_framesWritten = 0;
     m_bytesSincePatch = 0;
 
-    m_file.reset(::CreateFileW(
-        m_partialPath.c_str(),
-        GENERIC_WRITE | GENERIC_READ,
-        FILE_SHARE_READ,
-        nullptr,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr));
+    m_file.reset(::CreateFileW(m_partialPath.c_str(), GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ,
+                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!m_file) {
         Log::Error(L"Failed to create WAV partial file");
         ResetState();
@@ -255,17 +244,10 @@ bool WavWriter::OpenFinalPath(const std::wstring& finalWavPath) {
     }
 
     auto encoder = std::unique_ptr<WavEncoder, WavEncoderDeleter>(new WavEncoder());
-    const auto config = ma_encoder_config_init(
-        ma_encoding_format_wav,
-        ma_format_s16,
-        kChannels,
-        kSampleRate);
-    const auto result = ma_encoder_init(
-        &WavEncoderCallbacks::Write,
-        &WavEncoderCallbacks::Seek,
-        this,
-        &config,
-        &encoder->encoder);
+    const auto config =
+        ma_encoder_config_init(ma_encoding_format_wav, ma_format_s16, kChannels, kSampleRate);
+    const auto result = ma_encoder_init(&WavEncoderCallbacks::Write, &WavEncoderCallbacks::Seek,
+                                        this, &config, &encoder->encoder);
     if (result != MA_SUCCESS) {
         Log::Error(L"Failed to open miniaudio WAV encoder");
         Abandon();
@@ -281,26 +263,18 @@ bool WavWriter::Open(const std::wstring& folder) {
 }
 
 bool WavWriter::WriteFloatFrames(const float* interleavedStereo, uint32_t frameCount) {
-    if (m_encoder == nullptr || !m_encoder->live || interleavedStereo == nullptr || frameCount == 0) {
+    if (m_encoder == nullptr || !m_encoder->live || interleavedStereo == nullptr ||
+        frameCount == 0) {
         return false;
     }
 
     m_pcmScratch.resize(static_cast<size_t>(frameCount) * kChannels);
-    ma_convert_pcm_frames_format(
-        m_pcmScratch.data(),
-        ma_format_s16,
-        interleavedStereo,
-        ma_format_f32,
-        frameCount,
-        kChannels,
-        ma_dither_mode_none);
+    ma_convert_pcm_frames_format(m_pcmScratch.data(), ma_format_s16, interleavedStereo,
+                                 ma_format_f32, frameCount, kChannels, ma_dither_mode_none);
 
     ma_uint64 framesWritten = 0;
-    const auto result = ma_encoder_write_pcm_frames(
-        &m_encoder->encoder,
-        m_pcmScratch.data(),
-        frameCount,
-        &framesWritten);
+    const auto result = ma_encoder_write_pcm_frames(&m_encoder->encoder, m_pcmScratch.data(),
+                                                    frameCount, &framesWritten);
     if (result != MA_SUCCESS || framesWritten != frameCount) {
         Log::Error(L"WAV write failed");
         return false;
@@ -409,16 +383,16 @@ bool WavWriter::RepairPartialHeader(const std::wstring& partialPath) {
     }
 
     LARGE_INTEGER size{};
-    if (!::GetFileSizeEx(file.get(), &size) || size.QuadPart < static_cast<LONGLONG>(kHeaderBytes)) {
+    if (!::GetFileSizeEx(file.get(), &size) ||
+        size.QuadPart < static_cast<LONGLONG>(kHeaderBytes)) {
         return false;
     }
     if (!WavHeader::Read(file.get())) {
         return false;
     }
 
-    const auto dataBytes = std::min<uint64_t>(
-        static_cast<uint64_t>(size.QuadPart) - kHeaderBytes,
-        0xFFFFFFFFull);
+    const auto dataBytes =
+        std::min<uint64_t>(static_cast<uint64_t>(size.QuadPart) - kHeaderBytes, 0xFFFFFFFFull);
     return WriteRiffSizes(file.get(), dataBytes);
 }
 
@@ -446,7 +420,8 @@ auto WavWriter::RecoverPartialsInFolder(const std::wstring& folder) -> std::vect
                 continue;
             }
             LARGE_INTEGER size{};
-            tooShort = !::GetFileSizeEx(file.get(), &size) || size.QuadPart < static_cast<LONGLONG>(kHeaderBytes);
+            tooShort = !::GetFileSizeEx(file.get(), &size) ||
+                       size.QuadPart < static_cast<LONGLONG>(kHeaderBytes);
         }
         if (tooShort) {
             Log::Warn(L"Leaving short partial unrecovered: " + path);

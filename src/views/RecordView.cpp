@@ -1,22 +1,21 @@
 #include "views/RecordView.hpp"
 
-#include "infrastructure/storage/Settings.hpp"
-#include "ui/ShellDialogs.hpp"
-#include "ui/Theme.hpp"
 #include "infrastructure/common/FileIo.hpp"
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Paths.hpp"
 #include "infrastructure/common/Text.hpp"
-
-#include <commctrl.h>
-#include <shellapi.h>
-#include <shobjidl.h>
-#include <uxtheme.h>
+#include "infrastructure/storage/Settings.hpp"
+#include "ui/ShellDialogs.hpp"
+#include "ui/Theme.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <commctrl.h>
 #include <cstdio>
 #include <initializer_list>
+#include <shellapi.h>
+#include <shobjidl.h>
+#include <uxtheme.h>
 #include <vector>
 
 namespace {
@@ -51,17 +50,17 @@ auto FormatGainMultiplier(float gain) -> std::wstring {
 
 int GainToSliderPos(float gain) {
     const float clamped = std::clamp(gain, 0.0f, 4.0f);
-    return std::clamp(
-        static_cast<int>(std::lround(static_cast<double>(clamped) / static_cast<double>(kMicGainStep))),
-        kMicGainSliderMin,
-        kMicGainSliderMax);
+    return std::clamp(static_cast<int>(std::lround(static_cast<double>(clamped) /
+                                                   static_cast<double>(kMicGainStep))),
+                      kMicGainSliderMin, kMicGainSliderMax);
 }
 
 float SliderPosToGain(int pos) {
     return static_cast<float>(std::clamp(pos, kMicGainSliderMin, kMicGainSliderMax)) * kMicGainStep;
 }
 
-HFONT CreateFirstAvailableFont(std::initializer_list<const wchar_t*> faces, int heightPx, int weight) {
+HFONT CreateFirstAvailableFont(std::initializer_list<const wchar_t*> faces, int heightPx,
+                               int weight) {
     for (const wchar_t* face : faces) {
         LOGFONTW lf{};
         lf.lfHeight = -heightPx;
@@ -85,7 +84,7 @@ auto ToComboItems(const std::vector<AudioDeviceInfo>& devices) -> std::vector<De
     return items;
 }
 
-}  // namespace
+} // namespace
 
 BOOL RecordView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_micCombo.Attach(GetDlgItem(IDC_MIC_DEVICE));
@@ -175,18 +174,16 @@ void RecordView::UpdateDeviceTooltips() {
     if (micSel >= 0) {
         m_micCombo.Combo().GetLBText(micSel, micText);
     }
-    m_tooltips.UpdateTipText(
-        micText.IsEmpty() ? L"Microphone device" : micText.GetString(),
-        m_micCombo.Combo().m_hWnd);
+    m_tooltips.UpdateTipText(micText.IsEmpty() ? L"Microphone device" : micText.GetString(),
+                             m_micCombo.Combo().m_hWnd);
 
     CString sysText;
     const int sysSel = m_systemCombo.Combo().GetCurSel();
     if (sysSel >= 0) {
         m_systemCombo.Combo().GetLBText(sysSel, sysText);
     }
-    m_tooltips.UpdateTipText(
-        sysText.IsEmpty() ? L"System audio device" : sysText.GetString(),
-        m_systemCombo.Combo().m_hWnd);
+    m_tooltips.UpdateTipText(sysText.IsEmpty() ? L"System audio device" : sysText.GetString(),
+                             m_systemCombo.Combo().m_hWnd);
 }
 
 void RecordView::RebuildSpecialFonts(UINT dpi) {
@@ -197,15 +194,12 @@ void RecordView::RebuildSpecialFonts(UINT dpi) {
 
     // CFont is managed, so Attach releases the previous handle.
     if (HFONT timer = CreateFirstAvailableFont(
-            {L"Segoe UI Variable Display", L"Segoe UI Semibold", L"Segoe UI"},
-            ui::Scale(28, dpi),
+            {L"Segoe UI Variable Display", L"Segoe UI Semibold", L"Segoe UI"}, ui::Scale(28, dpi),
             FW_SEMIBOLD)) {
         m_timerFont.Attach(timer);
     }
-    if (HFONT section = CreateFirstAvailableFont(
-            {L"Segoe UI Semibold", L"Segoe UI"},
-            ui::Scale(13, dpi),
-            FW_SEMIBOLD)) {
+    if (HFONT section = CreateFirstAvailableFont({L"Segoe UI Semibold", L"Segoe UI"},
+                                                 ui::Scale(13, dpi), FW_SEMIBOLD)) {
         m_sectionFont.Attach(section);
     }
 }
@@ -216,7 +210,8 @@ void RecordView::ApplyControlFonts() {
     }
 
     const HFONT ui = m_uiFont;
-    for (HWND child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr; child = ::GetWindow(child, GW_HWNDNEXT)) {
+    for (HWND child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr;
+         child = ::GetWindow(child, GW_HWNDNEXT)) {
         const int id = ::GetDlgCtrlID(child);
         if (id == IDC_ELAPSED || id == IDC_INPUT_SECTION || id == IDC_OUTPUT_SECTION) {
             continue;
@@ -297,10 +292,7 @@ HBRUSH RecordView::OnCtlColorStatic(CDCHandle dc, CStatic wndStatic) {
     // The read-only path field shares the white input look of the combos.
     if (id == IDC_FOLDER_PATH) {
         dc.SetBkColor(ui::WindowColor());
-        dc.SetTextColor(
-            wndStatic.IsWindowEnabled()
-                ? ui::TextColor()
-                : ui::SecondaryTextColor());
+        dc.SetTextColor(wndStatic.IsWindowEnabled() ? ui::TextColor() : ui::SecondaryTextColor());
         return ui::WindowBrush();
     }
 
@@ -402,14 +394,8 @@ void RecordView::MatchControlHeight(HWND control, int height) {
     if (rect.Height() == height) {
         return;
     }
-    ::SetWindowPos(
-        control,
-        nullptr,
-        rect.left,
-        rect.top,
-        rect.Width(),
-        height,
-        SWP_NOZORDER | SWP_NOACTIVATE);
+    ::SetWindowPos(control, nullptr, rect.left, rect.top, rect.Width(), height,
+                   SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void RecordView::CenterLabelOnRow(int labelId, HWND row, int rowHeight) {
@@ -427,7 +413,8 @@ void RecordView::CenterLabelOnRow(int labelId, HWND row, int rowHeight) {
     if (labelRect.top == y) {
         return;
     }
-    ::SetWindowPos(label, nullptr, labelRect.left, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    ::SetWindowPos(label, nullptr, labelRect.left, y, 0, 0,
+                   SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void RecordView::LayoutFieldRows() {
@@ -478,8 +465,8 @@ void RecordView::SyncMicGainUi() {
         return;
     }
     const float gain = autoGain
-        ? m_session->EffectiveMicGain()
-        : (m_micGain.IsWindow() ? SliderPosToGain(m_micGain.GetPos()) : 1.0f);
+                           ? m_session->EffectiveMicGain()
+                           : (m_micGain.IsWindow() ? SliderPosToGain(m_micGain.GetPos()) : 1.0f);
     m_micGainValue.SetWindowText(FormatGainMultiplier(gain).c_str());
 }
 
@@ -587,10 +574,8 @@ void RecordView::StartMeterPreview() {
         return;
     }
     const auto& settings = Settings::Instance().Data();
-    m_levelMonitor.Start(
-        settings.micDeviceId,
-        settings.systemDeviceId,
-        settings.communicationsProcessing);
+    m_levelMonitor.Start(settings.micDeviceId, settings.systemDeviceId,
+                         settings.communicationsProcessing);
 }
 
 void RecordView::StopMeterPreview() {
@@ -622,9 +607,8 @@ void RecordView::SetInputsEnabled(bool enabled) {
 void RecordView::UpdateRecordButton() {
     m_recordButton.SetRecording(IsRecording());
     if (m_tooltips.IsWindow() && m_recordButton.IsWindow()) {
-        m_tooltips.UpdateTipText(
-            IsRecording() ? L"Stop recording" : L"Start recording",
-            m_recordButton.m_hWnd);
+        m_tooltips.UpdateTipText(IsRecording() ? L"Stop recording" : L"Start recording",
+                                 m_recordButton.m_hWnd);
     }
 }
 
@@ -641,13 +625,12 @@ void RecordView::ShowPrivacyDeniedDialog() {
     config.pszWindowTitle = L"MeetingBuddy";
     config.pszMainIcon = TD_WARNING_ICON;
     config.pszMainInstruction = L"Microphone access is turned off";
-    config.pszContent =
-        L"Windows is blocking microphone access for desktop apps.\n\n"
-        L"Open Privacy settings to allow MeetingBuddy to record.";
+    config.pszContent = L"Windows is blocking microphone access for desktop apps.\n\n"
+                        L"Open Privacy settings to allow MeetingBuddy to record.";
     config.pszFooter = L"Recording was not started.";
 
     TASKDIALOG_BUTTON buttons[] = {
-        { 1001, L"Open microphone settings" },
+        {1001, L"Open microphone settings"},
     };
     config.cButtons = 1;
     config.pButtons = buttons;
@@ -655,7 +638,8 @@ void RecordView::ShowPrivacyDeniedDialog() {
 
     int clicked = 0;
     if (SUCCEEDED(::TaskDialogIndirect(&config, &clicked, nullptr, nullptr)) && clicked == 1001) {
-        ::ShellExecuteW(m_hWnd, L"open", L"ms-settings:privacy-microphone", nullptr, nullptr, SW_SHOWNORMAL);
+        ::ShellExecuteW(m_hWnd, L"open", L"ms-settings:privacy-microphone", nullptr, nullptr,
+                        SW_SHOWNORMAL);
     }
 }
 
@@ -703,14 +687,8 @@ bool RecordView::ToggleRecording() {
 
     const auto& settings = Settings::Instance().Data();
     const RecordingStartResult result = m_session->Start(
-        folder,
-        settings.micDeviceId,
-        settings.systemDeviceId,
-        settings.micGain,
-        settings.micAgc,
-        settings.systemGain,
-        settings.communicationsProcessing,
-        settings.saveStems);
+        folder, settings.micDeviceId, settings.systemDeviceId, settings.micGain, settings.micAgc,
+        settings.systemGain, settings.communicationsProcessing, settings.saveStems);
 
     if (result.privacyDenied) {
         ShowPrivacyDeniedDialog();

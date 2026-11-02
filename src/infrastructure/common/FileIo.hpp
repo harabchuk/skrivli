@@ -18,8 +18,10 @@ enum class WriteMode {
     Atomic,
 };
 
-auto ReadFileBytes(const std::wstring& path, StripBom stripBom = StripBom::No) -> std::optional<std::string>;
-bool WriteFileBytes(const std::wstring& path, std::string_view data, WriteMode mode = WriteMode::Direct);
+auto ReadFileBytes(const std::wstring& path, StripBom stripBom = StripBom::No)
+    -> std::optional<std::string>;
+bool WriteFileBytes(const std::wstring& path, std::string_view data,
+                    WriteMode mode = WriteMode::Direct);
 
 // Creates the folder if needed and verifies a file can be created inside it.
 bool IsWritableDirectory(const std::wstring& folder);
@@ -27,4 +29,4 @@ bool IsWritableDirectory(const std::wstring& folder);
 // Returns 0 when the file does not exist.
 uint64_t FileSize(const std::wstring& path);
 
-}  // namespace FileIo
+} // namespace FileIo

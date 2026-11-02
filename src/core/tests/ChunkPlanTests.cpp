@@ -1,8 +1,7 @@
 #include "core/ChunkPlan.hpp"
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
+#include <gtest/gtest.h>
 
 TEST(ChunkPlan, ShortRecordingIsSingleChunk) {
     // Arrange
@@ -30,8 +29,7 @@ TEST(ChunkPlan, SyntheticLongBufferSplitsWithOverlap) {
 
     // Assert
     ASSERT_GE(chunks.size(), 2u);
-    EXPECT_TRUE(ChunkPlan::ShouldChunk(
-        static_cast<double>(totalFrames) / ChunkPlan::kSampleRate));
+    EXPECT_TRUE(ChunkPlan::ShouldChunk(static_cast<double>(totalFrames) / ChunkPlan::kSampleRate));
 
     EXPECT_EQ(chunks.front().first, 0u);
     EXPECT_EQ(chunks.front().second, chunkFrames);
@@ -48,9 +46,8 @@ TEST(ChunkPlan, SyntheticLongBufferSplitsWithOverlap) {
     EXPECT_EQ(coveredEnd, totalFrames);
 
     // Timestamp offset for the second chunk is in 10 ms units.
-    EXPECT_EQ(
-        ChunkPlan::OffsetTenths(chunks[1].first),
-        static_cast<int64_t>((chunks[1].first * 100.0) / ChunkPlan::kSampleRate));
+    EXPECT_EQ(ChunkPlan::OffsetTenths(chunks[1].first),
+              static_cast<int64_t>((chunks[1].first * 100.0) / ChunkPlan::kSampleRate));
 }
 
 TEST(ChunkPlan, ExactlyOneHourNotChunked) {

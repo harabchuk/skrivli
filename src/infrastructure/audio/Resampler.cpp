@@ -12,20 +12,16 @@ constexpr uint32_t kInputRate = 48000;
 constexpr uint32_t kOutputRate = 16000;
 constexpr uint32_t kLpfOrder = 8;
 
-}  // namespace
+} // namespace
 
-auto Resampler::Stereo48kToMono16k(const float* interleavedStereo, size_t frameCount) -> std::vector<float> {
+auto Resampler::Stereo48kToMono16k(const float* interleavedStereo, size_t frameCount)
+    -> std::vector<float> {
     if (interleavedStereo == nullptr || frameCount == 0) {
         return {};
     }
 
-    ma_data_converter_config config = ma_data_converter_config_init(
-        ma_format_f32,
-        ma_format_f32,
-        2,
-        1,
-        kInputRate,
-        kOutputRate);
+    ma_data_converter_config config =
+        ma_data_converter_config_init(ma_format_f32, ma_format_f32, 2, 1, kInputRate, kOutputRate);
     config.channelMixMode = ma_channel_mix_mode_rectangular;
     config.ditherMode = ma_dither_mode_none;
     // Order 8 is the highest Butterworth miniaudio will build. It is what keeps a
@@ -38,7 +34,8 @@ auto Resampler::Stereo48kToMono16k(const float* interleavedStereo, size_t frameC
     }
 
     const size_t target = frameCount / 3;
-    const ma_uint64 expected = converter.ExpectedOutputFrames(frameCount, static_cast<ma_uint64>(target));
+    const ma_uint64 expected =
+        converter.ExpectedOutputFrames(frameCount, static_cast<ma_uint64>(target));
     const ma_uint64 latency = converter.InputLatency();
 
     std::vector<float> out(static_cast<size_t>(expected + latency + 64));

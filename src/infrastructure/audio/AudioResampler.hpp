@@ -7,7 +7,7 @@
 // miniaudio data converter. Turns a device mix-format packet into 48 kHz
 // stereo float. Set up once at stream start.
 class AudioResampler {
-public:
+  public:
     AudioResampler() = default;
     ~AudioResampler();
 
@@ -20,16 +20,14 @@ public:
 
     // Resamples one packet into outInterleavedStereo (stereo float @ 48 kHz).
     // outFrames is the number of stereo frames written.
-    bool Process(
-        const void* inputBytes,
-        uint32_t inputByteCount,
-        uint32_t inputFrames,
-        std::vector<float>& outInterleavedStereo,
-        uint32_t& outFrames);
+    bool Process(const void* inputBytes, uint32_t inputByteCount, uint32_t inputFrames,
+                 std::vector<float>& outInterleavedStereo, uint32_t& outFrames);
 
-    bool IsReady() const { return m_state != nullptr; }
+    bool IsReady() const {
+        return m_state != nullptr;
+    }
 
-private:
+  private:
     struct State;
     struct StateDeleter {
         void operator()(State* state) const;

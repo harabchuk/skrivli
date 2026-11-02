@@ -1,7 +1,6 @@
 #include "core/RingBuffer.hpp"
 
 #include <gtest/gtest.h>
-
 #include <vector>
 
 TEST(RingBuffer, PushPopRoundTrip) {

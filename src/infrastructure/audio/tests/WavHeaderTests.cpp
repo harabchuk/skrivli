@@ -1,12 +1,12 @@
 #include "infrastructure/audio/WavHeader.hpp"
 
-#include <gtest/gtest.h>
+#include <windows.h>
 
 #include <cstring>
 #include <filesystem>
+#include <gtest/gtest.h>
 #include <string>
 #include <vector>
-#include <windows.h>
 
 namespace {
 
@@ -19,13 +19,8 @@ std::filesystem::path TempFile(const wchar_t* name) {
     return dir / name;
 }
 
-std::vector<char> MakeHeader(
-    uint16_t format,
-    uint16_t channels,
-    uint32_t sampleRate,
-    uint16_t bits,
-    uint32_t dataSize,
-    const char* riff = "RIFF") {
+std::vector<char> MakeHeader(uint16_t format, uint16_t channels, uint32_t sampleRate, uint16_t bits,
+                             uint32_t dataSize, const char* riff = "RIFF") {
     std::vector<char> header(44, 0);
     std::memcpy(header.data(), riff, 4);
     std::memcpy(header.data() + 8, "WAVE", 4);
@@ -40,19 +35,14 @@ std::vector<char> MakeHeader(
 }
 
 class TempWav {
-public:
+  public:
     TempWav(const wchar_t* name, const std::vector<char>& bytes) : m_path(TempFile(name)) {
-        m_handle = ::CreateFileW(
-            m_path.c_str(),
-            GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ,
-            nullptr,
-            CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr);
+        m_handle = ::CreateFileW(m_path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
+                                 nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         EXPECT_NE(m_handle, INVALID_HANDLE_VALUE);
         DWORD written = 0;
-        EXPECT_TRUE(::WriteFile(m_handle, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr));
+        EXPECT_TRUE(::WriteFile(m_handle, bytes.data(), static_cast<DWORD>(bytes.size()), &written,
+                                nullptr));
     }
 
     ~TempWav() {
@@ -66,14 +56,16 @@ public:
     TempWav(const TempWav&) = delete;
     TempWav& operator=(const TempWav&) = delete;
 
-    HANDLE Handle() const { return m_handle; }
+    HANDLE Handle() const {
+        return m_handle;
+    }
 
-private:
+  private:
     std::filesystem::path m_path;
     HANDLE m_handle = INVALID_HANDLE_VALUE;
 };
 
-}  // namespace
+} // namespace
 
 TEST(WavHeader, ReadsCanonicalHeaderFields) {
     // Arrange

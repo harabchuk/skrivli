@@ -6,16 +6,11 @@ namespace {
 
 // Not named LoadIcon: winuser.h defines that as a macro.
 HICON LoadTrayIcon(int id) {
-    return static_cast<HICON>(::LoadImageW(
-        _Module.GetResourceInstance(),
-        MAKEINTRESOURCEW(id),
-        IMAGE_ICON,
-        0,
-        0,
-        LR_DEFAULTSIZE | LR_SHARED));
+    return static_cast<HICON>(::LoadImageW(_Module.GetResourceInstance(), MAKEINTRESOURCEW(id),
+                                           IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED));
 }
 
-}  // namespace
+} // namespace
 
 TrayIcon::~TrayIcon() {
     Remove();

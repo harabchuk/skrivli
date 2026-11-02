@@ -28,13 +28,9 @@ void Mixer::EnsureDownmix() {
         return;
     }
     auto downmix = std::unique_ptr<Downmix, DownmixDeleter>(new Downmix());
-    const auto config = ma_channel_converter_config_init(
-        ma_format_f32,
-        AudioFormat::kChannels,
-        nullptr,
-        1,
-        nullptr,
-        ma_channel_mix_mode_rectangular);
+    const auto config =
+        ma_channel_converter_config_init(ma_format_f32, AudioFormat::kChannels, nullptr, 1, nullptr,
+                                         ma_channel_mix_mode_rectangular);
     if (ma_channel_converter_init(&config, nullptr, &downmix->converter) != MA_SUCCESS) {
         return;
     }
@@ -42,7 +38,8 @@ void Mixer::EnsureDownmix() {
     m_downmix = std::move(downmix);
 }
 
-void Mixer::Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain, bool micAgc) {
+void Mixer::Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain,
+                  bool micAgc) {
     m_startQpc = startQpc;
     m_qpcFrequency = qpcFrequency == 0 ? 1 : qpcFrequency;
     m_micGain = std::clamp(micGain, 0.0f, kAgcMaxGain);
@@ -85,7 +82,8 @@ float Mixer::CurrentMicGain() const {
 }
 
 void Mixer::UpdateAgc(float blockRms) {
-    constexpr float dt = static_cast<float>(AudioFormat::kBlockFrames) / static_cast<float>(AudioFormat::kSampleRate);
+    constexpr float dt = static_cast<float>(AudioFormat::kBlockFrames) /
+                         static_cast<float>(AudioFormat::kSampleRate);
     const float alpha = 1.0f - std::exp(-dt / kAgcWindowSeconds);
     m_agcRms = (1.0f - alpha) * m_agcRms + alpha * blockRms;
 
@@ -112,12 +110,14 @@ void Mixer::EnsureCapacity(SourceBuffer& source, int64_t frameIndex, uint32_t fr
 
     if (frameIndex < source.startFrame) {
         const int64_t pad = source.startFrame - frameIndex;
-        source.samples.insert(source.samples.begin(), static_cast<size_t>(pad) * AudioFormat::kChannels, 0.0f);
+        source.samples.insert(source.samples.begin(),
+                              static_cast<size_t>(pad) * AudioFormat::kChannels, 0.0f);
         source.startFrame = frameIndex;
     }
 
     if (neededEnd > source.endFrame) {
-        const size_t needSamples = static_cast<size_t>(neededEnd - source.startFrame) * AudioFormat::kChannels;
+        const size_t needSamples =
+            static_cast<size_t>(neededEnd - source.startFrame) * AudioFormat::kChannels;
         if (source.samples.size() < needSamples) {
             source.samples.resize(needSamples, 0.0f);
         }
@@ -125,7 +125,8 @@ void Mixer::EnsureCapacity(SourceBuffer& source, int64_t frameIndex, uint32_t fr
     }
 }
 
-void Mixer::IngestPacket(SourceBuffer& source, int64_t frameIndex, const float* data, uint32_t frames) {
+void Mixer::IngestPacket(SourceBuffer& source, int64_t frameIndex, const float* data,
+                         uint32_t frames) {
     if (data == nullptr || frames == 0) {
         return;
     }
@@ -145,12 +146,10 @@ void Mixer::IngestPacket(SourceBuffer& source, int64_t frameIndex, const float* 
     }
 
     EnsureCapacity(source, writeFrame, writeFrames);
-    auto* dest = source.samples.data()
-        + static_cast<size_t>(writeFrame - source.startFrame) * AudioFormat::kChannels;
-    std::copy(
-        writeData,
-        writeData + static_cast<size_t>(writeFrames) * AudioFormat::kChannels,
-        dest);
+    auto* dest = source.samples.data() +
+                 static_cast<size_t>(writeFrame - source.startFrame) * AudioFormat::kChannels;
+    std::copy(writeData, writeData + static_cast<size_t>(writeFrames) * AudioFormat::kChannels,
+              dest);
     source.endFrame = (std::max)(source.endFrame, writeFrame + static_cast<int64_t>(writeFrames));
 }
 
@@ -202,12 +201,10 @@ void Mixer::ReadSourceBlock(SourceBuffer& source, int64_t blockStart, float* des
     const int64_t destOffset = copyStart - blockStart;
     const int64_t srcOffset = copyStart - source.startFrame;
     const auto frameCount = static_cast<size_t>(copyEnd - copyStart);
-    ma_copy_pcm_frames(
-        dest + static_cast<size_t>(destOffset) * AudioFormat::kChannels,
-        source.samples.data() + static_cast<size_t>(srcOffset) * AudioFormat::kChannels,
-        frameCount,
-        ma_format_f32,
-        AudioFormat::kChannels);
+    ma_copy_pcm_frames(dest + static_cast<size_t>(destOffset) * AudioFormat::kChannels,
+                       source.samples.data() +
+                           static_cast<size_t>(srcOffset) * AudioFormat::kChannels,
+                       frameCount, ma_format_f32, AudioFormat::kChannels);
 }
 
 void Mixer::TrimSource(SourceBuffer& source, int64_t keepFrom) {
@@ -219,8 +216,10 @@ void Mixer::TrimSource(SourceBuffer& source, int64_t keepFrom) {
         return;
     }
 
-    const size_t dropSamples = static_cast<size_t>(keepFrom - source.startFrame) * AudioFormat::kChannels;
-    source.samples.erase(source.samples.begin(), source.samples.begin() + static_cast<std::ptrdiff_t>(dropSamples));
+    const size_t dropSamples =
+        static_cast<size_t>(keepFrom - source.startFrame) * AudioFormat::kChannels;
+    source.samples.erase(source.samples.begin(),
+                         source.samples.begin() + static_cast<std::ptrdiff_t>(dropSamples));
     source.startFrame = keepFrom;
 }
 
@@ -244,10 +243,11 @@ void Mixer::ApplyDriftCorrection() {
         if (!source.hasData || atFrame < source.startFrame || atFrame + 1 >= source.endFrame) {
             return;
         }
-        const size_t index = static_cast<size_t>(atFrame - source.startFrame) * AudioFormat::kChannels;
-        source.samples.erase(
-            source.samples.begin() + static_cast<std::ptrdiff_t>(index),
-            source.samples.begin() + static_cast<std::ptrdiff_t>(index + AudioFormat::kChannels));
+        const size_t index =
+            static_cast<size_t>(atFrame - source.startFrame) * AudioFormat::kChannels;
+        source.samples.erase(source.samples.begin() + static_cast<std::ptrdiff_t>(index),
+                             source.samples.begin() +
+                                 static_cast<std::ptrdiff_t>(index + AudioFormat::kChannels));
         source.endFrame -= 1;
     };
 
@@ -269,7 +269,8 @@ float Mixer::SoftLimit(float sample) {
     }
     const float sign = sample < 0.0f ? -1.0f : 1.0f;
     const float over = absSample - kLimiterStart;
-    const float limited = kLimiterStart + std::tanh(over / (1.0f - kLimiterStart)) * (1.0f - kLimiterStart);
+    const float limited =
+        kLimiterStart + std::tanh(over / (1.0f - kLimiterStart)) * (1.0f - kLimiterStart);
     return sign * (std::min)(limited, 0.999f);
 }
 
@@ -279,13 +280,8 @@ bool Mixer::HasPending() const {
     return micPending || sysPending;
 }
 
-bool Mixer::Process(
-    RingBuffer& micRing,
-    RingBuffer& sysRing,
-    uint64_t nowQpc,
-    float* outInterleavedStereo,
-    float* outMicStem,
-    float* outSysStem) {
+bool Mixer::Process(RingBuffer& micRing, RingBuffer& sysRing, uint64_t nowQpc,
+                    float* outInterleavedStereo, float* outMicStem, float* outSysStem) {
     if (outInterleavedStereo == nullptr) {
         return false;
     }
@@ -294,9 +290,8 @@ bool Mixer::Process(
     DrainRing(sysRing, m_sys);
     ApplyDriftCorrection();
 
-    const int64_t nowFrame = (nowQpc >= m_startQpc)
-        ? AudioFormat::QpcToFrames(nowQpc - m_startQpc, m_qpcFrequency)
-        : 0;
+    const int64_t nowFrame =
+        (nowQpc >= m_startQpc) ? AudioFormat::QpcToFrames(nowQpc - m_startQpc, m_qpcFrequency) : 0;
     if (!BlockReady(nowFrame)) {
         return false;
     }
@@ -307,13 +302,10 @@ bool Mixer::Process(
     ReadSourceBlock(m_sys, m_nextBlockFrame, sysBlock);
 
     float micMono[AudioFormat::kBlockFrames];
-    const bool downmixed = m_downmix != nullptr && m_downmix->live
-        && ma_channel_converter_process_pcm_frames(
-               &m_downmix->converter,
-               micMono,
-               micBlock,
-               AudioFormat::kBlockFrames)
-            == MA_SUCCESS;
+    const bool downmixed =
+        m_downmix != nullptr && m_downmix->live &&
+        ma_channel_converter_process_pcm_frames(&m_downmix->converter, micMono, micBlock,
+                                                AudioFormat::kBlockFrames) == MA_SUCCESS;
     if (!downmixed) {
         for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
             micMono[i] = 0.5f * (micBlock[i * 2] + micBlock[i * 2 + 1]);
@@ -333,7 +325,8 @@ bool Mixer::Process(
     }
 
     if (m_micAgc) {
-        UpdateAgc(static_cast<float>(std::sqrt(micPower / static_cast<double>(AudioFormat::kBlockFrames))));
+        UpdateAgc(static_cast<float>(
+            std::sqrt(micPower / static_cast<double>(AudioFormat::kBlockFrames))));
     }
 
     const float gainStart = m_micAgc ? m_agcPrevGain : m_micGain;
@@ -358,14 +351,12 @@ bool Mixer::Process(
         }
     }
 
-    ma_silence_pcm_frames(outInterleavedStereo, AudioFormat::kBlockFrames, ma_format_f32, AudioFormat::kChannels);
-    ma_mix_pcm_frames_f32(outInterleavedStereo, micScaled, AudioFormat::kBlockFrames, AudioFormat::kChannels, 1.0f);
-    ma_mix_pcm_frames_f32(
-        outInterleavedStereo,
-        sysBlock,
-        AudioFormat::kBlockFrames,
-        AudioFormat::kChannels,
-        m_systemGain);
+    ma_silence_pcm_frames(outInterleavedStereo, AudioFormat::kBlockFrames, ma_format_f32,
+                          AudioFormat::kChannels);
+    ma_mix_pcm_frames_f32(outInterleavedStereo, micScaled, AudioFormat::kBlockFrames,
+                          AudioFormat::kChannels, 1.0f);
+    ma_mix_pcm_frames_f32(outInterleavedStereo, sysBlock, AudioFormat::kBlockFrames,
+                          AudioFormat::kChannels, m_systemGain);
     for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
         const auto outL = SoftLimit(outInterleavedStereo[i * 2]);
         const auto outR = SoftLimit(outInterleavedStereo[i * 2 + 1]);
@@ -382,12 +373,8 @@ bool Mixer::Process(
     return true;
 }
 
-bool Mixer::Flush(
-    RingBuffer& micRing,
-    RingBuffer& sysRing,
-    float* outInterleavedStereo,
-    float* outMicStem,
-    float* outSysStem) {
+bool Mixer::Flush(RingBuffer& micRing, RingBuffer& sysRing, float* outInterleavedStereo,
+                  float* outMicStem, float* outSysStem) {
     DrainRing(micRing, m_mic);
     DrainRing(sysRing, m_sys);
 
@@ -396,7 +383,9 @@ bool Mixer::Flush(
     }
 
     // Force emission of the next block (treat as stale).
-    const uint64_t forceNow = m_startQpc
-        + AudioFormat::FramesToQpc(m_nextBlockFrame + kStaleFrames + AudioFormat::kBlockFrames, m_qpcFrequency);
+    const uint64_t forceNow =
+        m_startQpc +
+        AudioFormat::FramesToQpc(m_nextBlockFrame + kStaleFrames + AudioFormat::kBlockFrames,
+                                 m_qpcFrequency);
     return Process(micRing, sysRing, forceNow, outInterleavedStereo, outMicStem, outSysStem);
 }

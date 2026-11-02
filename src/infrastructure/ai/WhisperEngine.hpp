@@ -10,7 +10,7 @@
 #include <vector>
 
 class WhisperEngine {
-public:
+  public:
     using ProgressFn = std::function<void(int percent)>;
 
     WhisperEngine() = default;
@@ -24,20 +24,14 @@ public:
     void UnloadIfIdle(uint64_t idleMs);
 
     // pcm16kMono is mono float @ 16 kHz. cancelFlag is polled by abort_callback.
-    bool Transcribe(
-        const std::vector<float>& pcm16kMono,
-        const std::string& language,
-        int threads,
-        bool useVad,
-        const std::wstring& vadModelPath,
-        std::atomic_bool& cancelFlag,
-        ProgressFn onProgress,
-        std::vector<TranscriptSegment>& outSegments,
-        std::string& outDetectedLanguage,
-        std::wstring& error);
+    bool Transcribe(const std::vector<float>& pcm16kMono, const std::string& language, int threads,
+                    bool useVad, const std::wstring& vadModelPath, std::atomic_bool& cancelFlag,
+                    ProgressFn onProgress, std::vector<TranscriptSegment>& outSegments,
+                    std::string& outDetectedLanguage, std::wstring& error);
 
     bool IsLoaded() const;
-private:
+
+  private:
     struct whisper_context* m_ctx = nullptr;
     std::wstring m_modelPath;
     mutable std::mutex m_mutex;

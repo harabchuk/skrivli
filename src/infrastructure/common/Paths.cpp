@@ -1,9 +1,9 @@
 #include "infrastructure/common/Paths.hpp"
 
-#include <filesystem>
-#include <shlobj.h>
 #include <windows.h>
 
+#include <filesystem>
+#include <shlobj.h>
 #include <wil/resource.h>
 
 namespace {
@@ -26,7 +26,7 @@ auto Join(const std::wstring& root, const wchar_t* leaf) -> std::wstring {
     return path.wstring();
 }
 
-}  // namespace
+} // namespace
 
 namespace Paths {
 
@@ -64,11 +64,9 @@ bool EnsureDirectory(const std::wstring& path) {
 }
 
 bool EnsureAppDataDirectories() {
-    return EnsureDirectory(SettingsDir())
-        && EnsureDirectory(ModelsDir())
-        && EnsureDirectory(LogsDir())
-        && EnsureDirectory(RescueDir())
-        && EnsureDirectory(DefaultRecordingsDir());
+    return EnsureDirectory(SettingsDir()) && EnsureDirectory(ModelsDir()) &&
+           EnsureDirectory(LogsDir()) && EnsureDirectory(RescueDir()) &&
+           EnsureDirectory(DefaultRecordingsDir());
 }
 
-}  // namespace Paths
+} // namespace Paths

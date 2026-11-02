@@ -14,4 +14,4 @@ bool IsEnabled();
 
 auto CommandLineForRunKey(bool startMinimized) -> std::wstring;
 
-}  // namespace Autostart
+} // namespace Autostart

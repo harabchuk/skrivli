@@ -7,10 +7,10 @@
 #include <wil/resource.h>
 
 class Application {
-public:
+  public:
     int Run(HINSTANCE instance, int showCommand);
 
-private:
+  private:
     bool ClaimSingleInstance();
     void ActivateExistingInstance() const;
     void ReleaseSingleInstance();

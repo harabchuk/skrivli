@@ -1,10 +1,10 @@
 #pragma once
 
 #include <windows.h>
-#include <objbase.h>
+
 #include <avrt.h>
 #include <mfapi.h>
-
+#include <objbase.h>
 #include <wil/resource.h>
 
 // Process/thread-scoped RAII that WIL's own helpers do not match.
@@ -13,7 +13,7 @@
 // and would uninitialize that other apartment.
 
 class ScopedComInit {
-public:
+  public:
     explicit ScopedComInit(DWORD coInit = COINIT_MULTITHREADED) noexcept
         : m_hr(::CoInitializeEx(nullptr, coInit)) {
         if (FAILED(m_hr)) {
@@ -24,19 +24,23 @@ public:
     ScopedComInit(const ScopedComInit&) = delete;
     auto operator=(const ScopedComInit&) -> ScopedComInit& = delete;
 
-    HRESULT Result() const noexcept { return m_hr; }
+    HRESULT Result() const noexcept {
+        return m_hr;
+    }
 
     // True when COM is usable on this thread (S_OK, S_FALSE, or an existing apartment).
-    bool IsUsable() const noexcept { return SUCCEEDED(m_hr) || m_hr == RPC_E_CHANGED_MODE; }
+    bool IsUsable() const noexcept {
+        return SUCCEEDED(m_hr) || m_hr == RPC_E_CHANGED_MODE;
+    }
 
-private:
+  private:
     HRESULT m_hr;
     wil::unique_couninitialize_call m_uninit;
 };
 
 // Registers the calling thread with MMCSS for the given task and reverts it on destruction.
 class ScopedMmcss {
-public:
+  public:
     explicit ScopedMmcss(const wchar_t* taskName) noexcept {
         DWORD taskIndex = 0;
         m_handle.reset(::AvSetMmThreadCharacteristicsW(taskName, &taskIndex));
@@ -45,17 +49,20 @@ public:
     ScopedMmcss(const ScopedMmcss&) = delete;
     auto operator=(const ScopedMmcss&) -> ScopedMmcss& = delete;
 
-    bool IsRegistered() const noexcept { return static_cast<bool>(m_handle); }
+    bool IsRegistered() const noexcept {
+        return static_cast<bool>(m_handle);
+    }
 
-private:
-    using Handle = wil::unique_any<HANDLE, decltype(&::AvRevertMmThreadCharacteristics), ::AvRevertMmThreadCharacteristics>;
+  private:
+    using Handle = wil::unique_any<HANDLE, decltype(&::AvRevertMmThreadCharacteristics),
+                                   ::AvRevertMmThreadCharacteristics>;
 
     Handle m_handle;
 };
 
 // Pairs MFStartup with MFShutdown; shutdown only runs when startup succeeded.
 class ScopedMfStartup {
-public:
+  public:
     explicit ScopedMfStartup(DWORD flags = MFSTARTUP_LITE) noexcept
         : m_hr(::MFStartup(MF_VERSION, flags)) {
         if (FAILED(m_hr)) {
@@ -66,10 +73,14 @@ public:
     ScopedMfStartup(const ScopedMfStartup&) = delete;
     auto operator=(const ScopedMfStartup&) -> ScopedMfStartup& = delete;
 
-    HRESULT Result() const noexcept { return m_hr; }
-    bool IsStarted() const noexcept { return SUCCEEDED(m_hr); }
+    HRESULT Result() const noexcept {
+        return m_hr;
+    }
+    bool IsStarted() const noexcept {
+        return SUCCEEDED(m_hr);
+    }
 
-private:
+  private:
     using ShutdownCall = wil::unique_call<decltype(&::MFShutdown), ::MFShutdown>;
 
     HRESULT m_hr;

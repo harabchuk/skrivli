@@ -14,4 +14,4 @@ auto DefaultRecordingsDir() -> std::wstring;
 bool EnsureDirectory(const std::wstring& path);
 bool EnsureAppDataDirectories();
 
-}  // namespace Paths
+} // namespace Paths

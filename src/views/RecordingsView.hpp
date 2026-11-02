@@ -1,17 +1,19 @@
 #pragma once
 
 #include "pch.hpp"
+
 #include "Ids.hpp"
 #include "infrastructure/storage/DirectoryWatcher.hpp"
 #include "infrastructure/storage/RecordingLibrary.hpp"
 
 #include <vector>
 
-class RecordingsView
-    : public CDialogImpl<RecordingsView>
-    , public WTL::CDialogResize<RecordingsView> {
-public:
-    enum { IDD = IDD_RECORDINGS_PAGE };
+class RecordingsView : public CDialogImpl<RecordingsView>,
+                       public WTL::CDialogResize<RecordingsView> {
+  public:
+    enum {
+        IDD = IDD_RECORDINGS_PAGE
+    };
 
     enum Column {
         ColName = 0,
@@ -22,30 +24,30 @@ public:
     };
 
     BEGIN_MSG_MAP_EX(RecordingsView)
-        MSG_WM_INITDIALOG(OnInitDialog)
-        MSG_WM_SIZE(OnSize)
-        MSG_WM_DESTROY(OnDestroy)
-        MSG_WM_CTLCOLORDLG(OnCtlColorDlg)
-        MSG_WM_CTLCOLORSTATIC(OnCtlColorStatic)
-        COMMAND_ID_HANDLER_EX(IDC_REC_PLAY, OnPlay)
-        COMMAND_ID_HANDLER_EX(IDC_REC_TRANSCRIBE, OnTranscribe)
-        COMMAND_ID_HANDLER_EX(IDC_REC_VIEW, OnView)
-        COMMAND_ID_HANDLER_EX(IDC_REC_OPENFOLDER, OnOpenFolder)
-        COMMAND_ID_HANDLER_EX(IDC_REC_RENAME, OnRename)
-        COMMAND_ID_HANDLER_EX(IDC_REC_DELETE, OnDelete)
-        COMMAND_ID_HANDLER_EX(IDC_REC_REFRESH, OnRefresh)
-        NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, LVN_COLUMNCLICK, OnColumnClick)
-        NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, NM_DBLCLK, OnDoubleClick)
-        NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, NM_RCLICK, OnRightClick)
-        NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, LVN_ITEMCHANGED, OnItemChanged)
-        NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, LVN_GETINFOTIP, OnGetInfoTip)
-        MESSAGE_HANDLER(WM_APP_LIBRARY_CHANGED, OnLibraryChanged)
-        CHAIN_MSG_MAP(WTL::CDialogResize<RecordingsView>)
+    MSG_WM_INITDIALOG(OnInitDialog)
+    MSG_WM_SIZE(OnSize)
+    MSG_WM_DESTROY(OnDestroy)
+    MSG_WM_CTLCOLORDLG(OnCtlColorDlg)
+    MSG_WM_CTLCOLORSTATIC(OnCtlColorStatic)
+    COMMAND_ID_HANDLER_EX(IDC_REC_PLAY, OnPlay)
+    COMMAND_ID_HANDLER_EX(IDC_REC_TRANSCRIBE, OnTranscribe)
+    COMMAND_ID_HANDLER_EX(IDC_REC_VIEW, OnView)
+    COMMAND_ID_HANDLER_EX(IDC_REC_OPENFOLDER, OnOpenFolder)
+    COMMAND_ID_HANDLER_EX(IDC_REC_RENAME, OnRename)
+    COMMAND_ID_HANDLER_EX(IDC_REC_DELETE, OnDelete)
+    COMMAND_ID_HANDLER_EX(IDC_REC_REFRESH, OnRefresh)
+    NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, LVN_COLUMNCLICK, OnColumnClick)
+    NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, NM_DBLCLK, OnDoubleClick)
+    NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, NM_RCLICK, OnRightClick)
+    NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, LVN_ITEMCHANGED, OnItemChanged)
+    NOTIFY_HANDLER_EX(IDC_RECORDINGS_LIST, LVN_GETINFOTIP, OnGetInfoTip)
+    MESSAGE_HANDLER(WM_APP_LIBRARY_CHANGED, OnLibraryChanged)
+    CHAIN_MSG_MAP(WTL::CDialogResize<RecordingsView>)
     END_MSG_MAP()
 
     BEGIN_DLGRESIZE_MAP(RecordingsView)
-        DLGRESIZE_CONTROL(IDC_RECORDINGS_LIST, DLSZ_SIZE_X | DLSZ_SIZE_Y)
-        DLGRESIZE_CONTROL(IDC_REC_REFRESH, DLSZ_MOVE_Y)
+    DLGRESIZE_CONTROL(IDC_RECORDINGS_LIST, DLSZ_SIZE_X | DLSZ_SIZE_Y)
+    DLGRESIZE_CONTROL(IDC_REC_REFRESH, DLSZ_MOVE_Y)
     END_DLGRESIZE_MAP()
 
     void Refresh();
@@ -53,7 +55,7 @@ public:
     void SetTranscriptProgress(const std::wstring& audioPath, int percent);
     void ApplyUiFont(HFONT font);
 
-private:
+  private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
     void OnSize(UINT type, CSize size);
     void OnDestroy();

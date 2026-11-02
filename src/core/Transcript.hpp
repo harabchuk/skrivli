@@ -20,9 +20,9 @@ struct TranscriptSegment {
 };
 
 struct TranscriptMeta {
-    std::string titleDateTime;   // "YYYY-MM-DD HH:MM" local
+    std::string titleDateTime; // "YYYY-MM-DD HH:MM" local
     double durationSeconds = 0.0;
-    std::string recordedRange;   // "YYYY-MM-DD HH:MM – HH:MM" or similar
+    std::string recordedRange; // "YYYY-MM-DD HH:MM – HH:MM" or similar
     std::string modelFile;
     std::string languageConfigured; // e.g. "auto"
     std::string languageDetected;   // e.g. "en", empty if unknown

@@ -2,8 +2,9 @@
 
 #include "core/Recording.hpp"
 
-#include <string>
 #include <windows.h>
+
+#include <string>
 
 namespace Sidecar {
 
@@ -16,4 +17,4 @@ auto FormatLocalTimestampNow() -> std::string;
 // start/end = now, duration read from the WAV header, internal sample rate and channels.
 auto ForAudio(const std::wstring& audioPath) -> RecordingSidecar;
 
-}  // namespace Sidecar
+} // namespace Sidecar

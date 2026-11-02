@@ -2,17 +2,16 @@
 
 #include <windows.h>
 
-#include <wil/com.h>
-
 #include <atomic>
 #include <thread>
+#include <wil/com.h>
 
 struct IMMDevice;
 
 // Shared-mode render client that continuously submits silence on the same
 // device used for loopback, so the engine clock keeps advancing.
 class SilentRenderKeepAlive {
-public:
+  public:
     SilentRenderKeepAlive() = default;
     ~SilentRenderKeepAlive();
 
@@ -21,9 +20,11 @@ public:
 
     bool Start(IMMDevice* renderDevice);
     void Stop();
-    bool IsRunning() const { return m_running.load(std::memory_order_acquire); }
+    bool IsRunning() const {
+        return m_running.load(std::memory_order_acquire);
+    }
 
-private:
+  private:
     void ThreadMain();
     void RenderLoop();
 

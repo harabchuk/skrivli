@@ -1,11 +1,9 @@
 #include "ui/ShellDialogs.hpp"
 
 #include <shobjidl.h>
-
+#include <vector>
 #include <wil/com.h>
 #include <wil/resource.h>
-
-#include <vector>
 
 namespace ui {
 
@@ -38,11 +36,12 @@ void ApplyFilters(IFileDialog* dialog, std::span<const FileFilter> filters) {
     dialog->SetFileTypes(static_cast<UINT>(specs.size()), specs.data());
 }
 
-}  // namespace
+} // namespace
 
 auto PickFolder(HWND owner) -> std::optional<std::wstring> {
     wil::com_ptr_nothrow<IFileOpenDialog> dialog;
-    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(dialog.put()));
+    const auto hr =
+        ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(dialog.put()));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }
@@ -52,12 +51,11 @@ auto PickFolder(HWND owner) -> std::optional<std::wstring> {
     return ShowAndGetPath(dialog.get(), owner);
 }
 
-auto PickOpenFile(
-    HWND owner,
-    std::span<const FileFilter> filters,
-    const wchar_t* title) -> std::optional<std::wstring> {
+auto PickOpenFile(HWND owner, std::span<const FileFilter> filters, const wchar_t* title)
+    -> std::optional<std::wstring> {
     wil::com_ptr_nothrow<IFileOpenDialog> dialog;
-    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dialog.put()));
+    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                       IID_PPV_ARGS(dialog.put()));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }
@@ -68,13 +66,11 @@ auto PickOpenFile(
     return ShowAndGetPath(dialog.get(), owner);
 }
 
-auto PickSaveFile(
-    HWND owner,
-    std::span<const FileFilter> filters,
-    const wchar_t* defaultExt,
-    const std::wstring& fileName) -> std::optional<std::wstring> {
+auto PickSaveFile(HWND owner, std::span<const FileFilter> filters, const wchar_t* defaultExt,
+                  const std::wstring& fileName) -> std::optional<std::wstring> {
     wil::com_ptr_nothrow<IFileSaveDialog> dialog;
-    const auto hr = ::CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dialog.put()));
+    const auto hr = ::CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                       IID_PPV_ARGS(dialog.put()));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }
@@ -88,4 +84,4 @@ auto PickSaveFile(
     return ShowAndGetPath(dialog.get(), owner);
 }
 
-}  // namespace ui
+} // namespace ui

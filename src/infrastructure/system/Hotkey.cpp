@@ -72,11 +72,11 @@ UINT ParseKeyToken(const std::wstring& token) {
 
 bool IsModifierToken(const std::wstring& token) {
     const auto lower = ToLower(token);
-    return lower == L"ctrl" || lower == L"control" || lower == L"alt" || lower == L"shift"
-        || lower == L"win" || lower == L"windows";
+    return lower == L"ctrl" || lower == L"control" || lower == L"alt" || lower == L"shift" ||
+           lower == L"win" || lower == L"windows";
 }
 
-}  // namespace
+} // namespace
 
 namespace Hotkey {
 
@@ -169,4 +169,4 @@ void Unregister(HWND hwnd, int id) {
     }
 }
 
-}  // namespace Hotkey
+} // namespace Hotkey

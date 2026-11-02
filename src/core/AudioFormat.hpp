@@ -1,18 +1,17 @@
 #pragma once
 
 #include <audioclient.h>
-#include <mmreg.h>
+#include <cstdint>
 #include <ks.h>
 #include <ksmedia.h>
-
-#include <cstdint>
+#include <mmreg.h>
 
 namespace AudioFormat {
 
 inline constexpr UINT32 kSampleRate = 48000;
 inline constexpr UINT16 kChannels = 2;
 inline constexpr UINT16 kBitsPerSample = 32;
-inline constexpr UINT32 kBlockFrames = 480; // 10 ms
+inline constexpr UINT32 kBlockFrames = 480;                // 10 ms
 inline constexpr REFERENCE_TIME kBufferDuration = 2000000; // 200 ms in 100-ns units
 inline constexpr DWORD kEventTimeoutMs = 100;
 
@@ -42,4 +41,4 @@ inline uint64_t FramesToQpc(int64_t frames, uint64_t qpcFrequency) {
     return (static_cast<uint64_t>(frames) * qpcFrequency) / static_cast<uint64_t>(kSampleRate);
 }
 
-}  // namespace AudioFormat
+} // namespace AudioFormat

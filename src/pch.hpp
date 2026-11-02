@@ -21,18 +21,20 @@
 #endif
 
 #include <atlbase.h>
+
 #include <atlapp.h>
-#include <atlwin.h>
-#include <atlframe.h>
+
+#include <atlcrack.h>
 #include <atlctrls.h>
 #include <atlctrlx.h>
 #include <atldlgs.h>
+#include <atlframe.h>
 #include <atlmisc.h>
-#include <atlcrack.h>
 #include <atlres.h>
+#include <atlwin.h>
 
 #include <shellapi.h>
-#include <shlwapi.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 
 extern WTL::CAppModule _Module;

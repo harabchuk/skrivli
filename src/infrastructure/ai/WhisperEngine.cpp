@@ -3,18 +3,18 @@
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Text.hpp"
 
-#include <whisper.h>
-
 #include <algorithm>
 #include <chrono>
 #include <thread>
+#include <whisper.h>
 
 namespace {
 
 uint64_t NowMs() {
     using clock = std::chrono::steady_clock;
     return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch()).count());
+        std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch())
+            .count());
 }
 
 struct CallbackState {
@@ -27,14 +27,15 @@ bool AbortCallback(void* userData) {
     return state != nullptr && state->cancel != nullptr && state->cancel->load();
 }
 
-void ProgressCallback(whisper_context* /*ctx*/, whisper_state* /*state*/, int progress, void* userData) {
+void ProgressCallback(whisper_context* /*ctx*/, whisper_state* /*state*/, int progress,
+                      void* userData) {
     auto* cb = static_cast<CallbackState*>(userData);
     if (cb != nullptr && cb->progress) {
         cb->progress(std::clamp(progress, 0, 100));
     }
 }
 
-}  // namespace
+} // namespace
 
 WhisperEngine::~WhisperEngine() {
     Unload();
@@ -97,17 +98,11 @@ void WhisperEngine::UnloadIfIdle(uint64_t idleMs) {
     }
 }
 
-bool WhisperEngine::Transcribe(
-    const std::vector<float>& pcm16kMono,
-    const std::string& language,
-    int threads,
-    bool useVad,
-    const std::wstring& vadModelPath,
-    std::atomic_bool& cancelFlag,
-    ProgressFn onProgress,
-    std::vector<TranscriptSegment>& outSegments,
-    std::string& outDetectedLanguage,
-    std::wstring& error) {
+bool WhisperEngine::Transcribe(const std::vector<float>& pcm16kMono, const std::string& language,
+                               int threads, bool useVad, const std::wstring& vadModelPath,
+                               std::atomic_bool& cancelFlag, ProgressFn onProgress,
+                               std::vector<TranscriptSegment>& outSegments,
+                               std::string& outDetectedLanguage, std::wstring& error) {
     outSegments.clear();
     outDetectedLanguage.clear();
 
@@ -162,11 +157,8 @@ bool WhisperEngine::Transcribe(
         return false;
     }
 
-    const int rc = whisper_full(
-        m_ctx,
-        params,
-        pcm16kMono.data(),
-        static_cast<int>(pcm16kMono.size()));
+    const int rc =
+        whisper_full(m_ctx, params, pcm16kMono.data(), static_cast<int>(pcm16kMono.size()));
     m_lastUseTick = NowMs();
 
     if (cancelFlag.load()) {

@@ -40,7 +40,7 @@ struct SettingsData {
 };
 
 class Settings {
-public:
+  public:
     static auto Instance() -> Settings&;
 
     // Loads the settings file. A missing file yields defaults.
@@ -52,12 +52,16 @@ public:
     bool LoadFromFile(const std::wstring& path);
     bool SaveToFile(const std::wstring& path) const;
 
-    auto Data() -> SettingsData& { return m_data; }
-    auto Data() const -> const SettingsData& { return m_data; }
+    auto Data() -> SettingsData& {
+        return m_data;
+    }
+    auto Data() const -> const SettingsData& {
+        return m_data;
+    }
 
     auto RecordingsFolder() const -> std::wstring;
 
-private:
+  private:
     Settings() = default;
 
     SettingsData m_data;

@@ -1,8 +1,7 @@
 #include "infrastructure/audio/Resampler.hpp"
 
-#include <gtest/gtest.h>
-
 #include <cmath>
+#include <gtest/gtest.h>
 #include <vector>
 
 namespace {
@@ -13,7 +12,9 @@ std::vector<float> MakeStereoSine(double freqHz, double seconds, float amplitude
     const size_t frames = static_cast<size_t>(seconds * 48000.0);
     std::vector<float> stereo(frames * 2);
     for (size_t i = 0; i < frames; ++i) {
-        const float s = amplitude * static_cast<float>(std::sin(2.0 * kPi * freqHz * static_cast<double>(i) / 48000.0));
+        const float s =
+            amplitude *
+            static_cast<float>(std::sin(2.0 * kPi * freqHz * static_cast<double>(i) / 48000.0));
         stereo[i * 2] = s;
         stereo[i * 2 + 1] = s;
     }
@@ -31,7 +32,7 @@ double Rms(const std::vector<float>& samples) {
     return std::sqrt(sum / static_cast<double>(samples.size()));
 }
 
-}  // namespace
+} // namespace
 
 TEST(Resampler, OneKHzSineKeepsEnergy) {
     // Arrange

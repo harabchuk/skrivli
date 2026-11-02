@@ -8,7 +8,7 @@
 // RAII wrapper around ma_data_converter that appends float output to a growing buffer.
 // Output is always 32-bit float; `produced` counts frames (not samples) already in `out`.
 class MaConverter {
-public:
+  public:
     MaConverter() = default;
     ~MaConverter();
 
@@ -17,7 +17,9 @@ public:
 
     // Replaces any previous converter. `config.formatOut` must be ma_format_f32.
     bool Init(const ma_data_converter_config& config);
-    bool IsReady() const { return m_live; }
+    bool IsReady() const {
+        return m_live;
+    }
 
     ma_uint64 InputLatency() const;
     // Returns `fallback` when miniaudio cannot estimate the count.
@@ -30,7 +32,7 @@ public:
     // Pushes InputLatency() frames of silence so the filter tail reaches `out`.
     bool FlushLatency(std::vector<float>& out, size_t& produced);
 
-private:
+  private:
     void Uninit();
 
     ma_data_converter m_converter{};

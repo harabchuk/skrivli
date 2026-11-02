@@ -2,6 +2,8 @@
 
 #include "infrastructure/ai/WhisperEngine.hpp"
 
+#include <windows.h>
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -10,7 +12,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <windows.h>
 
 struct DecodedAudio;
 
@@ -21,7 +22,7 @@ struct TranscribeNotify {
 };
 
 class TranscriptionService {
-public:
+  public:
     static auto Instance() -> TranscriptionService&;
 
     void SetNotifyHwnd(HWND hwnd);
@@ -34,7 +35,7 @@ public:
     void Cancel(const std::wstring& audioPath);
     bool IsQueuedOrActive(const std::wstring& audioPath) const;
 
-private:
+  private:
     TranscriptionService() = default;
     ~TranscriptionService();
 
@@ -51,19 +52,14 @@ private:
     void ProcessJob(Job job);
     // Transcribes every planned chunk, appending offset-corrected segments. On failure it
     // records the failure through FailJob and returns false.
-    bool TranscribeChunks(
-        const Job& job,
-        const DecodedAudio& decoded,
-        std::vector<TranscriptSegment>& segments,
-        std::string& language);
+    bool TranscribeChunks(const Job& job, const DecodedAudio& decoded,
+                          std::vector<TranscriptSegment>& segments, std::string& language);
     void FailJob(const Job& job, TranscriptStatus status, const std::wstring& message);
-    void UpdateSidecarStatus(
-        const std::wstring& audioPath,
-        TranscriptStatus status,
-        const std::string& error,
-        const std::string& model,
-        const std::string& language);
-    void Notify(UINT msg, const std::wstring& audioPath, int percent = 0, std::wstring message = {});
+    void UpdateSidecarStatus(const std::wstring& audioPath, TranscriptStatus status,
+                             const std::string& error, const std::string& model,
+                             const std::string& language);
+    void Notify(UINT msg, const std::wstring& audioPath, int percent = 0,
+                std::wstring message = {});
 
     HWND m_notifyHwnd = nullptr;
     mutable std::mutex m_mutex;

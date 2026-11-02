@@ -1,10 +1,9 @@
-#include "infrastructure/audio/Mixer.hpp"
 #include "core/RingBuffer.hpp"
-
-#include <gtest/gtest.h>
+#include "infrastructure/audio/Mixer.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <gtest/gtest.h>
 #include <vector>
 
 namespace {
@@ -24,7 +23,7 @@ void PushTone(RingBuffer& ring, uint64_t qpc, uint32_t frames, float left, float
     ASSERT_TRUE(ring.Push(samples.data(), frames, qpc, false));
 }
 
-}  // namespace
+} // namespace
 
 TEST(Mixer, AlignsAndMixesCoveredBlock) {
     // Arrange

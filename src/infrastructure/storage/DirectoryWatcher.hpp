@@ -2,16 +2,15 @@
 
 #include <windows.h>
 
-#include <wil/resource.h>
-
 #include <atomic>
 #include <string>
 #include <thread>
+#include <wil/resource.h>
 
 // Background ReadDirectoryChangesW watcher. Posts notifyMsg to hwnd after a
 // short coalesce delay. Never touches UI controls itself.
 class DirectoryWatcher {
-public:
+  public:
     DirectoryWatcher() = default;
     ~DirectoryWatcher();
 
@@ -20,9 +19,11 @@ public:
 
     bool Start(const std::wstring& folder, HWND hwnd, UINT notifyMsg);
     void Stop();
-    auto Folder() const -> const std::wstring& { return m_folder; }
+    auto Folder() const -> const std::wstring& {
+        return m_folder;
+    }
 
-private:
+  private:
     void ThreadMain();
 
     std::wstring m_folder;

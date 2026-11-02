@@ -5,11 +5,10 @@
 #include "infrastructure/audio/MiniAudio.hpp"
 #include "infrastructure/common/Log.hpp"
 
-#include <mmreg.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <mmreg.h>
 
 namespace {
 
@@ -39,12 +38,12 @@ ma_format FormatFromWave(const WAVEFORMATEX* format) {
     if (format->wFormatTag == WAVE_FORMAT_PCM) {
         return fromPcmBits(format->wBitsPerSample);
     }
-    if (format->wFormatTag == WAVE_FORMAT_EXTENSIBLE
-        && format->cbSize >= (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX))) {
+    if (format->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+        format->cbSize >= (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX))) {
         const auto* extensible = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(format);
         const WORD bits = extensible->Samples.wValidBitsPerSample != 0
-            ? extensible->Samples.wValidBitsPerSample
-            : format->wBitsPerSample;
+                              ? extensible->Samples.wValidBitsPerSample
+                              : format->wBitsPerSample;
         if (extensible->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT && bits == 32) {
             return ma_format_f32;
         }
@@ -55,7 +54,7 @@ ma_format FormatFromWave(const WAVEFORMATEX* format) {
     return ma_format_unknown;
 }
 
-}  // namespace
+} // namespace
 
 struct AudioResampler::State {
     MaConverter converter;
@@ -95,20 +94,13 @@ bool AudioResampler::Initialize(const void* inputFormatBytes) {
 
     ma_channel inputMap[MA_MAX_CHANNELS]{};
     ma_channel outputMap[2]{};
-    ma_channel_map_init_standard(
-        ma_standard_channel_map_microsoft,
-        inputMap,
-        MA_MAX_CHANNELS,
-        inputFormat->nChannels);
+    ma_channel_map_init_standard(ma_standard_channel_map_microsoft, inputMap, MA_MAX_CHANNELS,
+                                 inputFormat->nChannels);
     ma_channel_map_init_standard(ma_standard_channel_map_microsoft, outputMap, 2, 2);
 
     auto config = ma_data_converter_config_init(
-        inputSampleFormat,
-        ma_format_f32,
-        inputFormat->nChannels,
-        AudioFormat::kChannels,
-        inputFormat->nSamplesPerSec,
-        AudioFormat::kSampleRate);
+        inputSampleFormat, ma_format_f32, inputFormat->nChannels, AudioFormat::kChannels,
+        inputFormat->nSamplesPerSec, AudioFormat::kSampleRate);
     config.pChannelMapIn = inputMap;
     config.pChannelMapOut = outputMap;
     config.ditherMode = ma_dither_mode_none;
@@ -125,12 +117,8 @@ bool AudioResampler::Initialize(const void* inputFormatBytes) {
     return true;
 }
 
-bool AudioResampler::Process(
-    const void* inputBytes,
-    uint32_t inputByteCount,
-    uint32_t inputFrames,
-    std::vector<float>& outInterleavedStereo,
-    uint32_t& outFrames) {
+bool AudioResampler::Process(const void* inputBytes, uint32_t inputByteCount, uint32_t inputFrames,
+                             std::vector<float>& outInterleavedStereo, uint32_t& outFrames) {
     outFrames = 0;
     outInterleavedStereo.clear();
     if (m_state == nullptr || inputBytes == nullptr || inputByteCount == 0 || inputFrames == 0) {

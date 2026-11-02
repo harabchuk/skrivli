@@ -8,26 +8,22 @@
 #include "infrastructure/common/Scoped.hpp"
 #include "infrastructure/common/Text.hpp"
 
-#include <audioclient.h>
 #include <windows.h>
 
 #include <algorithm>
+#include <audioclient.h>
 #include <cmath>
 
 namespace {
 
 constexpr DWORD kDiskCheckIntervalMs = 30000;
 
-}  // namespace
+} // namespace
 
-RecordingSession::CaptureSource::CaptureSource(
-    RecordingSession& session,
-    RingBuffer& sourceRing,
-    CaptureStream::Mode sourceMode)
-    : owner(session)
-    , ring(sourceRing)
-    , mode(sourceMode)
-    , label(sourceMode == CaptureStream::Mode::Microphone ? L"Microphone" : L"System audio") {
+RecordingSession::CaptureSource::CaptureSource(RecordingSession& session, RingBuffer& sourceRing,
+                                               CaptureStream::Mode sourceMode)
+    : owner(session), ring(sourceRing), mode(sourceMode),
+      label(sourceMode == CaptureStream::Mode::Microphone ? L"Microphone" : L"System audio") {
     if (sourceMode == CaptureStream::Mode::Loopback) {
         keepAlive.emplace();
     }
@@ -73,7 +69,8 @@ void RecordingSession::CaptureSource::NoteBufferFlags() {
     // Once each; not on the capture hot path.
     if (!notedSilent && stream.SawSilentPacket()) {
         notedSilent = true;
-        owner.AddDeviceNote(std::wstring(label) + L" delivered silent packets (AUDCLNT_BUFFERFLAGS_SILENT)");
+        owner.AddDeviceNote(std::wstring(label) +
+                            L" delivered silent packets (AUDCLNT_BUFFERFLAGS_SILENT)");
     }
     if (!notedDiscontinuity && stream.SawDiscontinuity()) {
         notedDiscontinuity = true;
@@ -88,17 +85,16 @@ void RecordingSession::CaptureSource::Stop() {
     }
 }
 
-auto RecordingSession::CaptureSource::Resolve(
-    const DeviceManager& devices) const -> wil::com_ptr_nothrow<IMMDevice> {
+auto RecordingSession::CaptureSource::Resolve(const DeviceManager& devices) const
+    -> wil::com_ptr_nothrow<IMMDevice> {
     const auto id = usesDefault ? std::wstring{} : deviceId;
-    return mode == CaptureStream::Mode::Microphone
-        ? devices.ResolveCaptureDevice(id)
-        : devices.ResolveRenderDevice(id);
+    return mode == CaptureStream::Mode::Microphone ? devices.ResolveCaptureDevice(id)
+                                                   : devices.ResolveRenderDevice(id);
 }
 
 bool RecordingSession::StemWriters::Open(const std::wstring& stemBase) {
-    if (!m_mic.OpenFinalPath(stemBase + L".mic.wav")
-        || !m_sys.OpenFinalPath(stemBase + L".system.wav")) {
+    if (!m_mic.OpenFinalPath(stemBase + L".mic.wav") ||
+        !m_sys.OpenFinalPath(stemBase + L".system.wav")) {
         return false;
     }
     m_open = true;
@@ -106,8 +102,8 @@ bool RecordingSession::StemWriters::Open(const std::wstring& stemBase) {
 }
 
 bool RecordingSession::StemWriters::Write(const float* mic, const float* sys) {
-    return m_mic.WriteFloatFrames(mic, AudioFormat::kBlockFrames)
-        && m_sys.WriteFloatFrames(sys, AudioFormat::kBlockFrames);
+    return m_mic.WriteFloatFrames(mic, AudioFormat::kBlockFrames) &&
+           m_sys.WriteFloatFrames(sys, AudioFormat::kBlockFrames);
 }
 
 void RecordingSession::StemWriters::Finalize() {
@@ -134,8 +130,8 @@ void RecordingSession::StemWriters::Discard() {
 }
 
 RecordingSession::RecordingSession()
-    : m_mic(*this, m_micRing, CaptureStream::Mode::Microphone)
-    , m_sys(*this, m_sysRing, CaptureStream::Mode::Loopback) {}
+    : m_mic(*this, m_micRing, CaptureStream::Mode::Microphone),
+      m_sys(*this, m_sysRing, CaptureStream::Mode::Loopback) {}
 
 RecordingSession::~RecordingSession() {
     Stop(StopMode::Save);
@@ -158,9 +154,8 @@ bool RecordingSession::IsPrivacyDenied(HRESULT hr) {
 }
 
 bool RecordingSession::IsDeviceBusy(HRESULT hr) {
-    return hr == AUDCLNT_E_DEVICE_IN_USE
-        || hr == AUDCLNT_E_EXCLUSIVE_MODE_ONLY
-        || hr == AUDCLNT_E_ENDPOINT_CREATE_FAILED;
+    return hr == AUDCLNT_E_DEVICE_IN_USE || hr == AUDCLNT_E_EXCLUSIVE_MODE_ONLY ||
+           hr == AUDCLNT_E_ENDPOINT_CREATE_FAILED;
 }
 
 auto RecordingSession::DescribeCaptureError(HRESULT hr, bool isMic) -> std::wstring {
@@ -172,7 +167,8 @@ auto RecordingSession::DescribeCaptureError(HRESULT hr, bool isMic) -> std::wstr
         return std::wstring(L"The ") + which + L" is in exclusive use by another application.";
     }
     wchar_t buf[128]{};
-    std::swprintf(buf, 128, L"Failed to open the %s (HRESULT 0x%08X).", which, static_cast<unsigned>(hr));
+    std::swprintf(buf, 128, L"Failed to open the %s (HRESULT 0x%08X).", which,
+                  static_cast<unsigned>(hr));
     return buf;
 }
 
@@ -209,8 +205,8 @@ double RecordingSession::ElapsedSeconds() const {
     if (freq.QuadPart == 0) {
         return 0.0;
     }
-    return static_cast<double>(static_cast<uint64_t>(now.QuadPart) - start)
-        / static_cast<double>(freq.QuadPart);
+    return static_cast<double>(static_cast<uint64_t>(now.QuadPart) - start) /
+           static_cast<double>(freq.QuadPart);
 }
 
 void RecordingSession::FailStart(RecordingStartResult& result, const std::wstring& message) {
@@ -248,14 +244,10 @@ void RecordingSession::SetMicAgc(bool enabled) {
     m_mixer.SetMicAgc(enabled);
 }
 
-void RecordingSession::ResetForStart(
-    const std::wstring& micDeviceId,
-    const std::wstring& systemDeviceId,
-    float micGain,
-    bool micAgc,
-    float systemGain,
-    bool communicationsProcessing,
-    bool saveStems) {
+void RecordingSession::ResetForStart(const std::wstring& micDeviceId,
+                                     const std::wstring& systemDeviceId, float micGain, bool micAgc,
+                                     float systemGain, bool communicationsProcessing,
+                                     bool saveStems) {
     m_stopWriter.store(false, std::memory_order_release);
     m_devicesChanged.store(false, std::memory_order_release);
     m_micRing.Reset();
@@ -328,8 +320,8 @@ bool RecordingSession::OpenSources(RecordingStartResult& result) {
     }
     if (!sysPresent) {
         result.warning = result.warning.empty()
-            ? L"No system audio device — recording microphone only."
-            : result.warning;
+                             ? L"No system audio device — recording microphone only."
+                             : result.warning;
         AddDeviceNote(L"Started without system audio");
     }
 
@@ -378,15 +370,11 @@ bool RecordingSession::OpenSources(RecordingStartResult& result) {
     return true;
 }
 
-RecordingStartResult RecordingSession::Start(
-    const std::wstring& folder,
-    const std::wstring& micDeviceId,
-    const std::wstring& systemDeviceId,
-    float micGain,
-    bool micAgc,
-    float systemGain,
-    bool communicationsProcessing,
-    bool saveStems) {
+RecordingStartResult RecordingSession::Start(const std::wstring& folder,
+                                             const std::wstring& micDeviceId,
+                                             const std::wstring& systemDeviceId, float micGain,
+                                             bool micAgc, float systemGain,
+                                             bool communicationsProcessing, bool saveStems) {
     std::lock_guard<std::mutex> lock(m_startStopMutex);
     RecordingStartResult result{};
 
@@ -402,14 +390,8 @@ RecordingStartResult RecordingSession::Start(
     }
 
     SetState(State::Starting);
-    ResetForStart(
-        micDeviceId,
-        systemDeviceId,
-        micGain,
-        micAgc,
-        systemGain,
-        communicationsProcessing,
-        saveStems);
+    ResetForStart(micDeviceId, systemDeviceId, micGain, micAgc, systemGain,
+                  communicationsProcessing, saveStems);
 
     if (!OpenOutputFiles(folder, result) || !OpenSources(result)) {
         return result;
@@ -422,12 +404,8 @@ RecordingStartResult RecordingSession::Start(
     ::QueryPerformanceCounter(&qpc);
     ::QueryPerformanceFrequency(&freq);
     m_startQpc.store(static_cast<uint64_t>(qpc.QuadPart), std::memory_order_release);
-    m_mixer.Reset(
-        static_cast<uint64_t>(qpc.QuadPart),
-        static_cast<uint64_t>(freq.QuadPart),
-        micGain,
-        systemGain,
-        micAgc);
+    m_mixer.Reset(static_cast<uint64_t>(qpc.QuadPart), static_cast<uint64_t>(freq.QuadPart),
+                  micGain, systemGain, micAgc);
 
     try {
         m_writerThread = std::thread([this]() { WriterMain(); });
@@ -554,12 +532,8 @@ bool RecordingSession::CheckDiskSpace(ULONGLONG& lastCheck) {
     return true;
 }
 
-bool RecordingSession::WriteBlock(
-    const float* block,
-    const float* micStem,
-    const float* sysStem,
-    bool flushing,
-    bool& rescued) {
+bool RecordingSession::WriteBlock(const float* block, const float* micStem, const float* sysStem,
+                                  bool flushing, bool& rescued) {
     if (!m_writer.WriteFloatFrames(block, AudioFormat::kBlockFrames)) {
         if (flushing) {
             if (!rescued) {
@@ -582,7 +556,8 @@ bool RecordingSession::WriteBlock(
         return false;
     }
     if (m_stems.IsOpen() && !m_stems.Write(micStem, sysStem)) {
-        Log::Warn(flushing ? L"Stem flush write failed" : L"Stem write failed; continuing with mix only");
+        Log::Warn(flushing ? L"Stem flush write failed"
+                           : L"Stem write failed; continuing with mix only");
         m_stems.Discard();
     }
     return true;
@@ -607,13 +582,8 @@ void RecordingSession::WriterMain() {
         ::QueryPerformanceCounter(&now);
         float* micOut = m_stems.IsOpen() ? micStem : nullptr;
         float* sysOut = m_stems.IsOpen() ? sysStem : nullptr;
-        if (m_mixer.Process(
-                m_micRing,
-                m_sysRing,
-                static_cast<uint64_t>(now.QuadPart),
-                block,
-                micOut,
-                sysOut)) {
+        if (m_mixer.Process(m_micRing, m_sysRing, static_cast<uint64_t>(now.QuadPart), block,
+                            micOut, sysOut)) {
             if (!WriteBlock(block, micStem, sysStem, false, rescued)) {
                 break;
             }
@@ -622,12 +592,8 @@ void RecordingSession::WriterMain() {
         }
     }
 
-    while (m_mixer.Flush(
-        m_micRing,
-        m_sysRing,
-        block,
-        m_stems.IsOpen() ? micStem : nullptr,
-        m_stems.IsOpen() ? sysStem : nullptr)) {
+    while (m_mixer.Flush(m_micRing, m_sysRing, block, m_stems.IsOpen() ? micStem : nullptr,
+                         m_stems.IsOpen() ? sysStem : nullptr)) {
         if (!m_writer.IsOpen()) {
             break;
         }

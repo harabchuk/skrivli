@@ -2,15 +2,14 @@
 
 #include <windows.h>
 
-#include <wil/resource.h>
-
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+#include <wil/resource.h>
 
 class WavWriter {
-public:
+  public:
     static constexpr uint32_t kSampleRate = 48000;
     static constexpr uint16_t kChannels = 2;
     static constexpr uint16_t kBitsPerSample = 16;
@@ -36,18 +35,29 @@ public:
     // Close and delete the partial (discard without saving).
     void Discard();
 
-    bool IsOpen() const { return static_cast<bool>(m_file); }
-    auto PartialPath() const -> const std::wstring& { return m_partialPath; }
-    auto FinalPath() const -> const std::wstring& { return m_finalPath; }
-    auto Folder() const -> const std::wstring& { return m_folder; }
-    uint64_t FramesWritten() const { return m_framesWritten; }
+    bool IsOpen() const {
+        return static_cast<bool>(m_file);
+    }
+    auto PartialPath() const -> const std::wstring& {
+        return m_partialPath;
+    }
+    auto FinalPath() const -> const std::wstring& {
+        return m_finalPath;
+    }
+    auto Folder() const -> const std::wstring& {
+        return m_folder;
+    }
+    uint64_t FramesWritten() const {
+        return m_framesWritten;
+    }
 
     // Patch RIFF/`data` sizes from file length (MiniAudio already wrote the header).
     static bool RepairPartialHeader(const std::wstring& partialPath);
     // Scan folder for `*.wav.partial`, repair, rename to `*.recovered.wav`.
     static auto RecoverPartialsInFolder(const std::wstring& folder) -> std::vector<std::wstring>;
     static bool FolderHasFreeSpace(const std::wstring& folder, uint64_t minBytes = kMinFreeBytes);
-private:
+
+  private:
     friend struct WavEncoderCallbacks;
 
     struct WavEncoder;

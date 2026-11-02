@@ -5,23 +5,23 @@
 #include "infrastructure/common/Paths.hpp"
 #include "infrastructure/common/Text.hpp"
 
-#include <bcrypt.h>
-#include <winhttp.h>
-#include <wil/resource.h>
-
 #include <algorithm>
+#include <bcrypt.h>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
+#include <wil/resource.h>
+#include <winhttp.h>
 
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "winhttp.lib")
 
 namespace {
 
-using UniqueWinHttp = wil::unique_any<HINTERNET, decltype(&::WinHttpCloseHandle), ::WinHttpCloseHandle>;
+using UniqueWinHttp =
+    wil::unique_any<HINTERNET, decltype(&::WinHttpCloseHandle), ::WinHttpCloseHandle>;
 using ProgressFn = ModelManager::ProgressFn;
 
 constexpr wchar_t kHost[] = L"huggingface.co";
@@ -60,37 +60,26 @@ struct HttpResponse {
     uint64_t contentLength = 0;
 };
 
-bool OpenRequest(
-    const std::wstring& fileName,
-    uint64_t resumeFrom,
-    HttpResponse& response,
-    std::wstring& error) {
-    response.session.reset(::WinHttpOpen(
-        L"MeetingBuddy/1.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
-        0));
+bool OpenRequest(const std::wstring& fileName, uint64_t resumeFrom, HttpResponse& response,
+                 std::wstring& error) {
+    response.session.reset(::WinHttpOpen(L"MeetingBuddy/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
     if (!response.session) {
         error = L"WinHttpOpen failed.";
         return false;
     }
 
-    response.connect.reset(::WinHttpConnect(response.session.get(), kHost, INTERNET_DEFAULT_HTTPS_PORT, 0));
+    response.connect.reset(
+        ::WinHttpConnect(response.session.get(), kHost, INTERNET_DEFAULT_HTTPS_PORT, 0));
     if (!response.connect) {
         error = L"WinHttpConnect failed.";
         return false;
     }
 
     const auto object = std::wstring(kPathPrefix) + fileName;
-    response.request.reset(::WinHttpOpenRequest(
-        response.connect.get(),
-        L"GET",
-        object.c_str(),
-        nullptr,
-        WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES,
-        WINHTTP_FLAG_SECURE));
+    response.request.reset(::WinHttpOpenRequest(response.connect.get(), L"GET", object.c_str(),
+                                                nullptr, WINHTTP_NO_REFERER,
+                                                WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
     if (!response.request) {
         error = L"WinHttpOpenRequest failed.";
         return false;
@@ -99,18 +88,14 @@ bool OpenRequest(
     std::wstring headers;
     if (resumeFrom > 0) {
         wchar_t range[128]{};
-        std::swprintf(range, 128, L"Range: bytes=%llu-\r\n", static_cast<unsigned long long>(resumeFrom));
+        std::swprintf(range, 128, L"Range: bytes=%llu-\r\n",
+                      static_cast<unsigned long long>(resumeFrom));
         headers = range;
     }
 
     const BOOL sent = ::WinHttpSendRequest(
-        response.request.get(),
-        headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
-        headers.empty() ? 0 : static_cast<DWORD>(-1),
-        WINHTTP_NO_REQUEST_DATA,
-        0,
-        0,
-        0);
+        response.request.get(), headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
+        headers.empty() ? 0 : static_cast<DWORD>(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
     if (!sent || !::WinHttpReceiveResponse(response.request.get(), nullptr)) {
         error = L"HTTP request failed.";
         return false;
@@ -118,12 +103,8 @@ bool OpenRequest(
 
     DWORD statusSize = sizeof(response.status);
     ::WinHttpQueryHeaders(
-        response.request.get(),
-        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-        WINHTTP_HEADER_NAME_BY_INDEX,
-        &response.status,
-        &statusSize,
-        WINHTTP_NO_HEADER_INDEX);
+        response.request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_HEADER_NAME_BY_INDEX, &response.status, &statusSize, WINHTTP_NO_HEADER_INDEX);
 
     if (response.status != 200 && response.status != 206) {
         error = L"Model download HTTP status " + std::to_wstring(response.status);
@@ -132,24 +113,16 @@ bool OpenRequest(
 
     wchar_t lengthBuf[64]{};
     DWORD lengthSize = sizeof(lengthBuf);
-    if (::WinHttpQueryHeaders(
-            response.request.get(),
-            WINHTTP_QUERY_CONTENT_LENGTH,
-            WINHTTP_HEADER_NAME_BY_INDEX,
-            lengthBuf,
-            &lengthSize,
-            WINHTTP_NO_HEADER_INDEX)) {
+    if (::WinHttpQueryHeaders(response.request.get(), WINHTTP_QUERY_CONTENT_LENGTH,
+                              WINHTTP_HEADER_NAME_BY_INDEX, lengthBuf, &lengthSize,
+                              WINHTTP_NO_HEADER_INDEX)) {
         response.contentLength = _wcstoui64(lengthBuf, nullptr, 10);
     }
     return true;
 }
 
-bool StreamToFile(
-    const HttpResponse& response,
-    const std::wstring& partial,
-    uint64_t existing,
-    DownloadState* progress,
-    std::wstring& error) {
+bool StreamToFile(const HttpResponse& response, const std::wstring& partial, uint64_t existing,
+                  DownloadState* progress, std::wstring& error) {
     const bool resumed = existing > 0 && response.status == 206;
 
     if (progress != nullptr) {
@@ -160,14 +133,9 @@ bool StreamToFile(
         }
     }
 
-    const auto rawFile = ::CreateFileW(
-        partial.c_str(),
-        GENERIC_WRITE,
-        FILE_SHARE_READ,
-        nullptr,
-        resumed ? OPEN_ALWAYS : CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
+    const auto rawFile =
+        ::CreateFileW(partial.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                      resumed ? OPEN_ALWAYS : CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (rawFile == INVALID_HANDLE_VALUE) {
         error = L"Could not create download file.";
         return false;
@@ -219,11 +187,8 @@ bool StreamToFile(
     }
 }
 
-bool HttpDownloadToFile(
-    const std::wstring& fileName,
-    const std::wstring& destPath,
-    DownloadState* progress,
-    std::wstring& error) {
+bool HttpDownloadToFile(const std::wstring& fileName, const std::wstring& destPath,
+                        DownloadState* progress, std::wstring& error) {
     const auto partial = destPath + L".partial";
     const auto existing = FileIo::FileSize(partial);
 
@@ -248,23 +213,35 @@ bool HttpDownloadToFile(
     return true;
 }
 
-}  // namespace
+} // namespace
 
 auto ModelManager::OfferedModels() -> const std::vector<ModelInfo>& {
     // SHA-256 digests from Hugging Face LFS (ggerganov/whisper.cpp).
     static const std::vector<ModelInfo> kModels = {
-        {L"ggml-tiny.bin", L"tiny", "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"},
-        {L"ggml-tiny.en.bin", L"tiny.en", "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"},
-        {L"ggml-tiny-q5_1.bin", L"tiny-q5_1", "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7"},
-        {L"ggml-tiny.en-q5_1.bin", L"tiny.en-q5_1", "c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b"},
-        {L"ggml-base.bin", L"base", "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"},
-        {L"ggml-base.en.bin", L"base.en", "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"},
-        {L"ggml-base-q5_1.bin", L"base-q5_1 (default)", "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"},
-        {L"ggml-base.en-q5_1.bin", L"base.en-q5_1", "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f"},
-        {L"ggml-small.bin", L"small", "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"},
-        {L"ggml-small.en.bin", L"small.en", "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"},
-        {L"ggml-small-q5_1.bin", L"small-q5_1", "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"},
-        {L"ggml-small.en-q5_1.bin", L"small.en-q5_1", "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30"},
+        {L"ggml-tiny.bin", L"tiny",
+         "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"},
+        {L"ggml-tiny.en.bin", L"tiny.en",
+         "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"},
+        {L"ggml-tiny-q5_1.bin", L"tiny-q5_1",
+         "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7"},
+        {L"ggml-tiny.en-q5_1.bin", L"tiny.en-q5_1",
+         "c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b"},
+        {L"ggml-base.bin", L"base",
+         "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"},
+        {L"ggml-base.en.bin", L"base.en",
+         "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"},
+        {L"ggml-base-q5_1.bin", L"base-q5_1 (default)",
+         "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"},
+        {L"ggml-base.en-q5_1.bin", L"base.en-q5_1",
+         "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f"},
+        {L"ggml-small.bin", L"small",
+         "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"},
+        {L"ggml-small.en.bin", L"small.en",
+         "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"},
+        {L"ggml-small-q5_1.bin", L"small-q5_1",
+         "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"},
+        {L"ggml-small.en-q5_1.bin", L"small.en-q5_1",
+         "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30"},
     };
     return kModels;
 }
@@ -309,8 +286,10 @@ auto ModelManager::Sha256Hex(const std::wstring& path) -> std::wstring {
     if (FAILED(::BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0))) {
         return {};
     }
-    ::BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&objectLen), sizeof(objectLen), &dataLen, 0);
-    ::BCryptGetProperty(alg, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hashLen), sizeof(hashLen), &dataLen, 0);
+    ::BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&objectLen),
+                        sizeof(objectLen), &dataLen, 0);
+    ::BCryptGetProperty(alg, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hashLen),
+                        sizeof(hashLen), &dataLen, 0);
 
     std::vector<BYTE> object(objectLen);
     std::vector<BYTE> digest(hashLen);
@@ -344,11 +323,8 @@ bool ModelManager::VerifySha256(const std::wstring& path, const char* expectedHe
     return _wcsicmp(actual.c_str(), expected.c_str()) == 0;
 }
 
-bool ModelManager::DownloadToFile(
-    const ModelInfo& info,
-    std::atomic_bool& cancel,
-    const ProgressFn& onProgress,
-    std::wstring& error) {
+bool ModelManager::DownloadToFile(const ModelInfo& info, std::atomic_bool& cancel,
+                                  const ProgressFn& onProgress, std::wstring& error) {
     Paths::EnsureDirectory(Paths::ModelsDir());
     const auto dest = ModelPath(info.fileName);
 

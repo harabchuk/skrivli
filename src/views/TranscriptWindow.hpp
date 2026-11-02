@@ -1,32 +1,32 @@
 #pragma once
 
 #include "pch.hpp"
+
 #include "Ids.hpp"
 
 #include <map>
 #include <string>
 
-class TranscriptWindow
-    : public WTL::CFrameWindowImpl<TranscriptWindow>
-    , public WTL::CMessageFilter {
-public:
+class TranscriptWindow : public WTL::CFrameWindowImpl<TranscriptWindow>,
+                         public WTL::CMessageFilter {
+  public:
     DECLARE_FRAME_WND_CLASS(L"MeetingBuddy.TranscriptWindow", IDR_MAINFRAME)
 
     BEGIN_MSG_MAP_EX(TranscriptWindow)
-        MSG_WM_CREATE(OnCreate)
-        MSG_WM_SIZE(OnSize)
-        MSG_WM_CLOSE(OnClose)
-        MSG_WM_DESTROY(OnDestroy)
-        MSG_WM_SETFOCUS(OnSetFocus)
-        COMMAND_ID_HANDLER_EX(ID_TRANSCRIPT_COPYALL, OnCopyAll)
-        COMMAND_ID_HANDLER_EX(ID_TRANSCRIPT_SAVEAS, OnSaveAs)
-        COMMAND_ID_HANDLER_EX(ID_TRANSCRIPT_OPENEDITOR, OnOpenEditor)
-        COMMAND_ID_HANDLER_EX(ID_TRANSCRIPT_FIND, OnFind)
-        COMMAND_ID_HANDLER_EX(ID_EDIT_COPY, OnEditCopy)
-        COMMAND_ID_HANDLER_EX(ID_EDIT_SELECT_ALL, OnSelectAll)
-        MESSAGE_HANDLER(WM_COPY, OnCopyMessage)
-        MESSAGE_HANDLER(m_findMsg, OnFindMsg)
-        CHAIN_MSG_MAP(WTL::CFrameWindowImpl<TranscriptWindow>)
+    MSG_WM_CREATE(OnCreate)
+    MSG_WM_SIZE(OnSize)
+    MSG_WM_CLOSE(OnClose)
+    MSG_WM_DESTROY(OnDestroy)
+    MSG_WM_SETFOCUS(OnSetFocus)
+    COMMAND_ID_HANDLER_EX(ID_TRANSCRIPT_COPYALL, OnCopyAll)
+    COMMAND_ID_HANDLER_EX(ID_TRANSCRIPT_SAVEAS, OnSaveAs)
+    COMMAND_ID_HANDLER_EX(ID_TRANSCRIPT_OPENEDITOR, OnOpenEditor)
+    COMMAND_ID_HANDLER_EX(ID_TRANSCRIPT_FIND, OnFind)
+    COMMAND_ID_HANDLER_EX(ID_EDIT_COPY, OnEditCopy)
+    COMMAND_ID_HANDLER_EX(ID_EDIT_SELECT_ALL, OnSelectAll)
+    MESSAGE_HANDLER(WM_COPY, OnCopyMessage)
+    MESSAGE_HANDLER(m_findMsg, OnFindMsg)
+    CHAIN_MSG_MAP(WTL::CFrameWindowImpl<TranscriptWindow>)
     END_MSG_MAP()
 
     BOOL PreTranslateMessage(MSG* msg);
@@ -35,10 +35,14 @@ public:
     static void CloseAll();
 
     bool LoadFile(const std::wstring& mdPath);
-    auto Path() const -> const std::wstring& { return m_path; }
-    void OnFinalMessage(HWND /*hwnd*/) override { delete this; }
+    auto Path() const -> const std::wstring& {
+        return m_path;
+    }
+    void OnFinalMessage(HWND /*hwnd*/) override {
+        delete this;
+    }
 
-private:
+  private:
     LRESULT OnCreate(LPCREATESTRUCT createStruct);
     void OnSize(UINT type, CSize size);
     void OnClose();

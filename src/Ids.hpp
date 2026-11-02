@@ -2,6 +2,8 @@
 
 #include "resource.h"
 
+#include <windows.h>
+
 enum : UINT {
     WM_APP_TRAYICON = WM_APP + 1,
     WM_APP_RECORDING_STARTED = WM_APP + 2,
@@ -22,7 +24,7 @@ enum : UINT {
 
 enum {
     // ID_DEFAULT_PANE (0) stretches; keep fixed panes on non-zero IDs.
-    IDC_STATUS_PANE_TRANSCRIBE = 0,  // ID_DEFAULT_PANE
+    IDC_STATUS_PANE_TRANSCRIBE = 0, // ID_DEFAULT_PANE
     IDC_STATUS_PANE_STATE = 1,
     IDC_STATUS_PANE_TIME = 2,
 };

@@ -1,10 +1,11 @@
 #pragma once
 
 #include "pch.hpp"
+
 #include "Ids.hpp"
 
 class TrayIcon {
-public:
+  public:
     TrayIcon() = default;
     ~TrayIcon();
 
@@ -17,9 +18,11 @@ public:
     void ShowBalloon(const wchar_t* title, const wchar_t* text);
     void SetRecording(bool recording);
     void SetTip(const wchar_t* tip);
-    bool UsesVersion4() const { return m_version4; }
+    bool UsesVersion4() const {
+        return m_version4;
+    }
 
-private:
+  private:
     void FillBase(NOTIFYICONDATAW& data) const;
     void Modify();
     static void Modify(NOTIFYICONDATAW& data);
@@ -33,8 +36,5 @@ private:
     wchar_t m_tip[128] = L"MeetingBuddy";
 
     static constexpr GUID kIconGuid = {
-        0xb8e7a41c,
-        0x5d3f,
-        0x4a2e,
-        {0x9c, 0x1b, 0x8f, 0x6e, 0x2d, 0x4a, 0x7b, 0x09}};
+        0xb8e7a41c, 0x5d3f, 0x4a2e, {0x9c, 0x1b, 0x8f, 0x6e, 0x2d, 0x4a, 0x7b, 0x09}};
 };

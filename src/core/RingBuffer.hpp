@@ -8,14 +8,14 @@
 // Push never blocks: on overrun the packet is dropped and a discontinuity is
 // recorded for the consumer. No allocation inside Push / Pop.
 class RingBuffer {
-public:
+  public:
     static constexpr uint32_t kChannels = 2;
     static constexpr uint32_t kFlagDiscontinuity = 1u;
 
     explicit RingBuffer(uint32_t capacityFrames = 48000)
-        : m_capacityFrames(capacityFrames < 16 ? 16 : capacityFrames)
-        , m_samples(static_cast<size_t>(m_capacityFrames) * kChannels, 0.0f)
-        , m_packets(packetSlotCount()) {
+        : m_capacityFrames(capacityFrames < 16 ? 16 : capacityFrames),
+          m_samples(static_cast<size_t>(m_capacityFrames) * kChannels, 0.0f),
+          m_packets(packetSlotCount()) {
         m_writePacket.store(0, std::memory_order_relaxed);
         m_readPacket.store(0, std::memory_order_relaxed);
         m_writeFrame.store(0, std::memory_order_relaxed);
@@ -27,9 +27,12 @@ public:
     RingBuffer(const RingBuffer&) = delete;
     auto operator=(const RingBuffer&) -> RingBuffer& = delete;
 
-    uint32_t CapacityFrames() const { return m_capacityFrames; }
+    uint32_t CapacityFrames() const {
+        return m_capacityFrames;
+    }
 
-    bool Push(const float* interleavedStereo, uint32_t frameCount, uint64_t qpcFirst, bool discontinuity) {
+    bool Push(const float* interleavedStereo, uint32_t frameCount, uint64_t qpcFirst,
+              bool discontinuity) {
         if (interleavedStereo == nullptr || frameCount == 0) {
             return false;
         }
@@ -70,7 +73,8 @@ public:
         return true;
     }
 
-    bool Pop(float* interleavedStereo, uint32_t maxFrames, uint32_t& outFrames, uint64_t& outQpc, uint32_t& outFlags) {
+    bool Pop(float* interleavedStereo, uint32_t maxFrames, uint32_t& outFrames, uint64_t& outQpc,
+             uint32_t& outFlags) {
         outFrames = 0;
         outQpc = 0;
         outFlags = 0;
@@ -92,20 +96,23 @@ public:
 
         const uint32_t sampleCount = frames * kChannels;
         for (uint32_t i = 0; i < sampleCount; ++i) {
-            interleavedStereo[i] = m_samples[(packet.sampleIndex * kChannels + i) % m_samples.size()];
+            interleavedStereo[i] =
+                m_samples[(packet.sampleIndex * kChannels + i) % m_samples.size()];
         }
 
         outFrames = frames;
         outQpc = packet.qpcFirst;
         outFlags = packet.flags;
 
-        m_readFrame.store(m_readFrame.load(std::memory_order_relaxed) + frames, std::memory_order_release);
+        m_readFrame.store(m_readFrame.load(std::memory_order_relaxed) + frames,
+                          std::memory_order_release);
         m_readPacket.store(readPkt + 1, std::memory_order_release);
         return true;
     }
 
     bool Empty() const {
-        return m_readPacket.load(std::memory_order_acquire) == m_writePacket.load(std::memory_order_acquire);
+        return m_readPacket.load(std::memory_order_acquire) ==
+               m_writePacket.load(std::memory_order_acquire);
     }
 
     bool ConsumeOverrun() {
@@ -121,7 +128,7 @@ public:
         m_overrun.store(false, std::memory_order_relaxed);
     }
 
-private:
+  private:
     struct Packet {
         uint64_t qpcFirst = 0;
         uint32_t frameCount = 0;

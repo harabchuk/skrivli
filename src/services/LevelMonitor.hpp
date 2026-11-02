@@ -1,8 +1,8 @@
 #pragma once
 
+#include "core/RingBuffer.hpp"
 #include "infrastructure/audio/CaptureStream.hpp"
 #include "infrastructure/audio/DeviceManager.hpp"
-#include "core/RingBuffer.hpp"
 #include "infrastructure/audio/SilentRenderKeepAlive.hpp"
 
 #include <atomic>
@@ -12,30 +12,36 @@
 
 // Idle-time mic + system peak metering (no disk I/O). Stop before recording starts.
 class LevelMonitor {
-public:
+  public:
     LevelMonitor() = default;
     ~LevelMonitor();
 
     LevelMonitor(const LevelMonitor&) = delete;
     auto operator=(const LevelMonitor&) -> LevelMonitor& = delete;
 
-    void SetDeviceManager(DeviceManager* devices) { m_devices = devices; }
+    void SetDeviceManager(DeviceManager* devices) {
+        m_devices = devices;
+    }
 
     // Opens capture for the given devices and starts the drain thread.
     // Empty ids resolve to the default endpoints. Failures are silent (peaks stay 0).
-    void Start(
-        const std::wstring& micDeviceId,
-        const std::wstring& systemDeviceId,
-        bool communicationsProcessing);
+    void Start(const std::wstring& micDeviceId, const std::wstring& systemDeviceId,
+               bool communicationsProcessing);
 
     void Stop();
 
-    bool IsRunning() const { return m_running.load(std::memory_order_acquire); }
+    bool IsRunning() const {
+        return m_running.load(std::memory_order_acquire);
+    }
 
-    float PeakMic() const { return m_peakMic.load(std::memory_order_acquire); }
-    float PeakSys() const { return m_peakSys.load(std::memory_order_acquire); }
+    float PeakMic() const {
+        return m_peakMic.load(std::memory_order_acquire);
+    }
+    float PeakSys() const {
+        return m_peakSys.load(std::memory_order_acquire);
+    }
 
-private:
+  private:
     void DrainMain();
     void TeardownCapture();
     static float PeakOfPacket(const float* interleavedStereo, uint32_t frames, bool monoAverage);

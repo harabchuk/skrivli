@@ -12,7 +12,8 @@ LevelMonitor::~LevelMonitor() {
     Stop();
 }
 
-float LevelMonitor::PeakOfPacket(const float* interleavedStereo, uint32_t frames, bool monoAverage) {
+float LevelMonitor::PeakOfPacket(const float* interleavedStereo, uint32_t frames,
+                                 bool monoAverage) {
     float peak = 0.0f;
     for (uint32_t i = 0; i < frames; ++i) {
         const float left = interleavedStereo[i * 2];
@@ -48,10 +49,8 @@ void LevelMonitor::Stop() {
     m_peakSys.store(0.0f, std::memory_order_release);
 }
 
-void LevelMonitor::Start(
-    const std::wstring& micDeviceId,
-    const std::wstring& systemDeviceId,
-    bool communicationsProcessing) {
+void LevelMonitor::Start(const std::wstring& micDeviceId, const std::wstring& systemDeviceId,
+                         bool communicationsProcessing) {
     Stop();
 
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -73,7 +72,8 @@ void LevelMonitor::Start(
         if (!m_keepAlive.Start(renderDevice.get())) {
             Log::Warn(L"LevelMonitor: system keep-alive failed");
         }
-        if (m_sysCapture.Start(renderDevice.get(), CaptureStream::Mode::Loopback, m_sysRing, false)) {
+        if (m_sysCapture.Start(renderDevice.get(), CaptureStream::Mode::Loopback, m_sysRing,
+                               false)) {
             any = true;
         } else {
             m_keepAlive.Stop();
@@ -82,11 +82,8 @@ void LevelMonitor::Start(
     }
 
     if (micDevice) {
-        if (m_micCapture.Start(
-                micDevice.get(),
-                CaptureStream::Mode::Microphone,
-                m_micRing,
-                communicationsProcessing)) {
+        if (m_micCapture.Start(micDevice.get(), CaptureStream::Mode::Microphone, m_micRing,
+                               communicationsProcessing)) {
             any = true;
         } else {
             Log::Warn(L"LevelMonitor: microphone capture failed to open");

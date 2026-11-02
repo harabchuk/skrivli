@@ -5,13 +5,11 @@
 #include "infrastructure/common/Log.hpp"
 
 #include <functiondiscoverykeys_devpkey.h>
-
 #include <wil/resource.h>
 
 class DeviceManager::NotificationClient final : public IMMNotificationClient {
-public:
-    explicit NotificationClient(HWND hwnd)
-        : m_hwnd(hwnd) {}
+  public:
+    explicit NotificationClient(HWND hwnd) : m_hwnd(hwnd) {}
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
         if (ppv == nullptr) {
@@ -38,7 +36,8 @@ public:
         return ref;
     }
 
-    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR /*deviceId*/, DWORD /*newState*/) override {
+    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR /*deviceId*/,
+                                                   DWORD /*newState*/) override {
         PostChanged();
         return S_OK;
     }
@@ -53,19 +52,18 @@ public:
         return S_OK;
     }
 
-    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(
-        EDataFlow /*flow*/,
-        ERole /*role*/,
-        LPCWSTR /*defaultDeviceId*/) override {
+    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow /*flow*/, ERole /*role*/,
+                                                     LPCWSTR /*defaultDeviceId*/) override {
         PostChanged();
         return S_OK;
     }
 
-    HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR /*deviceId*/, const PROPERTYKEY /*key*/) override {
+    HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR /*deviceId*/,
+                                                     const PROPERTYKEY /*key*/) override {
         return S_OK;
     }
 
-private:
+  private:
     void PostChanged() const {
         if (m_hwnd != nullptr && ::IsWindow(m_hwnd)) {
             ::PostMessageW(m_hwnd, WM_APP_DEVICES_CHANGED, 0, 0);
@@ -84,12 +82,8 @@ bool DeviceManager::Initialize(HWND notifyHwnd) {
     Shutdown();
     m_notifyHwnd = notifyHwnd;
 
-    auto hr = ::CoCreateInstance(
-        __uuidof(MMDeviceEnumerator),
-        nullptr,
-        CLSCTX_ALL,
-        __uuidof(IMMDeviceEnumerator),
-        m_enumerator.put_void());
+    auto hr = ::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                 __uuidof(IMMDeviceEnumerator), m_enumerator.put_void());
     if (!HResult::SucceededOrLog(hr, L"CoCreateInstance(MMDeviceEnumerator)")) {
         return false;
     }
@@ -121,11 +115,13 @@ auto DeviceManager::EnumerateRender() const -> std::vector<AudioDeviceInfo> {
     return Enumerate(eRender);
 }
 
-auto DeviceManager::ResolveCaptureDevice(const std::wstring& savedId) const -> wil::com_ptr_nothrow<IMMDevice> {
+auto DeviceManager::ResolveCaptureDevice(const std::wstring& savedId) const
+    -> wil::com_ptr_nothrow<IMMDevice> {
     return Resolve(eCapture, eCommunications, savedId);
 }
 
-auto DeviceManager::ResolveRenderDevice(const std::wstring& savedId) const -> wil::com_ptr_nothrow<IMMDevice> {
+auto DeviceManager::ResolveRenderDevice(const std::wstring& savedId) const
+    -> wil::com_ptr_nothrow<IMMDevice> {
     return Resolve(eRender, eConsole, savedId);
 }
 
@@ -182,7 +178,8 @@ auto DeviceManager::Enumerate(EDataFlow flow) const -> std::vector<AudioDeviceIn
     AudioDeviceInfo defaultEntry{};
     defaultEntry.id.clear();
     defaultEntry.isDefault = true;
-    defaultEntry.name = (flow == eCapture) ? L"Default communications device" : L"Default output device";
+    defaultEntry.name =
+        (flow == eCapture) ? L"Default communications device" : L"Default output device";
     devices.push_back(defaultEntry);
 
     for (UINT i = 0; i < count; ++i) {
@@ -206,10 +203,8 @@ auto DeviceManager::Enumerate(EDataFlow flow) const -> std::vector<AudioDeviceIn
     return devices;
 }
 
-auto DeviceManager::Resolve(
-    EDataFlow flow,
-    ERole defaultRole,
-    const std::wstring& savedId) const -> wil::com_ptr_nothrow<IMMDevice> {
+auto DeviceManager::Resolve(EDataFlow flow, ERole defaultRole, const std::wstring& savedId) const
+    -> wil::com_ptr_nothrow<IMMDevice> {
     if (!savedId.empty()) {
         auto device = GetById(savedId);
         if (device) {
@@ -223,7 +218,8 @@ auto DeviceManager::Resolve(
     return GetDefault(flow, defaultRole);
 }
 
-auto DeviceManager::GetDefault(EDataFlow flow, ERole role) const -> wil::com_ptr_nothrow<IMMDevice> {
+auto DeviceManager::GetDefault(EDataFlow flow, ERole role) const
+    -> wil::com_ptr_nothrow<IMMDevice> {
     wil::com_ptr_nothrow<IMMDevice> device;
     if (!m_enumerator) {
         return device;

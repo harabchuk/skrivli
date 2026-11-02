@@ -5,10 +5,9 @@
 #include "infrastructure/common/Paths.hpp"
 #include "infrastructure/common/Text.hpp"
 
-#include <glaze/glaze.hpp>
-
 #include <windows.h>
 
+#include <glaze/glaze.hpp>
 #include <utility>
 
 namespace settings_file {
@@ -81,7 +80,8 @@ SettingsFile ToFile(const SettingsData& data) {
     file.general.firstRunTrayHintShown = data.firstRunTrayHintShown;
     if (data.windowPlacement.has_value()) {
         const auto& placement = *data.windowPlacement;
-        file.general.window = WindowPlacement{placement.x, placement.y, placement.width, placement.height};
+        file.general.window =
+            WindowPlacement{placement.x, placement.y, placement.width, placement.height};
     }
 
     file.recording.folder = Text::WideToUtf8(data.folder);
@@ -114,7 +114,8 @@ SettingsData FromFile(const SettingsFile& file) {
     if (file.general.window.has_value()) {
         const auto& window = *file.general.window;
         if (window.width > 0 && window.height > 0) {
-            data.windowPlacement = WindowPlacementSettings{window.x, window.y, window.width, window.height};
+            data.windowPlacement =
+                WindowPlacementSettings{window.x, window.y, window.width, window.height};
         }
     }
 
@@ -182,7 +183,7 @@ void ArchiveUnreadable(const std::wstring& path) {
     }
 }
 
-}  // namespace settings_file
+} // namespace settings_file
 
 using settings_file::ArchiveUnreadable;
 using settings_file::FileExists;

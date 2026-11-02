@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pch.hpp"
+
 #include "Ids.hpp"
 #include "infrastructure/audio/DeviceManager.hpp"
 #include "infrastructure/storage/Settings.hpp"
@@ -10,25 +11,30 @@
 #include <vector>
 
 class SettingsDialog : public CDialogImpl<SettingsDialog> {
-public:
-    enum { IDD = IDD_SETTINGS };
+  public:
+    enum {
+        IDD = IDD_SETTINGS
+    };
 
     explicit SettingsDialog(DeviceManager* devices);
 
     BEGIN_MSG_MAP_EX(SettingsDialog)
-        MSG_WM_INITDIALOG(OnInitDialog)
-        COMMAND_ID_HANDLER_EX(IDOK, OnOk)
-        COMMAND_ID_HANDLER_EX(IDCANCEL, OnCancel)
-        COMMAND_HANDLER_EX(IDC_SET_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
-        COMMAND_HANDLER_EX(IDC_SET_MODEL_DOWNLOAD, BN_CLICKED, OnModelDownload)
-        COMMAND_HANDLER_EX(IDC_SET_MODEL_BROWSE, BN_CLICKED, OnModelBrowse)
-        COMMAND_HANDLER_EX(IDC_SET_COMPRESS_M4A, BN_CLICKED, OnDependentToggled)
-        COMMAND_HANDLER_EX(IDC_SET_MIC_AGC, BN_CLICKED, OnDependentToggled)
-        COMMAND_HANDLER_EX(IDC_SET_HOTKEY_ENABLE, BN_CLICKED, OnDependentToggled)
+    MSG_WM_INITDIALOG(OnInitDialog)
+    COMMAND_ID_HANDLER_EX(IDOK, OnOk)
+    COMMAND_ID_HANDLER_EX(IDCANCEL, OnCancel)
+    COMMAND_HANDLER_EX(IDC_SET_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
+    COMMAND_HANDLER_EX(IDC_SET_MODEL_DOWNLOAD, BN_CLICKED, OnModelDownload)
+    COMMAND_HANDLER_EX(IDC_SET_MODEL_BROWSE, BN_CLICKED, OnModelBrowse)
+    COMMAND_HANDLER_EX(IDC_SET_COMPRESS_M4A, BN_CLICKED, OnDependentToggled)
+    COMMAND_HANDLER_EX(IDC_SET_MIC_AGC, BN_CLICKED, OnDependentToggled)
+    COMMAND_HANDLER_EX(IDC_SET_HOTKEY_ENABLE, BN_CLICKED, OnDependentToggled)
     END_MSG_MAP()
 
-    bool FolderChanged() const { return m_folderChanged; }
-private:
+    bool FolderChanged() const {
+        return m_folderChanged;
+    }
+
+  private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
     void OnOk(UINT code, int id, HWND control);
     void OnCancel(UINT code, int id, HWND control);
@@ -46,7 +52,8 @@ private:
 
     void LoadFromSettings();
     bool CollectTo(SettingsData& out, std::wstring& error);
-    void FillDeviceCombo(DeviceCombo& combo, const std::vector<AudioDeviceInfo>& devices, const std::wstring& selectedId, bool capture);
+    void FillDeviceCombo(DeviceCombo& combo, const std::vector<AudioDeviceInfo>& devices,
+                         const std::wstring& selectedId, bool capture);
     void FillModelCombo();
     void FillLanguageCombo();
     void UpdateDependentEnabled();

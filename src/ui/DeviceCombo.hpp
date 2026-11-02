@@ -7,16 +7,24 @@
 
 // Drop-down list whose rows carry a string id kept beside the control instead of in item data.
 class DeviceCombo {
-public:
+  public:
     struct Item {
         std::wstring label;
         std::wstring id;
     };
 
-    void Attach(HWND combo) { m_combo.Attach(combo); }
-    bool IsWindow() const { return m_combo.IsWindow(); }
-    auto Combo() -> WTL::CComboBox& { return m_combo; }
-    auto Combo() const -> const WTL::CComboBox& { return m_combo; }
+    void Attach(HWND combo) {
+        m_combo.Attach(combo);
+    }
+    bool IsWindow() const {
+        return m_combo.IsWindow();
+    }
+    auto Combo() -> WTL::CComboBox& {
+        return m_combo;
+    }
+    auto Combo() const -> const WTL::CComboBox& {
+        return m_combo;
+    }
 
     void Fill(const std::vector<Item>& items);
     int Add(const std::wstring& label, const std::wstring& id);
@@ -25,7 +33,7 @@ public:
     bool Select(const std::wstring& id);
     auto SelectedId() const -> std::wstring;
 
-private:
+  private:
     WTL::CComboBox m_combo;
     std::vector<std::wstring> m_ids;
 };

@@ -5,9 +5,8 @@
 #include "ui/ShellDialogs.hpp"
 #include "ui/Theme.hpp"
 
-#include <commctrl.h>
-
 #include <atomic>
+#include <commctrl.h>
 #include <filesystem>
 
 namespace {
@@ -49,68 +48,26 @@ auto CreateDownloadDialog(HWND owner, std::atomic_bool* cancel, HWND* bar) -> HW
         ::RegisterClassW(&wc);
     }
 
-    auto dlg = ::CreateWindowExW(
-        WS_EX_DLGMODALFRAME,
-        className,
-        L"Downloading model",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        420,
-        140,
-        owner,
-        nullptr,
-        _Module.GetModuleInstance(),
-        cancel);
+    auto dlg = ::CreateWindowExW(WS_EX_DLGMODALFRAME, className, L"Downloading model",
+                                 WS_POPUP | WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT,
+                                 420, 140, owner, nullptr, _Module.GetModuleInstance(), cancel);
     if (dlg == nullptr) {
         return nullptr;
     }
 
-    ::CreateWindowExW(
-        0,
-        L"STATIC",
-        L"Downloading whisper model…",
-        WS_CHILD | WS_VISIBLE,
-        16,
-        16,
-        370,
-        20,
-        dlg,
-        nullptr,
-        _Module.GetModuleInstance(),
-        nullptr);
+    ::CreateWindowExW(0, L"STATIC", L"Downloading whisper model…", WS_CHILD | WS_VISIBLE, 16, 16,
+                      370, 20, dlg, nullptr, _Module.GetModuleInstance(), nullptr);
 
-    auto progress = ::CreateWindowExW(
-        0,
-        PROGRESS_CLASSW,
-        L"",
-        WS_CHILD | WS_VISIBLE,
-        16,
-        48,
-        370,
-        18,
-        dlg,
-        nullptr,
-        _Module.GetModuleInstance(),
-        nullptr);
+    auto progress = ::CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 16, 48, 370,
+                                      18, dlg, nullptr, _Module.GetModuleInstance(), nullptr);
     ::SendMessageW(progress, PBM_SETRANGE, 0, MAKELPARAM(0, 1000));
     if (bar != nullptr) {
         *bar = progress;
     }
 
-    ::CreateWindowExW(
-        0,
-        L"BUTTON",
-        L"Cancel",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        300,
-        78,
-        86,
-        24,
-        dlg,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
-        _Module.GetModuleInstance(),
-        nullptr);
+    ::CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 300, 78, 86,
+                      24, dlg, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
+                      _Module.GetModuleInstance(), nullptr);
 
     RECT ownerRect{};
     if (owner != nullptr) {
@@ -133,7 +90,7 @@ void PumpMessages() {
     }
 }
 
-}  // namespace
+} // namespace
 
 bool ModelPrompt::BrowseAndInstall(HWND owner, std::wstring& outFileName) {
     static constexpr ui::FileFilter kFilters[] = {
@@ -151,9 +108,11 @@ bool ModelPrompt::BrowseAndInstall(HWND owner, std::wstring& outFileName) {
     const auto dest = ModelManager::ModelPath(leaf);
     std::error_code ec;
     if (!Text::PathEquals(source, dest)) {
-        std::filesystem::copy_file(source, dest, std::filesystem::copy_options::overwrite_existing, ec);
+        std::filesystem::copy_file(source, dest, std::filesystem::copy_options::overwrite_existing,
+                                   ec);
         if (ec) {
-            ui::ShowMessage(owner, L"Could not copy model into the models folder.", MB_OK | MB_ICONWARNING);
+            ui::ShowMessage(owner, L"Could not copy model into the models folder.",
+                            MB_OK | MB_ICONWARNING);
             return false;
         }
     }
@@ -170,8 +129,7 @@ bool ModelPrompt::Download(HWND owner, const ModelInfo& info, std::wstring& erro
     }
 
     const bool ok = ModelManager::DownloadToFile(
-        info,
-        cancel,
+        info, cancel,
         [&](uint64_t done, uint64_t total) {
             if (ui.bar != nullptr && total > 0) {
                 const auto pos = static_cast<int>((done * 1000ull) / total);
@@ -199,10 +157,10 @@ auto ModelPrompt::EnsureModel(HWND owner, const std::wstring& fileName) -> std::
         return ModelManager::ModelPath(chosen);
     }
 
-    const int answer = ui::ShowMessage(
-        owner,
-        L"The selected whisper model is not installed.\n\nDownload it now, or browse for a local .bin file?",
-        MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON1);
+    const int answer = ui::ShowMessage(owner,
+                                       L"The selected whisper model is not installed.\n\nDownload "
+                                       L"it now, or browse for a local .bin file?",
+                                       MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON1);
     // Yes = Download, No = Browse, Cancel = abort
     if (answer == IDCANCEL) {
         return {};

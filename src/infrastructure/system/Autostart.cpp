@@ -4,9 +4,8 @@
 
 #include <windows.h>
 
-#include <wil/registry.h>
-
 #include <string>
+#include <wil/registry.h>
 
 namespace {
 
@@ -21,7 +20,7 @@ auto QuotedExePath() -> std::wstring {
     return L"\"" + std::wstring(path) + L"\"";
 }
 
-}  // namespace
+} // namespace
 
 namespace Autostart {
 
@@ -49,8 +48,8 @@ bool IsEnabled() {
 
 bool Apply(bool enable, bool startMinimized) {
     wil::unique_hkey key;
-    const auto openHr = wil::reg::open_unique_key_nothrow(
-        HKEY_CURRENT_USER, kRunKey, key, wil::reg::key_access::readwrite);
+    const auto openHr = wil::reg::open_unique_key_nothrow(HKEY_CURRENT_USER, kRunKey, key,
+                                                          wil::reg::key_access::readwrite);
     if (FAILED(openHr)) {
         Log::Error(L"Failed to open HKCU Run key for autostart");
         return false;
@@ -62,13 +61,9 @@ bool Apply(bool enable, bool startMinimized) {
         if (cmd.empty()) {
             return false;
         }
-        const auto rc = ::RegSetValueExW(
-            key.get(),
-            kRunValueName,
-            0,
-            REG_SZ,
-            reinterpret_cast<const BYTE*>(cmd.c_str()),
-            static_cast<DWORD>((cmd.size() + 1) * sizeof(wchar_t)));
+        const auto rc = ::RegSetValueExW(key.get(), kRunValueName, 0, REG_SZ,
+                                         reinterpret_cast<const BYTE*>(cmd.c_str()),
+                                         static_cast<DWORD>((cmd.size() + 1) * sizeof(wchar_t)));
         if (rc != ERROR_SUCCESS) {
             Log::Error(L"Failed to set Start with Windows Run value");
             ok = false;
@@ -84,4 +79,4 @@ bool Apply(bool enable, bool startMinimized) {
     return ok;
 }
 
-}  // namespace Autostart
+} // namespace Autostart

@@ -1,11 +1,11 @@
 #include "infrastructure/storage/Settings.hpp"
 
-#include <gtest/gtest.h>
+#include <windows.h>
 
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <sstream>
-#include <windows.h>
 
 namespace {
 
@@ -89,11 +89,12 @@ void ExpectSame(const SettingsData& actual, const SettingsData& expected) {
     EXPECT_EQ(actual.useVad, expected.useVad);
 }
 
-}  // namespace
+} // namespace
 
 TEST(Settings, MissingFileYieldsDefaults) {
     // Arrange
-    const std::wstring path = (std::filesystem::path(TempDir(L"Missing")) / L"settings.json").wstring();
+    const std::wstring path =
+        (std::filesystem::path(TempDir(L"Missing")) / L"settings.json").wstring();
 
     // Act
     ASSERT_TRUE(Settings::Instance().LoadFromFile(path));
@@ -105,7 +106,8 @@ TEST(Settings, MissingFileYieldsDefaults) {
 
 TEST(Settings, RoundTripPreservesEveryField) {
     // Arrange
-    const std::wstring path = (std::filesystem::path(TempDir(L"RoundTrip")) / L"settings.json").wstring();
+    const std::wstring path =
+        (std::filesystem::path(TempDir(L"RoundTrip")) / L"settings.json").wstring();
     const SettingsData original = Sample();
     Settings::Instance().Data() = original;
 
@@ -122,7 +124,8 @@ TEST(Settings, RoundTripPreservesEveryField) {
 
 TEST(Settings, OmitsWindowUntilPlacementIsKnown) {
     // Arrange
-    const std::wstring path = (std::filesystem::path(TempDir(L"NoWindow")) / L"settings.json").wstring();
+    const std::wstring path =
+        (std::filesystem::path(TempDir(L"NoWindow")) / L"settings.json").wstring();
     Settings::Instance().Data() = SettingsData{};
 
     // Act
@@ -134,7 +137,8 @@ TEST(Settings, OmitsWindowUntilPlacementIsKnown) {
 
 TEST(Settings, PartialFileKeepsDefaultsAndSkipsUnknownKeys) {
     // Arrange
-    const std::wstring path = (std::filesystem::path(TempDir(L"Partial")) / L"settings.json").wstring();
+    const std::wstring path =
+        (std::filesystem::path(TempDir(L"Partial")) / L"settings.json").wstring();
     WriteFile(path, R"({
         // comment
         "general": { "closeToTray": false, "extra": 1 },
@@ -158,7 +162,8 @@ TEST(Settings, PartialFileKeepsDefaultsAndSkipsUnknownKeys) {
 
 TEST(Settings, DropsWindowWithNonPositiveSize) {
     // Arrange
-    const std::wstring path = (std::filesystem::path(TempDir(L"BadWindow")) / L"settings.json").wstring();
+    const std::wstring path =
+        (std::filesystem::path(TempDir(L"BadWindow")) / L"settings.json").wstring();
     WriteFile(path, R"({
         "general": { "window": { "x": 1, "y": 2, "width": 0, "height": 10 } }
     })");
@@ -172,7 +177,8 @@ TEST(Settings, DropsWindowWithNonPositiveSize) {
 
 TEST(Settings, UnreadableFileResetsToDefaults) {
     // Arrange
-    const std::wstring path = (std::filesystem::path(TempDir(L"Unreadable")) / L"settings.json").wstring();
+    const std::wstring path =
+        (std::filesystem::path(TempDir(L"Unreadable")) / L"settings.json").wstring();
     WriteFile(path, "{");
 
     // Act

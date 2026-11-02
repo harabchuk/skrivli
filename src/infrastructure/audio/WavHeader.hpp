@@ -1,9 +1,9 @@
 #pragma once
 
+#include <windows.h>
+
 #include <cstdint>
 #include <optional>
-
-#include <windows.h>
 
 // Fields of the canonical 44-byte PCM WAV header written by WavWriter ("fmt " then "data" at
 // fixed offsets).

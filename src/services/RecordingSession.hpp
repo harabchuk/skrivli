@@ -1,9 +1,9 @@
 #pragma once
 
+#include "core/RingBuffer.hpp"
 #include "infrastructure/audio/CaptureStream.hpp"
 #include "infrastructure/audio/DeviceManager.hpp"
 #include "infrastructure/audio/Mixer.hpp"
-#include "core/RingBuffer.hpp"
 #include "infrastructure/audio/SilentRenderKeepAlive.hpp"
 #include "infrastructure/files/WavWriter.hpp"
 
@@ -24,7 +24,7 @@ struct RecordingStartResult {
 };
 
 class RecordingSession {
-public:
+  public:
     enum class State {
         Idle,
         Starting,
@@ -44,18 +44,17 @@ public:
     RecordingSession(const RecordingSession&) = delete;
     auto operator=(const RecordingSession&) -> RecordingSession& = delete;
 
-    void SetNotifyHwnd(HWND hwnd) { m_notifyHwnd = hwnd; }
-    void SetDeviceManager(DeviceManager* devices) { m_devices = devices; }
+    void SetNotifyHwnd(HWND hwnd) {
+        m_notifyHwnd = hwnd;
+    }
+    void SetDeviceManager(DeviceManager* devices) {
+        m_devices = devices;
+    }
 
-    RecordingStartResult Start(
-        const std::wstring& folder,
-        const std::wstring& micDeviceId,
-        const std::wstring& systemDeviceId,
-        float micGain,
-        bool micAgc,
-        float systemGain,
-        bool communicationsProcessing,
-        bool saveStems = false);
+    RecordingStartResult Start(const std::wstring& folder, const std::wstring& micDeviceId,
+                               const std::wstring& systemDeviceId, float micGain, bool micAgc,
+                               float systemGain, bool communicationsProcessing,
+                               bool saveStems = false);
 
     void Stop(StopMode mode = StopMode::Save);
 
@@ -66,29 +65,43 @@ public:
     void SetMicGain(float micGain);
     void SetMicAgc(bool enabled);
 
-    State GetState() const { return m_state.load(std::memory_order_acquire); }
+    State GetState() const {
+        return m_state.load(std::memory_order_acquire);
+    }
     bool IsActive() const {
         const auto state = GetState();
         return state == State::Starting || state == State::Recording || state == State::Stopping;
     }
 
-    float PeakMic() const { return m_mixer.PeakMic(); }
-    float PeakSys() const { return m_mixer.PeakSys(); }
-    float EffectiveMicGain() const { return m_mixer.EffectiveMicGain(); }
-    uint64_t StartQpc() const { return m_startQpc.load(std::memory_order_acquire); }
+    float PeakMic() const {
+        return m_mixer.PeakMic();
+    }
+    float PeakSys() const {
+        return m_mixer.PeakSys();
+    }
+    float EffectiveMicGain() const {
+        return m_mixer.EffectiveMicGain();
+    }
+    uint64_t StartQpc() const {
+        return m_startQpc.load(std::memory_order_acquire);
+    }
 
     auto TakeDeviceNotes() -> std::vector<std::wstring>;
     auto MicDeviceName() const -> std::wstring;
     auto SystemDeviceName() const -> std::wstring;
-    SYSTEMTIME StartLocalTime() const { return m_startLocal; }
+    SYSTEMTIME StartLocalTime() const {
+        return m_startLocal;
+    }
     double ElapsedSeconds() const;
 
-private:
+  private:
     // One capture input (mic or loopback) plus its ring buffer and device bookkeeping.
     struct CaptureSource {
-        CaptureSource(RecordingSession& session, RingBuffer& sourceRing, CaptureStream::Mode sourceMode);
+        CaptureSource(RecordingSession& session, RingBuffer& sourceRing,
+                      CaptureStream::Mode sourceMode);
 
-        // `reason == nullptr` is the initial open at Start; otherwise a reopen after a device change.
+        // `reason == nullptr` is the initial open at Start; otherwise a reopen after a device
+        // change.
         bool Open(IMMDevice* device, const wchar_t* reason);
         void NoteBufferFlags();
         void Stop();
@@ -110,14 +123,16 @@ private:
 
     // Optional per-source WAV stems written next to the mix.
     class StemWriters {
-    public:
+      public:
         bool Open(const std::wstring& stemBase);
         bool Write(const float* mic, const float* sys);
         void Finalize();
         void Discard();
-        bool IsOpen() const { return m_open; }
+        bool IsOpen() const {
+            return m_open;
+        }
 
-    private:
+      private:
         WavWriter m_mic;
         WavWriter m_sys;
         bool m_open = false;
@@ -127,22 +142,13 @@ private:
     void WriterMain();
     void ServiceDevices();
     bool CheckDiskSpace(ULONGLONG& lastCheck);
-    bool WriteBlock(
-        const float* block,
-        const float* micStem,
-        const float* sysStem,
-        bool flushing,
-        bool& rescued);
+    bool WriteBlock(const float* block, const float* micStem, const float* sysStem, bool flushing,
+                    bool& rescued);
     void Post(UINT msg, std::optional<std::wstring> payload = {});
     void FailStart(RecordingStartResult& result, const std::wstring& message);
-    void ResetForStart(
-        const std::wstring& micDeviceId,
-        const std::wstring& systemDeviceId,
-        float micGain,
-        bool micAgc,
-        float systemGain,
-        bool communicationsProcessing,
-        bool saveStems);
+    void ResetForStart(const std::wstring& micDeviceId, const std::wstring& systemDeviceId,
+                       float micGain, bool micAgc, float systemGain, bool communicationsProcessing,
+                       bool saveStems);
     bool OpenOutputFiles(const std::wstring& folder, RecordingStartResult& result);
     bool OpenSources(RecordingStartResult& result);
     void TeardownCapture();

@@ -9,7 +9,7 @@
 #include <vector>
 
 class Mixer {
-public:
+  public:
     static constexpr int64_t kStaleFrames = 7200;          // 150 ms
     static constexpr int64_t kDriftThresholdFrames = 960;  // 20 ms
     static constexpr float kLimiterStart = 0.89125093813f; // -1 dBFS
@@ -20,7 +20,7 @@ public:
     static constexpr float kAgcMinGain = 0.5f;
     static constexpr float kAgcMaxGain = 4.0f;
     static constexpr float kAgcWindowSeconds = 0.75f;
-    static constexpr float kAgcAttackPerBlock = 0.35f;  // fast reduce when loud
+    static constexpr float kAgcAttackPerBlock = 0.35f;   // fast reduce when loud
     static constexpr float kAgcReleasePerBlock = 0.015f; // slow raise when quiet
 
     Mixer() = default;
@@ -29,36 +29,36 @@ public:
     Mixer(const Mixer&) = delete;
     auto operator=(const Mixer&) -> Mixer& = delete;
 
-    void Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain, bool micAgc = false);
+    void Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain,
+               bool micAgc = false);
 
     // Pull from rings, emit one 10 ms stereo block when ready. Returns true if outBlock filled.
     // Optional stem buffers receive aligned pre-gain mic (mono→stereo) and system audio.
-    bool Process(
-        RingBuffer& micRing,
-        RingBuffer& sysRing,
-        uint64_t nowQpc,
-        float* outInterleavedStereo,
-        float* outMicStem = nullptr,
-        float* outSysStem = nullptr);
+    bool Process(RingBuffer& micRing, RingBuffer& sysRing, uint64_t nowQpc,
+                 float* outInterleavedStereo, float* outMicStem = nullptr,
+                 float* outSysStem = nullptr);
 
-    // After capture stops: emit remaining covered/stale blocks until rings and timelines are drained.
-    bool Flush(
-        RingBuffer& micRing,
-        RingBuffer& sysRing,
-        float* outInterleavedStereo,
-        float* outMicStem = nullptr,
-        float* outSysStem = nullptr);
+    // After capture stops: emit remaining covered/stale blocks until rings and timelines are
+    // drained.
+    bool Flush(RingBuffer& micRing, RingBuffer& sysRing, float* outInterleavedStereo,
+               float* outMicStem = nullptr, float* outSysStem = nullptr);
 
     bool HasPending() const;
 
-    float PeakMic() const { return m_peakMic.load(std::memory_order_acquire); }
-    float PeakSys() const { return m_peakSys.load(std::memory_order_acquire); }
-    float EffectiveMicGain() const { return m_effectiveMicGain.load(std::memory_order_acquire); }
+    float PeakMic() const {
+        return m_peakMic.load(std::memory_order_acquire);
+    }
+    float PeakSys() const {
+        return m_peakSys.load(std::memory_order_acquire);
+    }
+    float EffectiveMicGain() const {
+        return m_effectiveMicGain.load(std::memory_order_acquire);
+    }
 
     void SetGains(float micGain, float systemGain);
     void SetMicAgc(bool enabled);
 
-private:
+  private:
     struct SourceBuffer {
         std::vector<float> samples; // interleaved stereo, relative to startFrame
         int64_t startFrame = 0;

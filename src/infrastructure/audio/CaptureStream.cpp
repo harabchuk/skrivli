@@ -6,17 +6,15 @@
 
 #include <audioclient.h>
 #include <avrt.h>
-#include <mmdeviceapi.h>
-
 #include <cstring>
+#include <mmdeviceapi.h>
 #include <vector>
 
 namespace {
 
-constexpr DWORD kAutoConvertFlags =
-    AUDCLNT_STREAMFLAGS_EVENTCALLBACK
-    | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
-    | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+constexpr DWORD kAutoConvertFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
+                                    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+                                    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
 
 constexpr DWORD kRawEventFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
 
@@ -32,7 +30,7 @@ void ApplyCommunicationsCategory(IAudioClient* client) {
     }
 }
 
-}  // namespace
+} // namespace
 
 struct CaptureStream::ActiveClient {
     wil::com_ptr_nothrow<IAudioClient> audio;
@@ -49,11 +47,8 @@ CaptureStream::~CaptureStream() {
     Stop();
 }
 
-bool CaptureStream::Start(
-    IMMDevice* device,
-    Mode mode,
-    RingBuffer& ring,
-    bool communicationsProcessing) {
+bool CaptureStream::Start(IMMDevice* device, Mode mode, RingBuffer& ring,
+                          bool communicationsProcessing) {
     Stop();
     if (device == nullptr) {
         m_fatalError.store(E_POINTER, std::memory_order_release);
@@ -87,8 +82,8 @@ bool CaptureStream::Start(
     }
 
     ::WaitForSingleObject(m_initEvent.get(), 10000);
-    if (FAILED(m_fatalError.load(std::memory_order_acquire))
-        || m_deviceInvalidated.load(std::memory_order_acquire)) {
+    if (FAILED(m_fatalError.load(std::memory_order_acquire)) ||
+        m_deviceInvalidated.load(std::memory_order_acquire)) {
         Stop();
         return false;
     }
@@ -124,7 +119,8 @@ void CaptureStream::ThreadMain() {
 }
 
 bool CaptureStream::ActivateClient(wil::com_ptr_nothrow<IAudioClient>& client) {
-    const auto hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void());
+    const auto hr =
+        m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void());
     if (FAILED(hr) || !client) {
         m_fatalError.store(hr, std::memory_order_release);
         return false;
@@ -147,16 +143,14 @@ bool CaptureStream::InitializeClient(ActiveClient& active) {
         flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
 
-    auto hr = active.audio->Initialize(
-        AUDCLNT_SHAREMODE_SHARED,
-        flags,
-        AudioFormat::kBufferDuration,
-        0,
-        reinterpret_cast<WAVEFORMATEX*>(&floatFormat),
-        nullptr);
+    auto hr =
+        active.audio->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, AudioFormat::kBufferDuration, 0,
+                                 reinterpret_cast<WAVEFORMATEX*>(&floatFormat), nullptr);
 
     if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Warn, L"AUTOCONVERTPCM Initialize failed; trying mix-format + miniaudio resampler", hr);
+        Log::WriteHResult(
+            Log::Level::Warn,
+            L"AUTOCONVERTPCM Initialize failed; trying mix-format + miniaudio resampler", hr);
 
         WAVEFORMATEX* mixFormat = nullptr;
         hr = active.audio->GetMixFormat(&mixFormat);
@@ -177,13 +171,9 @@ bool CaptureStream::InitializeClient(ActiveClient& active) {
             rawFlags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
         }
 
-        hr = active.audio->Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            rawFlags,
-            AudioFormat::kBufferDuration,
-            0,
-            active.mixFormat.get(),
-            nullptr);
+        hr = active.audio->Initialize(AUDCLNT_SHAREMODE_SHARED, rawFlags,
+                                      AudioFormat::kBufferDuration, 0, active.mixFormat.get(),
+                                      nullptr);
         if (FAILED(hr)) {
             m_fatalError.store(hr, std::memory_order_release);
             return false;
@@ -252,8 +242,8 @@ void CaptureStream::DrainPackets(ActiveClient& active) {
             break;
         }
 
-        const bool discontinuity =
-            ((bufferFlags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0) || active.pendingDiscontinuity;
+        const bool discontinuity = ((bufferFlags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0) ||
+                                   active.pendingDiscontinuity;
         active.pendingDiscontinuity = false;
         if ((bufferFlags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0) {
             m_sawDiscontinuityFlag.store(true, std::memory_order_release);
@@ -271,19 +261,11 @@ void CaptureStream::DrainPackets(ActiveClient& active) {
                     continue;
                 }
                 uint32_t outFrames = 0;
-                if (!m_resampler.Process(
-                        data,
-                        frames * mixBlockAlign,
-                        frames,
-                        m_resampleScratch,
-                        outFrames)) {
+                if (!m_resampler.Process(data, frames * mixBlockAlign, frames, m_resampleScratch,
+                                         outFrames)) {
                     active.pendingDiscontinuity = true;
-                } else if (outFrames > 0
-                           && !m_ring->Push(
-                                  m_resampleScratch.data(),
-                                  outFrames,
-                                  qpcPosition,
-                                  discontinuity)) {
+                } else if (outFrames > 0 && !m_ring->Push(m_resampleScratch.data(), outFrames,
+                                                          qpcPosition, discontinuity)) {
                     active.pendingDiscontinuity = true;
                 }
             } else {

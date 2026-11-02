@@ -15,4 +15,4 @@ bool SucceededOrLog(HRESULT hr, const wchar_t* context) {
     return SUCCEEDED(LogIfFailed(hr, context));
 }
 
-}  // namespace HResult
+} // namespace HResult

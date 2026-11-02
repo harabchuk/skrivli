@@ -13,10 +13,9 @@ constexpr int kPeakHoldTicks = 30; // ~1 s at 30 Hz
 
 COLORREF LerpColor(COLORREF a, COLORREF b, float t) {
     t = std::clamp(t, 0.0f, 1.0f);
-    return RGB(
-        static_cast<int>(GetRValue(a) + (GetRValue(b) - GetRValue(a)) * t),
-        static_cast<int>(GetGValue(a) + (GetGValue(b) - GetGValue(a)) * t),
-        static_cast<int>(GetBValue(a) + (GetBValue(b) - GetBValue(a)) * t));
+    return RGB(static_cast<int>(GetRValue(a) + (GetRValue(b) - GetRValue(a)) * t),
+               static_cast<int>(GetGValue(a) + (GetGValue(b) - GetGValue(a)) * t),
+               static_cast<int>(GetBValue(a) + (GetBValue(b) - GetBValue(a)) * t));
 }
 
 COLORREF ColorAtNormalized(float norm) {
@@ -32,13 +31,11 @@ COLORREF ColorAtNormalized(float norm) {
 
 COLORREF DarkenSysColor(int index, int amount) {
     const COLORREF c = ::GetSysColor(index);
-    return RGB(
-        std::max(0, GetRValue(c) - amount),
-        std::max(0, GetGValue(c) - amount),
-        std::max(0, GetBValue(c) - amount));
+    return RGB(std::max(0, GetRValue(c) - amount), std::max(0, GetGValue(c) - amount),
+               std::max(0, GetBValue(c) - amount));
 }
 
-}  // namespace
+} // namespace
 
 float LevelMeter::PeakToDb(float peak) {
     const float clamped = std::clamp(peak, 0.0f, 1.0f);
@@ -119,16 +116,12 @@ void LevelMeter::PaintTo(CDCHandle dc, const CRect& rect) {
         const int stride = segmentWidth + segmentGap;
         for (int x = 0; x < fillWidth; x += stride) {
             const int segRight = std::min(x + segmentWidth, fillWidth);
-            CRect seg(
-                inner.left + x,
-                inner.top,
-                inner.left + segRight,
-                inner.bottom);
+            CRect seg(inner.left + x, inner.top, inner.left + segRight, inner.bottom);
             if (seg.Width() <= 0) {
                 continue;
             }
             const float mid = (static_cast<float>(x) + static_cast<float>(seg.Width()) * 0.5f) /
-                static_cast<float>(inner.Width());
+                              static_cast<float>(inner.Width());
             dc.FillSolidRect(&seg, ColorAtNormalized(mid));
         }
     }
