@@ -10,7 +10,10 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 #include <windows.h>
+
+struct DecodedAudio;
 
 struct TranscribeNotify {
     std::wstring audioPath;
@@ -50,13 +53,21 @@ private:
 
     void WorkerMain();
     void ProcessJob(Job job);
+    // Transcribes every planned chunk, appending offset-corrected segments. On failure it
+    // records the failure through FailJob and returns false.
+    bool TranscribeChunks(
+        const Job& job,
+        const DecodedAudio& decoded,
+        std::vector<TranscriptSegment>& segments,
+        std::string& language);
+    void FailJob(const Job& job, TranscriptStatus status, const std::wstring& message);
     void UpdateSidecarStatus(
         const std::wstring& audioPath,
         TranscriptStatus status,
         const std::string& error,
         const std::string& model,
         const std::string& language);
-    void PostNotify(UINT msg, TranscribeNotify* notify);
+    void Notify(UINT msg, const std::wstring& audioPath, int percent = 0, std::wstring message = {});
 
     HWND m_notifyHwnd = nullptr;
     mutable std::mutex m_mutex;

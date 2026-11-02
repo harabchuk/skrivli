@@ -12,6 +12,8 @@ struct ModelInfo {
 
 class ModelManager {
 public:
+    static constexpr wchar_t kDefaultModel[] = L"ggml-base-q5_1.bin";
+
     static const std::vector<ModelInfo>& OfferedModels();
     static const ModelInfo* Find(const std::wstring& fileName);
     static std::wstring ModelPath(const std::wstring& fileName);

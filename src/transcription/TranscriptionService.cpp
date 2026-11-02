@@ -93,7 +93,7 @@ bool TranscriptionService::Enqueue(HWND ownerForModelUi, const std::wstring& aud
     Start();
 
     const auto& settings = Settings::Instance().Data();
-    std::wstring modelFile = settings.model.empty() ? L"ggml-base-q5_1.bin" : settings.model;
+    std::wstring modelFile = settings.model.empty() ? ModelManager::kDefaultModel : settings.model;
     const std::wstring modelPath = ModelManager::EnsureModel(ownerForModelUi, modelFile);
     if (modelPath.empty()) {
         return false;
@@ -122,9 +122,7 @@ bool TranscriptionService::Enqueue(HWND ownerForModelUi, const std::wstring& aud
     }
 
     UpdateSidecarStatus(audioPath, TranscriptStatus::Queued, {}, Text::WideToUtf8(modelFile), {});
-    auto* notify = new TranscribeNotify{};
-    notify->audioPath = audioPath;
-    PostNotify(WM_APP_TRANSCRIBE_QUEUED, notify);
+    Notify(WM_APP_TRANSCRIBE_QUEUED, audioPath);
     m_cv.notify_one();
     return true;
 }
@@ -148,10 +146,7 @@ void TranscriptionService::Cancel(const std::wstring& audioPath) {
 
     if (removedQueued) {
         UpdateSidecarStatus(audioPath, TranscriptStatus::Cancelled, "Cancelled", {}, {});
-        auto* notify = new TranscribeNotify{};
-        notify->audioPath = audioPath;
-        notify->message = L"Cancelled";
-        PostNotify(WM_APP_TRANSCRIBE_FAILED, notify);
+        Notify(WM_APP_TRANSCRIBE_FAILED, audioPath, 0, L"Cancelled");
     }
 }
 
@@ -182,8 +177,17 @@ std::wstring TranscriptionService::ActivePath() const {
     return m_activePath;
 }
 
-void TranscriptionService::PostNotify(UINT msg, TranscribeNotify* notify) {
-    PostOwned(m_notifyHwnd, msg, std::unique_ptr<TranscribeNotify>(notify));
+void TranscriptionService::Notify(UINT msg, const std::wstring& audioPath, int percent, std::wstring message) {
+    auto notify = std::make_unique<TranscribeNotify>();
+    notify->audioPath = audioPath;
+    notify->message = std::move(message);
+    notify->percent = percent;
+    PostOwned(m_notifyHwnd, msg, std::move(notify));
+}
+
+void TranscriptionService::FailJob(const Job& job, TranscriptStatus status, const std::wstring& message) {
+    UpdateSidecarStatus(job.audioPath, status, Text::WideToUtf8(message), {}, {});
+    Notify(WM_APP_TRANSCRIBE_FAILED, job.audioPath, 0, message);
 }
 
 void TranscriptionService::UpdateSidecarStatus(
@@ -246,55 +250,15 @@ void TranscriptionService::WorkerMain() {
     }
 }
 
-void TranscriptionService::ProcessJob(Job job) {
-    UpdateSidecarStatus(
-        job.audioPath,
-        TranscriptStatus::Preparing,
-        {},
-        Text::WideToUtf8(job.modelFileName),
-        job.language);
-
-    auto* preparing = new TranscribeNotify{};
-    preparing->audioPath = job.audioPath;
-    preparing->percent = 0;
-    PostNotify(WM_APP_TRANSCRIBE_PROGRESS, preparing);
-
-    std::wstring error;
-    if (!m_engine.EnsureLoaded(job.modelPath, error)) {
-        UpdateSidecarStatus(job.audioPath, TranscriptStatus::Failed, Text::WideToUtf8(error), {}, {});
-        auto* notify = new TranscribeNotify{};
-        notify->audioPath = job.audioPath;
-        notify->message = error;
-        PostNotify(WM_APP_TRANSCRIBE_FAILED, notify);
-        return;
-    }
-
-    DecodedAudio decoded{};
-    if (!AudioFileReader::Read(job.audioPath, decoded, error)) {
-        UpdateSidecarStatus(job.audioPath, TranscriptStatus::Failed, Text::WideToUtf8(error), {}, {});
-        auto* notify = new TranscribeNotify{};
-        notify->audioPath = job.audioPath;
-        notify->message = error;
-        PostNotify(WM_APP_TRANSCRIBE_FAILED, notify);
-        return;
-    }
-
-    if (m_cancel.load()) {
-        UpdateSidecarStatus(job.audioPath, TranscriptStatus::Cancelled, "Cancelled", {}, {});
-        auto* notify = new TranscribeNotify{};
-        notify->audioPath = job.audioPath;
-        notify->message = L"Cancelled";
-        PostNotify(WM_APP_TRANSCRIBE_FAILED, notify);
-        return;
-    }
-
+bool TranscriptionService::TranscribeChunks(
+    const Job& job,
+    const DecodedAudio& decoded,
+    std::vector<TranscriptSegment>& segments,
+    std::string& language) {
     const size_t totalFrames48 = decoded.interleavedStereo.size() / 2;
     const auto chunks = ChunkPlan::Plan(totalFrames48);
     const size_t chunkCount = (std::max)(size_t{1}, chunks.size());
     const bool chunked = chunks.size() > 1;
-
-    std::vector<TranscriptSegment> allSegments;
-    std::string detectedLanguage;
 
     UpdateSidecarStatus(
         job.audioPath,
@@ -307,12 +271,8 @@ void TranscriptionService::ProcessJob(Job job) {
 
     for (size_t chunkIndex = 0; chunkIndex < chunks.size(); ++chunkIndex) {
         if (m_cancel.load()) {
-            UpdateSidecarStatus(job.audioPath, TranscriptStatus::Cancelled, "Cancelled", {}, {});
-            auto* notify = new TranscribeNotify{};
-            notify->audioPath = job.audioPath;
-            notify->message = L"Cancelled";
-            PostNotify(WM_APP_TRANSCRIBE_FAILED, notify);
-            return;
+            FailJob(job, TranscriptStatus::Cancelled, L"Cancelled");
+            return false;
         }
 
         const size_t frameOffset = chunks[chunkIndex].first;
@@ -325,8 +285,9 @@ void TranscriptionService::ProcessJob(Job job) {
             : 0;
         const int span = chunked ? static_cast<int>(100 / chunkCount) : 100;
 
-        std::vector<TranscriptSegment> segments;
+        std::vector<TranscriptSegment> chunkSegments;
         std::string chunkLang;
+        std::wstring error;
         const bool ok = m_engine.Transcribe(
             mono16k,
             job.language,
@@ -337,39 +298,27 @@ void TranscriptionService::ProcessJob(Job job) {
             [&](int percent) {
                 const int mapped = basePercent + (percent * span) / 100;
                 m_percent.store(mapped);
-                auto* notify = new TranscribeNotify{};
-                notify->audioPath = job.audioPath;
-                notify->percent = mapped;
-                PostNotify(WM_APP_TRANSCRIBE_PROGRESS, notify);
+                Notify(WM_APP_TRANSCRIBE_PROGRESS, job.audioPath, mapped);
             },
-            segments,
+            chunkSegments,
             chunkLang,
             error);
 
         if (!ok) {
             const bool cancelled = m_cancel.load() || error == L"Cancelled.";
-            UpdateSidecarStatus(
-                job.audioPath,
-                cancelled ? TranscriptStatus::Cancelled : TranscriptStatus::Failed,
-                Text::WideToUtf8(error),
-                {},
-                {});
-            auto* notify = new TranscribeNotify{};
-            notify->audioPath = job.audioPath;
-            notify->message = error;
-            PostNotify(WM_APP_TRANSCRIBE_FAILED, notify);
-            return;
+            FailJob(job, cancelled ? TranscriptStatus::Cancelled : TranscriptStatus::Failed, error);
+            return false;
         }
 
-        if (detectedLanguage.empty()) {
-            detectedLanguage = chunkLang;
+        if (language.empty()) {
+            language = chunkLang;
         }
 
         const int64_t offsetTenths = ChunkPlan::OffsetTenths(frameOffset);
-        for (auto& seg : segments) {
+        for (auto& seg : chunkSegments) {
             seg.t0 += offsetTenths;
             seg.t1 += offsetTenths;
-            allSegments.push_back(std::move(seg));
+            segments.push_back(std::move(seg));
         }
     }
 
@@ -385,6 +334,40 @@ void TranscriptionService::ProcessJob(Job job) {
             << L" (wall " << wallSeconds << L"s / audio " << audioSeconds << L"s"
             << L", model " << job.modelFileName << L")";
     Log::Info(rtfLine.str());
+    return true;
+}
+
+void TranscriptionService::ProcessJob(Job job) {
+    UpdateSidecarStatus(
+        job.audioPath,
+        TranscriptStatus::Preparing,
+        {},
+        Text::WideToUtf8(job.modelFileName),
+        job.language);
+    Notify(WM_APP_TRANSCRIBE_PROGRESS, job.audioPath, 0);
+
+    std::wstring error;
+    if (!m_engine.EnsureLoaded(job.modelPath, error)) {
+        FailJob(job, TranscriptStatus::Failed, error);
+        return;
+    }
+
+    DecodedAudio decoded{};
+    if (!AudioFileReader::Read(job.audioPath, decoded, error)) {
+        FailJob(job, TranscriptStatus::Failed, error);
+        return;
+    }
+
+    if (m_cancel.load()) {
+        FailJob(job, TranscriptStatus::Cancelled, L"Cancelled");
+        return;
+    }
+
+    std::vector<TranscriptSegment> allSegments;
+    std::string detectedLanguage;
+    if (!TranscribeChunks(job, decoded, allSegments, detectedLanguage)) {
+        return;
+    }
 
     RecordingSidecar side{};
     Sidecar::Load(RecordingLibrary::JsonPathForAudio(job.audioPath), side);
@@ -400,11 +383,7 @@ void TranscriptionService::ProcessJob(Job job) {
     const std::string markdown = MarkdownFormatter::Format(meta, allSegments);
     const std::wstring mdPath = RecordingLibrary::MdPathForAudio(job.audioPath);
     if (!MarkdownFormatter::WriteUtf8NoBom(mdPath, markdown)) {
-        UpdateSidecarStatus(job.audioPath, TranscriptStatus::Failed, "Failed to write markdown", {}, {});
-        auto* notify = new TranscribeNotify{};
-        notify->audioPath = job.audioPath;
-        notify->message = L"Failed to write markdown";
-        PostNotify(WM_APP_TRANSCRIBE_FAILED, notify);
+        FailJob(job, TranscriptStatus::Failed, L"Failed to write markdown");
         return;
     }
 
@@ -419,9 +398,6 @@ void TranscriptionService::ProcessJob(Job job) {
         Text::WideToUtf8(job.modelFileName),
         langOut);
 
-    auto* done = new TranscribeNotify{};
-    done->audioPath = job.audioPath;
-    done->percent = 100;
-    PostNotify(WM_APP_TRANSCRIBE_FINISHED, done);
+    Notify(WM_APP_TRANSCRIBE_FINISHED, job.audioPath, 100);
     Log::Info(L"Transcript ready: " + mdPath);
 }

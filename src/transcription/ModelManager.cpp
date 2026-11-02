@@ -7,6 +7,7 @@
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/Scoped.hpp"
 #include "util/Text.hpp"
 
 #include <bcrypt.h>
@@ -50,24 +51,21 @@ struct DownloadProgress {
     uint64_t done = 0;
 };
 
+void RequestCancel(HWND hwnd) {
+    auto* state = reinterpret_cast<DownloadProgress*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (state != nullptr && state->cancel != nullptr) {
+        state->cancel->store(true);
+    }
+}
+
 LRESULT CALLBACK DownloadWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_CREATE) {
         auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
         ::SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
         return 0;
     }
-    if (msg == WM_COMMAND && LOWORD(wParam) == IDCANCEL) {
-        auto* state = reinterpret_cast<DownloadProgress*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-        if (state != nullptr && state->cancel != nullptr) {
-            state->cancel->store(true);
-        }
-        return 0;
-    }
-    if (msg == WM_CLOSE) {
-        auto* state = reinterpret_cast<DownloadProgress*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-        if (state != nullptr && state->cancel != nullptr) {
-            state->cancel->store(true);
-        }
+    if ((msg == WM_COMMAND && LOWORD(wParam) == IDCANCEL) || msg == WM_CLOSE) {
+        RequestCancel(hwnd);
         return 0;
     }
     return ::DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -167,170 +165,165 @@ void PumpMessages() {
     }
 }
 
-bool HttpDownloadToFile(
-    const std::wstring& fileName,
-    const std::wstring& destPath,
-    DownloadProgress* progress,
-    std::wstring& error) {
-    const std::wstring partial = destPath + L".partial";
-    uint64_t existing = FileIo::FileSize(partial);
+struct HttpResponse {
+    // Declared in open order so they close in reverse (request, connect, session).
+    UniqueWinHttp session;
+    UniqueWinHttp connect;
+    UniqueWinHttp request;
+    DWORD status = 0;
+    uint64_t contentLength = 0;
+};
 
-    HINTERNET session = ::WinHttpOpen(
+bool OpenRequest(
+    const std::wstring& fileName,
+    uint64_t resumeFrom,
+    HttpResponse& response,
+    std::wstring& error) {
+    response.session.reset(::WinHttpOpen(
         L"MeetingBuddy/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS,
-        0);
-    if (session == nullptr) {
+        0));
+    if (!response.session) {
         error = L"WinHttpOpen failed.";
         return false;
     }
 
-    HINTERNET connect = ::WinHttpConnect(session, kHost, INTERNET_DEFAULT_HTTPS_PORT, 0);
-    if (connect == nullptr) {
+    response.connect.reset(::WinHttpConnect(response.session.get(), kHost, INTERNET_DEFAULT_HTTPS_PORT, 0));
+    if (!response.connect) {
         error = L"WinHttpConnect failed.";
-        ::WinHttpCloseHandle(session);
         return false;
     }
 
     const std::wstring object = std::wstring(kPathPrefix) + fileName;
-    HINTERNET request = ::WinHttpOpenRequest(
-        connect,
+    response.request.reset(::WinHttpOpenRequest(
+        response.connect.get(),
         L"GET",
         object.c_str(),
         nullptr,
         WINHTTP_NO_REFERER,
         WINHTTP_DEFAULT_ACCEPT_TYPES,
-        WINHTTP_FLAG_SECURE);
-    if (request == nullptr) {
+        WINHTTP_FLAG_SECURE));
+    if (!response.request) {
         error = L"WinHttpOpenRequest failed.";
-        ::WinHttpCloseHandle(connect);
-        ::WinHttpCloseHandle(session);
         return false;
     }
 
     std::wstring headers;
-    if (existing > 0) {
+    if (resumeFrom > 0) {
         wchar_t range[128]{};
-        std::swprintf(range, 128, L"Range: bytes=%llu-\r\n", static_cast<unsigned long long>(existing));
+        std::swprintf(range, 128, L"Range: bytes=%llu-\r\n", static_cast<unsigned long long>(resumeFrom));
         headers = range;
     }
 
-    BOOL sent = ::WinHttpSendRequest(
-        request,
+    const BOOL sent = ::WinHttpSendRequest(
+        response.request.get(),
         headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
         headers.empty() ? 0 : static_cast<DWORD>(-1),
         WINHTTP_NO_REQUEST_DATA,
         0,
         0,
         0);
-    if (!sent || !::WinHttpReceiveResponse(request, nullptr)) {
+    if (!sent || !::WinHttpReceiveResponse(response.request.get(), nullptr)) {
         error = L"HTTP request failed.";
-        ::WinHttpCloseHandle(request);
-        ::WinHttpCloseHandle(connect);
-        ::WinHttpCloseHandle(session);
         return false;
     }
 
-    DWORD status = 0;
-    DWORD statusSize = sizeof(status);
+    DWORD statusSize = sizeof(response.status);
     ::WinHttpQueryHeaders(
-        request,
+        response.request.get(),
         WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_HEADER_NAME_BY_INDEX,
-        &status,
+        &response.status,
         &statusSize,
         WINHTTP_NO_HEADER_INDEX);
 
-    if (status != 200 && status != 206) {
-        error = L"Model download HTTP status " + std::to_wstring(status);
-        ::WinHttpCloseHandle(request);
-        ::WinHttpCloseHandle(connect);
-        ::WinHttpCloseHandle(session);
+    if (response.status != 200 && response.status != 206) {
+        error = L"Model download HTTP status " + std::to_wstring(response.status);
         return false;
     }
 
     wchar_t lengthBuf[64]{};
     DWORD lengthSize = sizeof(lengthBuf);
-    uint64_t contentLength = 0;
     if (::WinHttpQueryHeaders(
-            request,
+            response.request.get(),
             WINHTTP_QUERY_CONTENT_LENGTH,
             WINHTTP_HEADER_NAME_BY_INDEX,
             lengthBuf,
             &lengthSize,
             WINHTTP_NO_HEADER_INDEX)) {
-        contentLength = _wcstoui64(lengthBuf, nullptr, 10);
+        response.contentLength = _wcstoui64(lengthBuf, nullptr, 10);
     }
+    return true;
+}
+
+bool StreamToFile(
+    const HttpResponse& response,
+    const std::wstring& partial,
+    uint64_t existing,
+    DownloadProgress* progress,
+    std::wstring& error) {
+    const bool resumed = existing > 0 && response.status == 206;
 
     if (progress != nullptr) {
         progress->done = existing;
-        progress->total = existing + contentLength;
+        progress->total = existing + response.contentLength;
         if (progress->total == 0) {
             progress->total = 1;
         }
     }
 
-    const DWORD createDisp = (existing > 0 && status == 206) ? OPEN_ALWAYS : CREATE_ALWAYS;
-    HANDLE file = ::CreateFileW(
+    const HANDLE rawFile = ::CreateFileW(
         partial.c_str(),
         GENERIC_WRITE,
         FILE_SHARE_READ,
         nullptr,
-        createDisp,
+        resumed ? OPEN_ALWAYS : CREATE_ALWAYS,
         FILE_ATTRIBUTE_NORMAL,
         nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
+    if (rawFile == INVALID_HANDLE_VALUE) {
         error = L"Could not create download file.";
-        ::WinHttpCloseHandle(request);
-        ::WinHttpCloseHandle(connect);
-        ::WinHttpCloseHandle(session);
         return false;
     }
-    if (existing > 0 && status == 206) {
+    CHandle file(rawFile);
+
+    if (resumed) {
         LARGE_INTEGER move{};
         move.QuadPart = static_cast<LONGLONG>(existing);
         ::SetFilePointerEx(file, move, nullptr, FILE_BEGIN);
-    } else {
-        existing = 0;
-        if (progress != nullptr) {
-            progress->done = 0;
-            progress->total = contentLength > 0 ? contentLength : 1;
-        }
+    } else if (progress != nullptr) {
+        progress->done = 0;
+        progress->total = response.contentLength > 0 ? response.contentLength : 1;
     }
 
     std::vector<BYTE> buffer(64 * 1024);
-    bool ok = true;
     for (;;) {
         if (progress != nullptr && progress->cancel != nullptr && progress->cancel->load()) {
             error = L"Download cancelled.";
-            ok = false;
-            break;
+            return false;
         }
 
         DWORD available = 0;
-        if (!::WinHttpQueryDataAvailable(request, &available)) {
+        if (!::WinHttpQueryDataAvailable(response.request.get(), &available)) {
             error = L"WinHttpQueryDataAvailable failed.";
-            ok = false;
-            break;
+            return false;
         }
         if (available == 0) {
-            break;
+            return true;
         }
 
-        DWORD toRead = (std::min)(available, static_cast<DWORD>(buffer.size()));
+        const DWORD toRead = (std::min)(available, static_cast<DWORD>(buffer.size()));
         DWORD read = 0;
-        if (!::WinHttpReadData(request, buffer.data(), toRead, &read) || read == 0) {
+        if (!::WinHttpReadData(response.request.get(), buffer.data(), toRead, &read) || read == 0) {
             error = L"WinHttpReadData failed.";
-            ok = false;
-            break;
+            return false;
         }
 
         DWORD written = 0;
         if (!::WriteFile(file, buffer.data(), read, &written, nullptr) || written != read) {
             error = L"Failed writing download.";
-            ok = false;
-            break;
+            return false;
         }
 
         if (progress != nullptr) {
@@ -342,14 +335,22 @@ bool HttpDownloadToFile(
             PumpMessages();
         }
     }
+}
 
-    ::CloseHandle(file);
-    ::WinHttpCloseHandle(request);
-    ::WinHttpCloseHandle(connect);
-    ::WinHttpCloseHandle(session);
+bool HttpDownloadToFile(
+    const std::wstring& fileName,
+    const std::wstring& destPath,
+    DownloadProgress* progress,
+    std::wstring& error) {
+    const std::wstring partial = destPath + L".partial";
+    const uint64_t existing = FileIo::FileSize(partial);
 
-    if (!ok) {
-        return false;
+    {
+        HttpResponse response;
+        if (!OpenRequest(fileName, existing, response, error) ||
+            !StreamToFile(response, partial, existing, progress, error)) {
+            return false;
+        }
     }
 
     std::error_code ec;
@@ -528,7 +529,7 @@ bool ModelManager::Download(HWND owner, const ModelInfo& info, std::wstring& err
 
 std::wstring ModelManager::EnsureModel(HWND owner, const std::wstring& fileName) {
     Paths::EnsureDirectory(Paths::ModelsDir());
-    std::wstring chosen = fileName.empty() ? L"ggml-base-q5_1.bin" : fileName;
+    std::wstring chosen = fileName.empty() ? ModelManager::kDefaultModel : fileName;
 
     if (IsPresent(chosen)) {
         return ModelPath(chosen);

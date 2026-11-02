@@ -1,5 +1,6 @@
 #include "storage/Settings.hpp"
 
+#include "transcription/ModelManager.hpp"
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
@@ -44,7 +45,7 @@ struct RecordingSettings {
 };
 
 struct TranscriptionSettings {
-    std::string model = "ggml-base-q5_1.bin";
+    std::string model = Text::WideToUtf8(ModelManager::kDefaultModel);
     std::string language = "auto";
     bool autoTranscribe = false;
     int threads = 0;
