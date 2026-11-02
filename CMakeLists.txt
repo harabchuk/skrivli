@@ -72,8 +72,10 @@ set(MEETINGBUDDY_AUDIO_SOURCES
     src/audio/DeviceManager.cpp
     src/audio/CaptureStream.cpp
     src/audio/AudioResampler.cpp
+    src/audio/MaConverter.cpp
     src/audio/SilentRenderKeepAlive.cpp
     src/audio/Mixer.cpp
+    src/audio/WavHeader.cpp
     src/audio/WavWriter.cpp
     src/audio/M4aEncoder.cpp
     src/audio/RecordingSession.cpp
@@ -189,8 +191,11 @@ if(MEETINGBUDDY_BUILD_TESTS)
         tests/SettingsTests.cpp
         tests/TextTests.cpp
         tests/FileIoTests.cpp
+        tests/WavHeaderTests.cpp
         src/storage/Settings.cpp
         src/audio/Mixer.cpp
+        src/audio/MaConverter.cpp
+        src/audio/WavHeader.cpp
         src/audio/WavWriter.cpp
         src/storage/RecordingSidecar.cpp
         src/storage/RecordingLibrary.cpp

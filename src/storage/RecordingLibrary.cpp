@@ -1,5 +1,6 @@
 #include "storage/RecordingLibrary.hpp"
 
+#include "audio/WavHeader.hpp"
 #include "audio/WavWriter.hpp"
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
@@ -134,40 +135,9 @@ double RecordingLibrary::ReadWavDurationSeconds(const std::wstring& wavPath) {
         return 0.0;
     }
 
-    LARGE_INTEGER size{};
-    if (!::GetFileSizeEx(file, &size) || size.QuadPart < 44) {
-        ::CloseHandle(file);
-        return 0.0;
-    }
-
-    char header[44]{};
-    DWORD read = 0;
-    if (!::ReadFile(file, header, 44, &read, nullptr) || read != 44) {
-        ::CloseHandle(file);
-        return 0.0;
-    }
+    const std::optional<WavHeader> header = WavHeader::Read(file);
     ::CloseHandle(file);
-
-    if (std::strncmp(header, "RIFF", 4) != 0 || std::strncmp(header + 8, "WAVE", 4) != 0) {
-        return 0.0;
-    }
-
-    uint16_t channels = 0;
-    uint32_t sampleRate = 0;
-    uint16_t bits = 0;
-    uint32_t dataSize = 0;
-    std::memcpy(&channels, header + 22, sizeof(channels));
-    std::memcpy(&sampleRate, header + 24, sizeof(sampleRate));
-    std::memcpy(&bits, header + 34, sizeof(bits));
-    std::memcpy(&dataSize, header + 40, sizeof(dataSize));
-    if (channels == 0 || sampleRate == 0 || bits == 0) {
-        return 0.0;
-    }
-    const uint64_t bytesPerSecond = static_cast<uint64_t>(sampleRate) * channels * (bits / 8);
-    if (bytesPerSecond == 0) {
-        return 0.0;
-    }
-    return static_cast<double>(dataSize) / static_cast<double>(bytesPerSecond);
+    return header ? header->DurationSeconds() : 0.0;
 }
 
 bool RecordingLibrary::WriteSidecarForAudio(const std::wstring& audioPath, const RecordingSidecar& data) {

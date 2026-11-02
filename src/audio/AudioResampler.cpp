@@ -1,6 +1,7 @@
 #include "audio/AudioResampler.hpp"
 
 #include "audio/AudioFormat.hpp"
+#include "audio/MaConverter.hpp"
 #include "audio/MiniAudio.hpp"
 #include "util/Log.hpp"
 
@@ -57,19 +58,11 @@ ma_format FormatFromWave(const WAVEFORMATEX* format) {
 }  // namespace
 
 struct AudioResampler::State {
-    ma_data_converter converter{};
+    MaConverter converter;
     uint32_t blockAlign = 0;
-    bool live = false;
 };
 
 void AudioResampler::StateDeleter::operator()(State* state) const {
-    if (state == nullptr) {
-        return;
-    }
-    if (state->live) {
-        ma_data_converter_uninit(&state->converter, nullptr);
-        state->live = false;
-    }
     delete state;
 }
 
@@ -123,12 +116,10 @@ bool AudioResampler::Initialize(const void* inputFormatBytes) {
 
     auto state = std::unique_ptr<State, StateDeleter>(new State());
     state->blockAlign = bytesPerFrame;
-    const ma_result result = ma_data_converter_init(&config, nullptr, &state->converter);
-    if (result != MA_SUCCESS) {
+    if (!state->converter.Init(config)) {
         Log::Error(L"miniaudio data converter init failed");
         return false;
     }
-    state->live = true;
     m_state = std::move(state);
     Log::Info(L"Audio resampler ready (mix-format → 48 kHz stereo float)");
     return true;
@@ -142,48 +133,24 @@ bool AudioResampler::Process(
     uint32_t& outFrames) {
     outFrames = 0;
     outInterleavedStereo.clear();
-    if (m_state == nullptr || !m_state->live || inputBytes == nullptr || inputByteCount == 0 || inputFrames == 0) {
+    if (m_state == nullptr || inputBytes == nullptr || inputByteCount == 0 || inputFrames == 0) {
         return false;
     }
     if (inputByteCount < inputFrames * m_state->blockAlign) {
         return false;
     }
 
-    ma_uint64 expected = 0;
-    if (ma_data_converter_get_expected_output_frame_count(&m_state->converter, inputFrames, &expected) != MA_SUCCESS
-        || expected == 0) {
+    ma_uint64 expected = m_state->converter.ExpectedOutputFrames(inputFrames, 0);
+    if (expected == 0) {
         expected = static_cast<ma_uint64>(inputFrames) + 256;
     }
     expected += 64;
     outInterleavedStereo.resize(static_cast<size_t>(expected) * AudioFormat::kChannels);
 
-    const auto* cursor = static_cast<const std::byte*>(inputBytes);
-    ma_uint64 framesLeft = inputFrames;
     size_t produced = 0;
-    while (framesLeft > 0) {
-        ma_uint64 inCount = framesLeft;
-        ma_uint64 outSpace = (outInterleavedStereo.size() / AudioFormat::kChannels) - produced;
-        if (outSpace == 0) {
-            outInterleavedStereo.resize(outInterleavedStereo.size() + static_cast<size_t>(AudioFormat::kChannels) * 1024);
-            outSpace = (outInterleavedStereo.size() / AudioFormat::kChannels) - produced;
-        }
-
-        const ma_result result = ma_data_converter_process_pcm_frames(
-            &m_state->converter,
-            cursor,
-            &inCount,
-            outInterleavedStereo.data() + produced * AudioFormat::kChannels,
-            &outSpace);
-        if (result != MA_SUCCESS) {
-            outInterleavedStereo.clear();
-            return false;
-        }
-        if (inCount == 0 && outSpace == 0) {
-            break;
-        }
-        cursor += static_cast<size_t>(inCount) * m_state->blockAlign;
-        framesLeft -= inCount;
-        produced += static_cast<size_t>(outSpace);
+    if (!m_state->converter.Push(inputBytes, inputFrames, outInterleavedStereo, produced)) {
+        outInterleavedStereo.clear();
+        return false;
     }
 
     outInterleavedStereo.resize(produced * AudioFormat::kChannels);

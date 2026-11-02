@@ -1,6 +1,7 @@
 #include "audio/WavWriter.hpp"
 
 #include "audio/MiniAudio.hpp"
+#include "audio/WavHeader.hpp"
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
@@ -14,7 +15,7 @@
 namespace {
 
 constexpr uint64_t kPatchIntervalBytes = 48000ull * 2ull * 2ull * 2ull; // ~2 s of PCM16 stereo
-constexpr uint32_t kHeaderBytes = 44;
+constexpr uint32_t kHeaderBytes = WavHeader::kHeaderBytes;
 constexpr uint32_t kRiffSizeOffset = 4;
 constexpr uint32_t kDataSizeOffset = 40;
 
@@ -59,19 +60,6 @@ bool WriteRiffSizes(HANDLE file, uint64_t dataBytes) {
         return false;
     }
     return SeekHandle(file, static_cast<int64_t>(kHeaderBytes + dataBytes), FILE_BEGIN);
-}
-
-bool IsRiffWavePrefix(HANDLE file) {
-    char prefix[12]{};
-    DWORD read = 0;
-    if (!SeekHandle(file, 0, FILE_BEGIN)) {
-        return false;
-    }
-    if (!::ReadFile(file, prefix, sizeof(prefix), &read, nullptr) || read != sizeof(prefix)) {
-        return false;
-    }
-    return prefix[0] == 'R' && prefix[1] == 'I' && prefix[2] == 'F' && prefix[3] == 'F'
-        && prefix[8] == 'W' && prefix[9] == 'A' && prefix[10] == 'V' && prefix[11] == 'E';
 }
 
 }  // namespace
@@ -467,7 +455,7 @@ bool WavWriter::RepairPartialHeader(const std::wstring& partialPath) {
         ::CloseHandle(file);
         return false;
     }
-    if (!IsRiffWavePrefix(file)) {
+    if (!WavHeader::Read(file)) {
         ::CloseHandle(file);
         return false;
     }

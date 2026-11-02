@@ -1,5 +1,6 @@
 #include "transcription/AudioFileReader.hpp"
 
+#include "audio/MaConverter.hpp"
 #include "audio/MiniAudio.hpp"
 #include "util/Text.hpp"
 
@@ -45,76 +46,26 @@ bool ConvertToStereo48k(
     config.ditherMode = ma_dither_mode_none;
     config.resampling.linear.lpfOrder = 8;
 
-    ma_data_converter converter{};
-    if (ma_data_converter_init(&config, nullptr, &converter) != MA_SUCCESS) {
+    MaConverter converter;
+    if (!converter.Init(config)) {
         error = L"Could not resample decoded audio.";
         return false;
     }
 
-    ma_uint64 expected = 0;
-    if (ma_data_converter_get_expected_output_frame_count(&converter, frameCount, &expected) != MA_SUCCESS) {
-        expected = frameCount;
-    }
-    const ma_uint64 latency = ma_data_converter_get_input_latency(&converter);
+    const ma_uint64 expected = converter.ExpectedOutputFrames(frameCount, frameCount);
+    const ma_uint64 latency = converter.InputLatency();
     outStereo.resize(static_cast<size_t>(expected + latency + 64) * 2);
 
-    ma_uint64 framesLeft = frameCount;
     size_t produced = 0;
-    const float* cursor = interleaved;
-    while (framesLeft > 0) {
-        ma_uint64 inCount = framesLeft;
-        ma_uint64 outSpace = (outStereo.size() / 2) - produced;
-        if (outSpace == 0) {
-            outStereo.resize(outStereo.size() + 4096);
-            outSpace = (outStereo.size() / 2) - produced;
-        }
-        const ma_result result = ma_data_converter_process_pcm_frames(
-            &converter,
-            cursor,
-            &inCount,
-            outStereo.data() + produced * 2,
-            &outSpace);
-        if (result != MA_SUCCESS) {
-            ma_data_converter_uninit(&converter, nullptr);
-            error = L"Could not resample decoded audio.";
-            outStereo.clear();
-            return false;
-        }
-        if (inCount == 0 && outSpace == 0) {
-            break;
-        }
-        cursor += static_cast<size_t>(inCount) * channels;
-        framesLeft -= inCount;
-        produced += static_cast<size_t>(outSpace);
+    if (!converter.Push(interleaved, frameCount, outStereo, produced)) {
+        error = L"Could not resample decoded audio.";
+        outStereo.clear();
+        return false;
     }
 
-    if (latency > 0) {
-        std::vector<float> silence(static_cast<size_t>(latency) * channels, 0.0f);
-        ma_uint64 flushFrames = latency;
-        const float* silenceCursor = silence.data();
-        while (flushFrames > 0) {
-            ma_uint64 inCount = flushFrames;
-            ma_uint64 outSpace = (outStereo.size() / 2) - produced;
-            if (outSpace == 0) {
-                outStereo.resize(outStereo.size() + 4096);
-                outSpace = (outStereo.size() / 2) - produced;
-            }
-            const ma_result result = ma_data_converter_process_pcm_frames(
-                &converter,
-                silenceCursor,
-                &inCount,
-                outStereo.data() + produced * 2,
-                &outSpace);
-            if (result != MA_SUCCESS || (inCount == 0 && outSpace == 0)) {
-                break;
-            }
-            silenceCursor += static_cast<size_t>(inCount) * channels;
-            flushFrames -= inCount;
-            produced += static_cast<size_t>(outSpace);
-        }
-    }
+    // A failed tail flush only drops the last few output frames, so keep what was converted.
+    (void)converter.FlushLatency(outStereo, produced);
 
-    ma_data_converter_uninit(&converter, nullptr);
     outStereo.resize(produced * 2);
     return true;
 }

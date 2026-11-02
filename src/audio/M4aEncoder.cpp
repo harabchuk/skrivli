@@ -1,5 +1,6 @@
 #include "audio/M4aEncoder.hpp"
 
+#include "audio/WavHeader.hpp"
 #include "util/Log.hpp"
 
 #include <mfapi.h>
@@ -44,41 +45,23 @@ bool ReadWavPcm16Stereo48k(const std::wstring& path, std::vector<int16_t>& pcm, 
         return false;
     }
 
-    std::vector<char> header(44);
-    DWORD read = 0;
-    if (!::ReadFile(file, header.data(), 44, &read, nullptr) || read != 44) {
-        ::CloseHandle(file);
-        error = L"Failed to read WAV header.";
-        return false;
-    }
-
-    if (std::strncmp(header.data(), "RIFF", 4) != 0 || std::strncmp(header.data() + 8, "WAVE", 4) != 0) {
+    const std::optional<WavHeader> header = WavHeader::Read(file);
+    if (!header) {
         ::CloseHandle(file);
         error = L"Not a RIFF/WAVE file.";
         return false;
     }
 
-    uint16_t format = 0;
-    uint16_t channels = 0;
-    uint32_t sampleRate = 0;
-    uint16_t bits = 0;
-    uint32_t dataSize = 0;
-    std::memcpy(&format, header.data() + 20, sizeof(format));
-    std::memcpy(&channels, header.data() + 22, sizeof(channels));
-    std::memcpy(&sampleRate, header.data() + 24, sizeof(sampleRate));
-    std::memcpy(&bits, header.data() + 34, sizeof(bits));
-    std::memcpy(&dataSize, header.data() + 40, sizeof(dataSize));
-
-    // Walk chunks if the simple layout is not "fmt " then "data" at fixed offsets.
-    // Our WavWriter uses the canonical 44-byte header; accept that path.
-    if (format != 1 || channels != kChannels || sampleRate != kSampleRate || bits != kBitsPerSample) {
+    // Our WavWriter uses the canonical 44-byte header; other chunk layouts are not walked.
+    if (header->format != 1 || header->channels != kChannels || header->sampleRate != kSampleRate
+        || header->bits != kBitsPerSample) {
         ::CloseHandle(file);
         error = L"WAV must be PCM 16-bit stereo 48 kHz.";
         return false;
     }
 
-    const uint64_t remaining = static_cast<uint64_t>(size.QuadPart) - 44;
-    const uint64_t bytes = (std::min)(remaining, static_cast<uint64_t>(dataSize));
+    const uint64_t remaining = static_cast<uint64_t>(size.QuadPart) - WavHeader::kHeaderBytes;
+    const uint64_t bytes = (std::min)(remaining, static_cast<uint64_t>(header->dataSize));
     if (bytes % 4 != 0) {
         ::CloseHandle(file);
         error = L"WAV data size is not aligned.";
@@ -87,6 +70,7 @@ bool ReadWavPcm16Stereo48k(const std::wstring& path, std::vector<int16_t>& pcm, 
 
     pcm.resize(static_cast<size_t>(bytes / sizeof(int16_t)));
     if (!pcm.empty()) {
+        DWORD read = 0;
         if (!::ReadFile(file, pcm.data(), static_cast<DWORD>(bytes), &read, nullptr) || read != bytes) {
             ::CloseHandle(file);
             error = L"Failed to read WAV PCM data.";
