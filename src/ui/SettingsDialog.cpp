@@ -77,7 +77,7 @@ BOOL SettingsDialog::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_hotkey.Attach(GetDlgItem(IDC_SET_HOTKEY));
 
     // Same flat dropdown look as the Record view.
-    for (WTL::CComboBox* combo : { &m_mic, &m_sys, &m_model, &m_language }) {
+    for (WTL::CComboBox* combo : { &m_mic.Combo(), &m_sys.Combo(), &m_model.Combo(), &m_language }) {
         if (combo->IsWindow()) {
             ::SetWindowTheme(combo->m_hWnd, L"CFD", nullptr);
         }
@@ -101,71 +101,49 @@ void SettingsDialog::FillLanguageCombo() {
 }
 
 void SettingsDialog::FillModelCombo() {
-    m_model.ResetContent();
+    std::vector<DeviceCombo::Item> items;
     for (const auto& info : ModelManager::OfferedModels()) {
         std::wstring label = info.displayName;
         if (ModelManager::IsPresent(info.fileName)) {
             label += L" (installed)";
         }
-        const int index = m_model.AddString(label.c_str());
-        auto* heap = new std::wstring(info.fileName);
-        m_model.SetItemDataPtr(index, heap);
+        items.push_back({std::move(label), info.fileName});
     }
-}
-
-void SettingsDialog::ClearComboItemData(WTL::CComboBox& combo) {
-    const int count = combo.GetCount();
-    for (int i = 0; i < count; ++i) {
-        auto* ptr = static_cast<std::wstring*>(combo.GetItemDataPtr(i));
-        delete ptr;
-        combo.SetItemDataPtr(i, nullptr);
-    }
+    m_model.Fill(items);
 }
 
 void SettingsDialog::FillDeviceCombo(
-    WTL::CComboBox& combo,
+    DeviceCombo& combo,
     const std::vector<AudioDeviceInfo>& devices,
     const std::wstring& selectedId,
     bool capture) {
-    ClearComboItemData(combo);
-    combo.ResetContent();
-
-    const wchar_t* defaultLabel = capture
-        ? L"Default communications device"
-        : L"Default output device";
-    int index = combo.AddString(defaultLabel);
-    combo.SetItemDataPtr(index, new std::wstring());
-
+    std::vector<DeviceCombo::Item> items;
+    items.push_back({capture ? L"Default communications device" : L"Default output device", {}});
     for (const auto& device : devices) {
         std::wstring label = device.name;
         if (device.isDefault) {
             label += L" (default)";
         }
-        index = combo.AddString(label.c_str());
-        combo.SetItemDataPtr(index, new std::wstring(device.id));
+        items.push_back({std::move(label), device.id});
     }
-    SelectDeviceId(combo, selectedId);
+    combo.Fill(items);
+    combo.Select(selectedId);
 }
 
-void SettingsDialog::SelectDeviceId(WTL::CComboBox& combo, const std::wstring& id) {
-    const int count = combo.GetCount();
-    for (int i = 0; i < count; ++i) {
-        const auto* stored = static_cast<const std::wstring*>(combo.GetItemDataPtr(i));
-        if (stored != nullptr && *stored == id) {
-            combo.SetCurSel(i);
-            return;
-        }
-    }
-    combo.SetCurSel(0);
-}
-
-std::wstring SettingsDialog::SelectedDeviceId(const WTL::CComboBox& combo) const {
-    const int sel = combo.GetCurSel();
-    if (sel < 0) {
-        return {};
-    }
-    const auto* stored = static_cast<const std::wstring*>(combo.GetItemDataPtr(sel));
-    return stored != nullptr ? *stored : std::wstring{};
+std::array<SettingsDialog::CheckboxBinding, SettingsDialog::kCheckboxCount> SettingsDialog::Checkboxes() {
+    return {{
+        {&m_micAgc, &SettingsData::micAgc},
+        {&m_saveStems, &SettingsData::saveStems},
+        {&m_compress, &SettingsData::compressToM4a},
+        {&m_keepWav, &SettingsData::keepWav},
+        {&m_comms, &SettingsData::communicationsProcessing},
+        {&m_autoTranscribe, &SettingsData::autoTranscribe},
+        {&m_useVad, &SettingsData::useVad},
+        {&m_closeTray, &SettingsData::closeToTray},
+        {&m_startWindows, &SettingsData::startWithWindows},
+        {&m_startMinimized, &SettingsData::startMinimized},
+        {&m_hotkeyEnable, &SettingsData::hotkeyEnabled},
+    }};
 }
 
 void SettingsDialog::LoadFromSettings() {
@@ -179,21 +157,11 @@ void SettingsDialog::LoadFromSettings() {
 
     m_micGain.SetWindowText(FormatGain(data.micGain).c_str());
     m_sysGain.SetWindowText(FormatGain(data.systemGain).c_str());
-    m_micAgc.SetCheck(data.micAgc ? BST_CHECKED : BST_UNCHECKED);
-    m_saveStems.SetCheck(data.saveStems ? BST_CHECKED : BST_UNCHECKED);
-    m_compress.SetCheck(data.compressToM4a ? BST_CHECKED : BST_UNCHECKED);
-    m_keepWav.SetCheck(data.keepWav ? BST_CHECKED : BST_UNCHECKED);
-    m_comms.SetCheck(data.communicationsProcessing ? BST_CHECKED : BST_UNCHECKED);
-
-    int modelSel = 0;
-    for (int i = 0; i < m_model.GetCount(); ++i) {
-        const auto* file = static_cast<const std::wstring*>(m_model.GetItemDataPtr(i));
-        if (file != nullptr && *file == data.model) {
-            modelSel = i;
-            break;
-        }
+    for (const auto& [button, field] : Checkboxes()) {
+        button->SetCheck(data.*field ? BST_CHECKED : BST_UNCHECKED);
     }
-    m_model.SetCurSel(modelSel);
+
+    m_model.Select(data.model);
 
     int langSel = m_language.FindStringExact(0, data.language.c_str());
     if (langSel < 0) {
@@ -202,13 +170,6 @@ void SettingsDialog::LoadFromSettings() {
     m_language.SetCurSel(langSel);
 
     m_threads.SetWindowText(std::to_wstring(data.threads).c_str());
-    m_autoTranscribe.SetCheck(data.autoTranscribe ? BST_CHECKED : BST_UNCHECKED);
-    m_useVad.SetCheck(data.useVad ? BST_CHECKED : BST_UNCHECKED);
-
-    m_closeTray.SetCheck(data.closeToTray ? BST_CHECKED : BST_UNCHECKED);
-    m_startWindows.SetCheck(data.startWithWindows ? BST_CHECKED : BST_UNCHECKED);
-    m_startMinimized.SetCheck(data.startMinimized ? BST_CHECKED : BST_UNCHECKED);
-    m_hotkeyEnable.SetCheck(data.hotkeyEnabled ? BST_CHECKED : BST_UNCHECKED);
     m_hotkey.SetWindowText(data.hotkey.c_str());
 }
 
@@ -221,15 +182,7 @@ void SettingsDialog::UpdateDependentEnabled() {
     m_micGain.EnableWindow(micAgc ? FALSE : TRUE);
 }
 
-void SettingsDialog::OnCompressToggled(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    UpdateDependentEnabled();
-}
-
-void SettingsDialog::OnMicAgcToggled(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    UpdateDependentEnabled();
-}
-
-void SettingsDialog::OnHotkeyToggled(UINT /*code*/, int /*id*/, HWND /*control*/) {
+void SettingsDialog::OnDependentToggled(UINT /*code*/, int /*id*/, HWND /*control*/) {
     UpdateDependentEnabled();
 }
 
@@ -240,15 +193,11 @@ void SettingsDialog::OnBrowseFolder(UINT /*code*/, int /*id*/, HWND /*control*/)
 }
 
 void SettingsDialog::OnModelDownload(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const int sel = m_model.GetCurSel();
-    if (sel < 0) {
+    const std::wstring file = m_model.SelectedId();
+    if (file.empty()) {
         return;
     }
-    const auto* file = static_cast<const std::wstring*>(m_model.GetItemDataPtr(sel));
-    if (file == nullptr || file->empty()) {
-        return;
-    }
-    const ModelInfo* info = ModelManager::Find(*file);
+    const ModelInfo* info = ModelManager::Find(file);
     if (info == nullptr) {
         return;
     }
@@ -259,15 +208,8 @@ void SettingsDialog::OnModelDownload(UINT /*code*/, int /*id*/, HWND /*control*/
         }
         return;
     }
-    ClearComboItemData(m_model);
     FillModelCombo();
-    for (int i = 0; i < m_model.GetCount(); ++i) {
-        const auto* stored = static_cast<const std::wstring*>(m_model.GetItemDataPtr(i));
-        if (stored != nullptr && *stored == *file) {
-            m_model.SetCurSel(i);
-            break;
-        }
-    }
+    m_model.Select(file);
 }
 
 void SettingsDialog::OnModelBrowse(UINT /*code*/, int /*id*/, HWND /*control*/) {
@@ -275,25 +217,13 @@ void SettingsDialog::OnModelBrowse(UINT /*code*/, int /*id*/, HWND /*control*/) 
     if (!ModelManager::BrowseAndInstall(m_hWnd, installed) || installed.empty()) {
         return;
     }
-    ClearComboItemData(m_model);
     FillModelCombo();
-    bool found = false;
-    for (int i = 0; i < m_model.GetCount(); ++i) {
-        const auto* stored = static_cast<const std::wstring*>(m_model.GetItemDataPtr(i));
-        if (stored != nullptr && *stored == installed) {
-            m_model.SetCurSel(i);
-            found = true;
-            break;
-        }
-    }
-    if (!found) {
-        const int index = m_model.AddString(installed.c_str());
-        m_model.SetItemDataPtr(index, new std::wstring(installed));
-        m_model.SetCurSel(index);
+    if (!m_model.Select(installed)) {
+        m_model.Combo().SetCurSel(m_model.Add(installed, installed));
     }
 }
 
-bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) const {
+bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) {
     error.clear();
     out = Settings::Instance().Data();
 
@@ -309,8 +239,12 @@ bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) const {
         return false;
     }
 
-    out.micDeviceId = SelectedDeviceId(m_mic);
-    out.systemDeviceId = SelectedDeviceId(m_sys);
+    out.micDeviceId = m_mic.SelectedId();
+    out.systemDeviceId = m_sys.SelectedId();
+
+    for (const auto& [button, field] : Checkboxes()) {
+        out.*field = button->GetCheck() == BST_CHECKED;
+    }
 
     CString micGainText;
     CString sysGainText;
@@ -318,24 +252,15 @@ bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) const {
     m_sysGain.GetWindowText(sysGainText);
     out.micGain = ParseFloat(micGainText, 1.0f);
     out.systemGain = ParseFloat(sysGainText, 0.8f);
-    out.micAgc = m_micAgc.GetCheck() == BST_CHECKED;
     if (!std::isfinite(out.micGain) || out.micGain < 0.0f || out.micGain > 4.0f
         || !std::isfinite(out.systemGain) || out.systemGain < 0.0f || out.systemGain > 4.0f) {
         error = L"Gains must be between 0 and 4.";
         return false;
     }
 
-    out.saveStems = m_saveStems.GetCheck() == BST_CHECKED;
-    out.compressToM4a = m_compress.GetCheck() == BST_CHECKED;
-    out.keepWav = m_keepWav.GetCheck() == BST_CHECKED;
-    out.communicationsProcessing = m_comms.GetCheck() == BST_CHECKED;
-
-    const int modelSel = m_model.GetCurSel();
-    if (modelSel >= 0) {
-        const auto* file = static_cast<const std::wstring*>(m_model.GetItemDataPtr(modelSel));
-        if (file != nullptr) {
-            out.model = *file;
-        }
+    const std::wstring modelFile = m_model.SelectedId();
+    if (!modelFile.empty()) {
+        out.model = modelFile;
     }
 
     CString lang;
@@ -352,13 +277,6 @@ bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) const {
         error = L"Thread count must be between 0 (auto) and 64.";
         return false;
     }
-
-    out.autoTranscribe = m_autoTranscribe.GetCheck() == BST_CHECKED;
-    out.useVad = m_useVad.GetCheck() == BST_CHECKED;
-    out.closeToTray = m_closeTray.GetCheck() == BST_CHECKED;
-    out.startWithWindows = m_startWindows.GetCheck() == BST_CHECKED;
-    out.startMinimized = m_startMinimized.GetCheck() == BST_CHECKED;
-    out.hotkeyEnabled = m_hotkeyEnable.GetCheck() == BST_CHECKED;
 
     CString hotkeyText;
     m_hotkey.GetWindowText(hotkeyText);
@@ -392,15 +310,9 @@ void SettingsDialog::OnOk(UINT /*code*/, int /*id*/, HWND /*control*/) {
 
     m_applied = next;
     m_folderChanged = !Text::PathEquals(previousFolder, Settings::Instance().RecordingsFolder());
-    ClearComboItemData(m_mic);
-    ClearComboItemData(m_sys);
-    ClearComboItemData(m_model);
     EndDialog(IDOK);
 }
 
 void SettingsDialog::OnCancel(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    ClearComboItemData(m_mic);
-    ClearComboItemData(m_sys);
-    ClearComboItemData(m_model);
     EndDialog(IDCANCEL);
 }

@@ -5,6 +5,7 @@
 #include "audio/DeviceManager.hpp"
 #include "audio/LevelMonitor.hpp"
 #include "audio/RecordingSession.hpp"
+#include "ui/DeviceCombo.hpp"
 #include "ui/LevelMeter.hpp"
 #include "ui/RecordButton.hpp"
 
@@ -27,9 +28,9 @@ public:
         MSG_WM_DRAWITEM(OnDrawItem)
         COMMAND_HANDLER_EX(IDC_RECORD_BUTTON, BN_CLICKED, OnRecordClicked)
         COMMAND_HANDLER_EX(IDC_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
-        COMMAND_HANDLER_EX(IDC_MIC_DEVICE, CBN_SELCHANGE, OnMicSelChange)
-        COMMAND_HANDLER_EX(IDC_SYSTEM_DEVICE, CBN_SELCHANGE, OnSystemSelChange)
-        COMMAND_HANDLER_EX(IDC_MIC_GAIN_AUTO, BN_CLICKED, OnMicAgcClicked)
+        COMMAND_HANDLER_EX(IDC_MIC_DEVICE, CBN_SELCHANGE, OnDeviceSelChange)
+        COMMAND_HANDLER_EX(IDC_SYSTEM_DEVICE, CBN_SELCHANGE, OnDeviceSelChange)
+        COMMAND_HANDLER_EX(IDC_MIC_GAIN_AUTO, BN_CLICKED, OnMicGainUiChanged)
         CHAIN_MSG_MAP(WTL::CDialogResize<RecordView>)
     END_MSG_MAP()
 
@@ -79,22 +80,14 @@ private:
     void OnDrawItem(int id, LPDRAWITEMSTRUCT drawItem);
     void OnRecordClicked(UINT code, int id, HWND control);
     void OnBrowseFolder(UINT code, int id, HWND control);
-    void OnMicSelChange(UINT code, int id, HWND control);
-    void OnSystemSelChange(UINT code, int id, HWND control);
-    void OnMicAgcClicked(UINT code, int id, HWND control);
+    void OnDeviceSelChange(UINT code, int id, HWND control);
+    void OnMicGainUiChanged(UINT code = 0, int id = 0, HWND control = nullptr);
     void OnHScroll(UINT code, UINT pos, CScrollBar bar);
 
     void PersistDeviceSelection();
     void PersistFolder();
-    void PersistMicGain();
-    void PersistMicAgc();
-    void ApplyMicGain(float gain);
-    void ApplyMicAgc(bool enabled);
-    void SetMicGainSlider(float gain);
-    void UpdateMicGainControls();
-    void UpdateMicGainLabel(float gain);
-    float MicGainFromSlider() const;
-    bool MicAgcChecked() const;
+    void SyncMicGainUi();
+    void ApplyRecordingState(bool recording);
     void SetInputsEnabled(bool enabled);
     void UpdateRecordButton();
     void UpdateElapsed();
@@ -112,9 +105,6 @@ private:
     void CenterLabelOnRow(int labelId, HWND row, int rowHeight);
     void InitTooltips();
     void UpdateDeviceTooltips();
-    std::wstring SelectedDeviceId(int comboId) const;
-    void SelectDeviceId(int comboId, const std::wstring& id);
-    void ClearComboItemData(WTL::CComboBox& combo);
     void ShowPrivacyDeniedDialog();
     void ShowErrorDialog(const std::wstring& message);
 
@@ -122,8 +112,8 @@ private:
     DeviceManager* m_devices = nullptr;
     LevelMonitor m_levelMonitor;
 
-    WTL::CComboBox m_micCombo;
-    WTL::CComboBox m_systemCombo;
+    DeviceCombo m_micCombo;
+    DeviceCombo m_systemCombo;
     WTL::CEdit m_folderEdit;
     RecordButton m_recordButton;
     WTL::CStatic m_elapsedLabel;

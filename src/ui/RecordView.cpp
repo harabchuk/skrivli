@@ -16,8 +16,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <cstdio>
+#include <initializer_list>
+#include <vector>
 
 namespace {
 
@@ -49,14 +50,40 @@ std::wstring FormatGainMultiplier(float gain) {
     return buffer;
 }
 
-HFONT TryCreateFont(const wchar_t* face, int heightPx, int weight) {
-    LOGFONTW lf{};
-    lf.lfHeight = -heightPx;
-    lf.lfWeight = weight;
-    lf.lfCharSet = DEFAULT_CHARSET;
-    lf.lfQuality = CLEARTYPE_QUALITY;
-    wcsncpy_s(lf.lfFaceName, face, _TRUNCATE);
-    return ::CreateFontIndirectW(&lf);
+int GainToSliderPos(float gain) {
+    const float clamped = std::clamp(gain, 0.0f, 4.0f);
+    return std::clamp(
+        static_cast<int>(std::lround(static_cast<double>(clamped) / static_cast<double>(kMicGainStep))),
+        kMicGainSliderMin,
+        kMicGainSliderMax);
+}
+
+float SliderPosToGain(int pos) {
+    return static_cast<float>(std::clamp(pos, kMicGainSliderMin, kMicGainSliderMax)) * kMicGainStep;
+}
+
+HFONT CreateFirstAvailableFont(std::initializer_list<const wchar_t*> faces, int heightPx, int weight) {
+    for (const wchar_t* face : faces) {
+        LOGFONTW lf{};
+        lf.lfHeight = -heightPx;
+        lf.lfWeight = weight;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfQuality = CLEARTYPE_QUALITY;
+        wcsncpy_s(lf.lfFaceName, face, _TRUNCATE);
+        if (HFONT font = ::CreateFontIndirectW(&lf)) {
+            return font;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<DeviceCombo::Item> ToComboItems(const std::vector<AudioDeviceInfo>& devices) {
+    std::vector<DeviceCombo::Item> items;
+    items.reserve(devices.size());
+    for (const auto& device : devices) {
+        items.push_back({device.name, device.id});
+    }
+    return items;
 }
 
 }  // namespace
@@ -126,8 +153,8 @@ void RecordView::InitTooltips() {
         return;
     }
     m_tooltips.SetMaxTipWidth(400);
-    m_tooltips.AddTool(m_micCombo.m_hWnd, L"");
-    m_tooltips.AddTool(m_systemCombo.m_hWnd, L"");
+    m_tooltips.AddTool(m_micCombo.Combo().m_hWnd, L"");
+    m_tooltips.AddTool(m_systemCombo.Combo().m_hWnd, L"");
     m_tooltips.AddTool(m_recordButton.m_hWnd, L"Start or stop recording");
     if (m_micGain.IsWindow()) {
         m_tooltips.AddTool(m_micGain.m_hWnd, L"Microphone mix gain (0.0\u20134.0)");
@@ -145,18 +172,22 @@ void RecordView::UpdateDeviceTooltips() {
         return;
     }
     CString micText;
-    const int micSel = m_micCombo.GetCurSel();
+    const int micSel = m_micCombo.Combo().GetCurSel();
     if (micSel >= 0) {
-        m_micCombo.GetLBText(micSel, micText);
+        m_micCombo.Combo().GetLBText(micSel, micText);
     }
-    m_tooltips.UpdateTipText(micText.IsEmpty() ? L"Microphone device" : micText.GetString(), m_micCombo.m_hWnd);
+    m_tooltips.UpdateTipText(
+        micText.IsEmpty() ? L"Microphone device" : micText.GetString(),
+        m_micCombo.Combo().m_hWnd);
 
     CString sysText;
-    const int sysSel = m_systemCombo.GetCurSel();
+    const int sysSel = m_systemCombo.Combo().GetCurSel();
     if (sysSel >= 0) {
-        m_systemCombo.GetLBText(sysSel, sysText);
+        m_systemCombo.Combo().GetLBText(sysSel, sysText);
     }
-    m_tooltips.UpdateTipText(sysText.IsEmpty() ? L"System audio device" : sysText.GetString(), m_systemCombo.m_hWnd);
+    m_tooltips.UpdateTipText(
+        sysText.IsEmpty() ? L"System audio device" : sysText.GetString(),
+        m_systemCombo.Combo().m_hWnd);
 }
 
 void RecordView::RebuildSpecialFonts(UINT dpi) {
@@ -165,33 +196,18 @@ void RecordView::RebuildSpecialFonts(UINT dpi) {
     }
     m_dpi = dpi;
 
-    const int timerPx = ui::Scale(28, dpi);
-    HFONT timer = TryCreateFont(L"Segoe UI Variable Display", timerPx, FW_SEMIBOLD);
-    if (timer == nullptr) {
-        timer = TryCreateFont(L"Segoe UI Semibold", timerPx, FW_SEMIBOLD);
-    }
-    if (timer == nullptr) {
-        timer = TryCreateFont(L"Segoe UI", timerPx, FW_SEMIBOLD);
-    }
-    if (timer != nullptr) {
-        const HFONT previous = m_timerFont.Detach();
+    // CFont is managed, so Attach releases the previous handle.
+    if (HFONT timer = CreateFirstAvailableFont(
+            {L"Segoe UI Variable Display", L"Segoe UI Semibold", L"Segoe UI"},
+            ui::Scale(28, dpi),
+            FW_SEMIBOLD)) {
         m_timerFont.Attach(timer);
-        if (previous != nullptr) {
-            ::DeleteObject(previous);
-        }
     }
-
-    const int sectionPx = ui::Scale(13, dpi);
-    HFONT section = TryCreateFont(L"Segoe UI Semibold", sectionPx, FW_SEMIBOLD);
-    if (section == nullptr) {
-        section = TryCreateFont(L"Segoe UI", sectionPx, FW_SEMIBOLD);
-    }
-    if (section != nullptr) {
-        const HFONT previous = m_sectionFont.Detach();
+    if (HFONT section = CreateFirstAvailableFont(
+            {L"Segoe UI Semibold", L"Segoe UI"},
+            ui::Scale(13, dpi),
+            FW_SEMIBOLD)) {
         m_sectionFont.Attach(section);
-        if (previous != nullptr) {
-            ::DeleteObject(previous);
-        }
     }
 }
 
@@ -223,8 +239,8 @@ void RecordView::ApplyControlFonts() {
         }
     }
 
-    ApplyComboStyle(m_micCombo);
-    ApplyComboStyle(m_systemCombo);
+    ApplyComboStyle(m_micCombo.Combo());
+    ApplyComboStyle(m_systemCombo.Combo());
     LayoutFieldRows();
 
     if (m_inputSection.IsWindow()) {
@@ -262,26 +278,10 @@ void RecordView::OnDpiChanged(UINT dpi) {
     ApplyControlFonts();
 }
 
-void RecordView::ClearComboItemData(WTL::CComboBox& combo) {
-    for (int i = 0; i < combo.GetCount(); ++i) {
-        wchar_t* itemId = static_cast<wchar_t*>(combo.GetItemDataPtr(i));
-        if (itemId != nullptr) {
-            free(itemId);
-            combo.SetItemDataPtr(i, nullptr);
-        }
-    }
-}
-
 void RecordView::OnDestroy() {
     KillTimer(IDT_RECORD_ELAPSED);
     KillTimer(IDT_RECORD_METERS);
     StopMeterPreview();
-    if (m_micCombo.IsWindow()) {
-        ClearComboItemData(m_micCombo);
-    }
-    if (m_systemCombo.IsWindow()) {
-        ClearComboItemData(m_systemCombo);
-    }
     if (m_tooltips.IsWindow()) {
         m_tooltips.DestroyWindow();
     }
@@ -435,14 +435,14 @@ void RecordView::LayoutFieldRows() {
     if (!m_micCombo.IsWindow() || !m_systemCombo.IsWindow()) {
         return;
     }
-    const int comboHeight = ClosedComboHeight(m_micCombo);
+    const int comboHeight = ClosedComboHeight(m_micCombo.Combo());
     if (comboHeight <= 0) {
         return;
     }
     MatchControlHeight(m_folderEdit, comboHeight);
     MatchControlHeight(GetDlgItem(IDC_BROWSE_FOLDER), comboHeight);
-    CenterLabelOnRow(IDC_MIC_LABEL, m_micCombo, comboHeight);
-    CenterLabelOnRow(IDC_SYSTEM_LABEL, m_systemCombo, comboHeight);
+    CenterLabelOnRow(IDC_MIC_LABEL, m_micCombo.Combo(), comboHeight);
+    CenterLabelOnRow(IDC_SYSTEM_LABEL, m_systemCombo.Combo(), comboHeight);
     CenterLabelOnRow(IDC_FOLDER_LABEL, m_folderEdit, comboHeight);
 }
 
@@ -450,99 +450,61 @@ void RecordView::SyncControlsToSettings() {
     const auto& settings = Settings::Instance().Data();
     const std::wstring folder = Settings::Instance().RecordingsFolder();
     m_folderEdit.SetWindowText(folder.c_str());
-    SetMicGainSlider(settings.micGain);
+    if (m_micGain.IsWindow()) {
+        const int pos = GainToSliderPos(settings.micGain);
+        if (m_micGain.GetPos() != pos) {
+            m_micGain.SetPos(pos);
+        }
+    }
     if (m_micAgc.IsWindow()) {
         m_micAgc.SetCheck(settings.micAgc ? BST_CHECKED : BST_UNCHECKED);
     }
-    UpdateMicGainControls();
-    ApplyMicGain(settings.micGain);
-    ApplyMicAgc(settings.micAgc);
-}
-
-float RecordView::MicGainFromSlider() const {
-    if (!m_micGain.IsWindow()) {
-        return 1.0f;
-    }
-    const int pos = std::clamp(m_micGain.GetPos(), kMicGainSliderMin, kMicGainSliderMax);
-    return static_cast<float>(pos) * kMicGainStep;
-}
-
-bool RecordView::MicAgcChecked() const {
-    return m_micAgc.IsWindow() && m_micAgc.GetCheck() == BST_CHECKED;
-}
-
-void RecordView::UpdateMicGainLabel(float gain) {
-    if (m_micGainValue.IsWindow()) {
-        m_micGainValue.SetWindowText(FormatGainMultiplier(gain).c_str());
+    SyncMicGainUi();
+    if (IsRecording()) {
+        m_session->SetMicGain(settings.micGain);
+        m_session->SetMicAgc(settings.micAgc);
     }
 }
 
-void RecordView::UpdateMicGainControls() {
-    const bool autoGain = MicAgcChecked();
+void RecordView::SyncMicGainUi() {
+    const bool autoGain = m_micAgc.IsWindow() && m_micAgc.GetCheck() == BST_CHECKED;
     if (m_micGain.IsWindow()) {
         m_micGain.EnableWindow(autoGain ? FALSE : TRUE);
     }
-    if (autoGain) {
-        if (IsRecording() && m_session != nullptr) {
-            UpdateMicGainLabel(m_session->EffectiveMicGain());
-        } else if (m_micGainValue.IsWindow()) {
-            m_micGainValue.SetWindowText(L"Auto");
+    if (!m_micGainValue.IsWindow()) {
+        return;
+    }
+    if (autoGain && !IsRecording()) {
+        m_micGainValue.SetWindowText(L"Auto");
+        return;
+    }
+    const float gain = autoGain
+        ? m_session->EffectiveMicGain()
+        : (m_micGain.IsWindow() ? SliderPosToGain(m_micGain.GetPos()) : 1.0f);
+    m_micGainValue.SetWindowText(FormatGainMultiplier(gain).c_str());
+}
+
+void RecordView::OnMicGainUiChanged(UINT /*code*/, int /*id*/, HWND /*control*/) {
+    const bool autoGain = m_micAgc.IsWindow() && m_micAgc.GetCheck() == BST_CHECKED;
+    const float sliderGain = m_micGain.IsWindow() ? SliderPosToGain(m_micGain.GetPos()) : 1.0f;
+
+    auto& settings = Settings::Instance().Data();
+    const bool agcChanged = settings.micAgc != autoGain;
+    settings.micAgc = autoGain;
+    if (!autoGain && !agcChanged) {
+        settings.micGain = sliderGain;
+    }
+    Settings::Instance().Save();
+
+    SyncMicGainUi();
+    if (IsRecording()) {
+        if (agcChanged) {
+            m_session->SetMicAgc(autoGain);
         }
-    } else {
-        UpdateMicGainLabel(MicGainFromSlider());
+        if (!autoGain) {
+            m_session->SetMicGain(sliderGain);
+        }
     }
-}
-
-void RecordView::SetMicGainSlider(float gain) {
-    if (!m_micGain.IsWindow()) {
-        return;
-    }
-    const float clamped = std::clamp(gain, 0.0f, 4.0f);
-    const int pos = std::clamp(
-        static_cast<int>(std::lround(static_cast<double>(clamped) / static_cast<double>(kMicGainStep))),
-        kMicGainSliderMin,
-        kMicGainSliderMax);
-    if (m_micGain.GetPos() != pos) {
-        m_micGain.SetPos(pos);
-    }
-}
-
-void RecordView::ApplyMicGain(float gain) {
-    if (m_session != nullptr && m_session->IsActive()) {
-        m_session->SetMicGain(gain);
-    }
-}
-
-void RecordView::ApplyMicAgc(bool enabled) {
-    if (m_session != nullptr && m_session->IsActive()) {
-        m_session->SetMicAgc(enabled);
-    }
-}
-
-void RecordView::PersistMicGain() {
-    if (MicAgcChecked()) {
-        return;
-    }
-    const float gain = MicGainFromSlider();
-    UpdateMicGainLabel(gain);
-    Settings::Instance().Data().micGain = gain;
-    Settings::Instance().Save();
-    ApplyMicGain(gain);
-}
-
-void RecordView::PersistMicAgc() {
-    const bool enabled = MicAgcChecked();
-    Settings::Instance().Data().micAgc = enabled;
-    Settings::Instance().Save();
-    UpdateMicGainControls();
-    ApplyMicAgc(enabled);
-    if (!enabled) {
-        ApplyMicGain(MicGainFromSlider());
-    }
-}
-
-void RecordView::OnMicAgcClicked(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    PersistMicAgc();
 }
 
 void RecordView::OnHScroll(UINT /*code*/, UINT /*pos*/, CScrollBar bar) {
@@ -550,7 +512,7 @@ void RecordView::OnHScroll(UINT /*code*/, UINT /*pos*/, CScrollBar bar) {
         SetMsgHandled(FALSE);
         return;
     }
-    PersistMicGain();
+    OnMicGainUiChanged();
 }
 
 void RecordView::SetWarning(const std::wstring& text) {
@@ -569,23 +531,13 @@ void RecordView::RefreshDevices() {
     const std::wstring selectedMic = Settings::Instance().Data().micDeviceId;
     const std::wstring selectedSys = Settings::Instance().Data().systemDeviceId;
 
-    ClearComboItemData(m_micCombo);
-    m_micCombo.ResetContent();
     const auto capture = m_devices->EnumerateCapture();
-    for (const auto& device : capture) {
-        const int index = m_micCombo.AddString(device.name.c_str());
-        m_micCombo.SetItemDataPtr(index, _wcsdup(device.id.c_str()));
-    }
-    SelectDeviceId(IDC_MIC_DEVICE, selectedMic);
+    m_micCombo.Fill(ToComboItems(capture));
+    m_micCombo.Select(selectedMic);
 
-    ClearComboItemData(m_systemCombo);
-    m_systemCombo.ResetContent();
     const auto render = m_devices->EnumerateRender();
-    for (const auto& device : render) {
-        const int index = m_systemCombo.AddString(device.name.c_str());
-        m_systemCombo.SetItemDataPtr(index, _wcsdup(device.id.c_str()));
-    }
-    SelectDeviceId(IDC_SYSTEM_DEVICE, selectedSys);
+    m_systemCombo.Fill(ToComboItems(render));
+    m_systemCombo.Select(selectedSys);
 
     if (!IsRecording()) {
         std::wstring warning;
@@ -600,36 +552,9 @@ void RecordView::RefreshDevices() {
     UpdateDeviceTooltips();
 }
 
-void RecordView::SelectDeviceId(int comboId, const std::wstring& id) {
-    WTL::CComboBox combo(GetDlgItem(comboId));
-    int fallback = 0;
-    for (int i = 0; i < combo.GetCount(); ++i) {
-        const wchar_t* itemId = static_cast<const wchar_t*>(combo.GetItemDataPtr(i));
-        const std::wstring value = itemId != nullptr ? itemId : L"";
-        if (value == id) {
-            combo.SetCurSel(i);
-            return;
-        }
-        if (value.empty()) {
-            fallback = i;
-        }
-    }
-    combo.SetCurSel(fallback);
-}
-
-std::wstring RecordView::SelectedDeviceId(int comboId) const {
-    WTL::CComboBox combo(GetDlgItem(comboId));
-    const int sel = combo.GetCurSel();
-    if (sel < 0) {
-        return {};
-    }
-    const wchar_t* itemId = static_cast<const wchar_t*>(combo.GetItemDataPtr(sel));
-    return itemId != nullptr ? itemId : L"";
-}
-
 void RecordView::PersistDeviceSelection() {
-    Settings::Instance().Data().micDeviceId = SelectedDeviceId(IDC_MIC_DEVICE);
-    Settings::Instance().Data().systemDeviceId = SelectedDeviceId(IDC_SYSTEM_DEVICE);
+    Settings::Instance().Data().micDeviceId = m_micCombo.SelectedId();
+    Settings::Instance().Data().systemDeviceId = m_systemCombo.SelectedId();
     Settings::Instance().Save();
     UpdateDeviceTooltips();
 }
@@ -641,14 +566,7 @@ void RecordView::PersistFolder() {
     Settings::Instance().Save();
 }
 
-void RecordView::OnMicSelChange(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    PersistDeviceSelection();
-    if (!IsRecording()) {
-        StartMeterPreview();
-    }
-}
-
-void RecordView::OnSystemSelChange(UINT /*code*/, int /*id*/, HWND /*control*/) {
+void RecordView::OnDeviceSelChange(UINT /*code*/, int /*id*/, HWND /*control*/) {
     PersistDeviceSelection();
     if (!IsRecording()) {
         StartMeterPreview();
@@ -696,8 +614,8 @@ void RecordView::OnBrowseFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void RecordView::SetInputsEnabled(bool enabled) {
-    m_micCombo.EnableWindow(enabled);
-    m_systemCombo.EnableWindow(enabled);
+    m_micCombo.Combo().EnableWindow(enabled);
+    m_systemCombo.Combo().EnableWindow(enabled);
     m_folderEdit.EnableWindow(enabled);
     ::EnableWindow(GetDlgItem(IDC_BROWSE_FOLDER), enabled ? TRUE : FALSE);
 }
@@ -817,37 +735,37 @@ void RecordView::OnRecordClicked(UINT /*code*/, int /*id*/, HWND /*control*/) {
     ToggleRecording();
 }
 
-void RecordView::OnRecordingStarted() {
-    StopMeterPreview();
-    m_startedQpc = m_session != nullptr ? m_session->StartQpc() : 0;
-    SetInputsEnabled(false);
+void RecordView::ApplyRecordingState(bool recording) {
+    SetInputsEnabled(!recording);
     UpdateRecordButton();
-    m_recBlinkTicks = 0;
-    m_recBlinkOn = true;
-    UpdateRecIndicator();
-    SetTimer(IDT_RECORD_ELAPSED, 250);
-    UpdateElapsed();
+    if (recording) {
+        StopMeterPreview();
+        m_startedQpc = m_session != nullptr ? m_session->StartQpc() : 0;
+        m_recBlinkTicks = 0;
+        m_recBlinkOn = true;
+        UpdateRecIndicator();
+        SetTimer(IDT_RECORD_ELAPSED, 250);
+        UpdateElapsed();
+    } else {
+        KillTimer(IDT_RECORD_ELAPSED);
+        m_recBlinkOn = false;
+        m_recIndicator.ShowWindow(SW_HIDE);
+    }
     m_elapsedLabel.Invalidate(FALSE);
 }
 
+void RecordView::OnRecordingStarted() {
+    ApplyRecordingState(true);
+}
+
 void RecordView::OnRecordingFinished(const std::wstring& /*path*/) {
-    KillTimer(IDT_RECORD_ELAPSED);
-    SetInputsEnabled(true);
-    UpdateRecordButton();
+    ApplyRecordingState(false);
     m_elapsedLabel.SetWindowText(L"00:00:00");
-    m_elapsedLabel.Invalidate(FALSE);
-    m_recBlinkOn = false;
-    m_recIndicator.ShowWindow(SW_HIDE);
     RefreshDevices();
 }
 
 void RecordView::OnRecordingError(const std::wstring& message) {
-    KillTimer(IDT_RECORD_ELAPSED);
-    SetInputsEnabled(true);
-    UpdateRecordButton();
-    m_recBlinkOn = false;
-    m_recIndicator.ShowWindow(SW_HIDE);
-    m_elapsedLabel.Invalidate(FALSE);
+    ApplyRecordingState(false);
     StartMeterPreview();
     if (!message.empty()) {
         ShowErrorDialog(message);
@@ -891,8 +809,8 @@ void RecordView::UpdateMeters() {
     float micGain = settings.micGain;
     if (settings.micAgc) {
         micGain = (IsRecording() && m_session != nullptr) ? m_session->EffectiveMicGain() : 1.0f;
-        if (IsRecording()) {
-            UpdateMicGainLabel(micGain);
+        if (IsRecording() && m_micGainValue.IsWindow()) {
+            m_micGainValue.SetWindowText(FormatGainMultiplier(micGain).c_str());
         }
     }
     m_micMeter.SetLevel(micPeak * micGain);

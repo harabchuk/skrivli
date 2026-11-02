@@ -4,6 +4,10 @@
 #include "Ids.hpp"
 #include "audio/DeviceManager.hpp"
 #include "storage/Settings.hpp"
+#include "ui/DeviceCombo.hpp"
+
+#include <array>
+#include <vector>
 
 class SettingsDialog : public CDialogImpl<SettingsDialog> {
 public:
@@ -18,9 +22,9 @@ public:
         COMMAND_HANDLER_EX(IDC_SET_BROWSE_FOLDER, BN_CLICKED, OnBrowseFolder)
         COMMAND_HANDLER_EX(IDC_SET_MODEL_DOWNLOAD, BN_CLICKED, OnModelDownload)
         COMMAND_HANDLER_EX(IDC_SET_MODEL_BROWSE, BN_CLICKED, OnModelBrowse)
-        COMMAND_HANDLER_EX(IDC_SET_COMPRESS_M4A, BN_CLICKED, OnCompressToggled)
-        COMMAND_HANDLER_EX(IDC_SET_MIC_AGC, BN_CLICKED, OnMicAgcToggled)
-        COMMAND_HANDLER_EX(IDC_SET_HOTKEY_ENABLE, BN_CLICKED, OnHotkeyToggled)
+        COMMAND_HANDLER_EX(IDC_SET_COMPRESS_M4A, BN_CLICKED, OnDependentToggled)
+        COMMAND_HANDLER_EX(IDC_SET_MIC_AGC, BN_CLICKED, OnDependentToggled)
+        COMMAND_HANDLER_EX(IDC_SET_HOTKEY_ENABLE, BN_CLICKED, OnDependentToggled)
     END_MSG_MAP()
 
     bool FolderChanged() const { return m_folderChanged; }
@@ -33,27 +37,29 @@ private:
     void OnBrowseFolder(UINT code, int id, HWND control);
     void OnModelDownload(UINT code, int id, HWND control);
     void OnModelBrowse(UINT code, int id, HWND control);
-    void OnCompressToggled(UINT code, int id, HWND control);
-    void OnMicAgcToggled(UINT code, int id, HWND control);
-    void OnHotkeyToggled(UINT code, int id, HWND control);
+    void OnDependentToggled(UINT code, int id, HWND control);
+
+    struct CheckboxBinding {
+        WTL::CButton* button;
+        bool SettingsData::* field;
+    };
+    static constexpr size_t kCheckboxCount = 11;
+    std::array<CheckboxBinding, kCheckboxCount> Checkboxes();
 
     void LoadFromSettings();
-    bool CollectTo(SettingsData& out, std::wstring& error) const;
-    void FillDeviceCombo(WTL::CComboBox& combo, const std::vector<AudioDeviceInfo>& devices, const std::wstring& selectedId, bool capture);
+    bool CollectTo(SettingsData& out, std::wstring& error);
+    void FillDeviceCombo(DeviceCombo& combo, const std::vector<AudioDeviceInfo>& devices, const std::wstring& selectedId, bool capture);
     void FillModelCombo();
     void FillLanguageCombo();
     void UpdateDependentEnabled();
-    std::wstring SelectedDeviceId(const WTL::CComboBox& combo) const;
-    void SelectDeviceId(WTL::CComboBox& combo, const std::wstring& id);
-    void ClearComboItemData(WTL::CComboBox& combo);
 
     DeviceManager* m_devices = nullptr;
     SettingsData m_applied{};
     bool m_folderChanged = false;
 
     WTL::CEdit m_folder;
-    WTL::CComboBox m_mic;
-    WTL::CComboBox m_sys;
+    DeviceCombo m_mic;
+    DeviceCombo m_sys;
     WTL::CEdit m_micGain;
     WTL::CEdit m_sysGain;
     WTL::CButton m_micAgc;
@@ -61,7 +67,7 @@ private:
     WTL::CButton m_compress;
     WTL::CButton m_keepWav;
     WTL::CButton m_comms;
-    WTL::CComboBox m_model;
+    DeviceCombo m_model;
     WTL::CComboBox m_language;
     WTL::CEdit m_threads;
     WTL::CButton m_autoTranscribe;
