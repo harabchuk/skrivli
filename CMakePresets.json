@@ -12,16 +12,6 @@
       "generator": "Visual Studio 18 2026",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build"
-    },
-    {
-      "name": "ninja",
-      "displayName": "Ninja (x64)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
-      }
     }
   ],
   "buildPresets": [
@@ -29,10 +19,6 @@
       "name": "default",
       "configurePreset": "default",
       "configuration": "Release"
-    },
-    {
-      "name": "ninja",
-      "configurePreset": "ninja"
     }
   ]
 }
