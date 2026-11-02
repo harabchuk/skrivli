@@ -31,14 +31,13 @@ public:
     Microsoft::WRL::ComPtr<IMMDevice> ResolveCaptureDevice(const std::wstring& savedId) const;
     Microsoft::WRL::ComPtr<IMMDevice> ResolveRenderDevice(const std::wstring& savedId) const;
 
-    std::wstring DefaultCaptureId() const;
-    std::wstring DefaultRenderId() const;
     std::wstring FriendlyName(IMMDevice* device) const;
 
 private:
     class NotificationClient;
 
-    std::vector<AudioDeviceInfo> Enumerate(EDataFlow flow, ERole defaultRole) const;
+    std::vector<AudioDeviceInfo> Enumerate(EDataFlow flow) const;
+    std::wstring DefaultId(EDataFlow flow, ERole role) const;
     Microsoft::WRL::ComPtr<IMMDevice> Resolve(
         EDataFlow flow,
         ERole defaultRole,

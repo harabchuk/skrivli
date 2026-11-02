@@ -6,6 +6,8 @@
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
+#include <atlbase.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -60,6 +62,15 @@ bool WriteRiffSizes(HANDLE file, uint64_t dataBytes) {
         return false;
     }
     return SeekHandle(file, static_cast<int64_t>(kHeaderBytes + dataBytes), FILE_BEGIN);
+}
+
+bool OpenExisting(ATL::CHandle& out, const std::wstring& path, DWORD access, DWORD share) {
+    HANDLE file = ::CreateFileW(path.c_str(), access, share, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    out.Attach(file);
+    return true;
 }
 
 }  // namespace
@@ -133,8 +144,25 @@ bool WavWriter::SeekFile(int64_t offset, int origin) {
     return ::SetFilePointerEx(static_cast<HANDLE>(m_file), distance, nullptr, method) != FALSE;
 }
 
-void WavWriter::CloseEncoder() {
+void WavWriter::CloseFile(bool flush) {
+    // Uninitializing the encoder makes dr_wav seek back and write the final RIFF sizes, so it
+    // must run while the handle is still open.
     m_encoder.reset();
+    if (m_file != nullptr) {
+        if (flush) {
+            ::FlushFileBuffers(static_cast<HANDLE>(m_file));
+        }
+        ::CloseHandle(static_cast<HANDLE>(m_file));
+        m_file = nullptr;
+    }
+}
+
+void WavWriter::ResetState() {
+    m_partialPath.clear();
+    m_finalPath.clear();
+    m_folder.clear();
+    m_framesWritten = 0;
+    m_bytesSincePatch = 0;
 }
 
 bool WavWriter::FolderHasFreeSpace(const std::wstring& folder, uint64_t minBytes) {
@@ -229,9 +257,7 @@ bool WavWriter::OpenFinalPath(const std::wstring& finalWavPath) {
         nullptr);
     if (file == INVALID_HANDLE_VALUE) {
         Log::Error(L"Failed to create WAV partial file");
-        m_partialPath.clear();
-        m_finalPath.clear();
-        m_folder.clear();
+        ResetState();
         return false;
     }
 
@@ -260,26 +286,7 @@ bool WavWriter::OpenFinalPath(const std::wstring& finalWavPath) {
 }
 
 bool WavWriter::Open(const std::wstring& folder) {
-    Abandon();
-    if (!FileIo::IsWritableDirectory(folder)) {
-        Log::Error(L"Recordings folder is not writable");
-        return false;
-    }
-    if (!FolderHasFreeSpace(folder)) {
-        Log::Error(L"Recordings folder has insufficient free disk space");
-        return false;
-    }
-
-    const std::wstring base = MakeBasePath(folder);
-    return OpenFinalPath(base + L".wav");
-}
-
-bool WavWriter::SeekAndWriteSizes() {
-    if (m_file == nullptr) {
-        return false;
-    }
-    const uint64_t dataBytes = m_framesWritten * kChannels * (kBitsPerSample / 8);
-    return WriteRiffSizes(static_cast<HANDLE>(m_file), dataBytes);
+    return OpenFinalPath(MakeBasePath(folder) + L".wav");
 }
 
 bool WavWriter::WriteFloatFrames(const float* interleavedStereo, uint32_t frameCount) {
@@ -321,7 +328,11 @@ bool WavWriter::WriteFloatFrames(const float* interleavedStereo, uint32_t frameC
 }
 
 bool WavWriter::PatchHeader() {
-    return SeekAndWriteSizes();
+    if (m_file == nullptr) {
+        return false;
+    }
+    const uint64_t dataBytes = m_framesWritten * kChannels * (kBitsPerSample / 8);
+    return WriteRiffSizes(static_cast<HANDLE>(m_file), dataBytes);
 }
 
 bool WavWriter::Finalize(std::wstring& outFinalPath) {
@@ -330,11 +341,7 @@ bool WavWriter::Finalize(std::wstring& outFinalPath) {
         return false;
     }
 
-    // ma_encoder_uninit → dr_wav seeks back and writes the final RIFF sizes.
-    CloseEncoder();
-    ::FlushFileBuffers(static_cast<HANDLE>(m_file));
-    ::CloseHandle(static_cast<HANDLE>(m_file));
-    m_file = nullptr;
+    CloseFile(true);
 
     if (!::MoveFileExW(m_partialPath.c_str(), m_finalPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
         Log::Error(L"Failed to rename WAV partial to final");
@@ -342,11 +349,7 @@ bool WavWriter::Finalize(std::wstring& outFinalPath) {
     }
 
     outFinalPath = m_finalPath;
-    m_partialPath.clear();
-    m_finalPath.clear();
-    m_folder.clear();
-    m_framesWritten = 0;
-    m_bytesSincePatch = 0;
+    ResetState();
     return true;
 }
 
@@ -360,12 +363,7 @@ bool WavWriter::RescueTo(const std::wstring& rescueDir, std::wstring& outFinalPa
         return false;
     }
 
-    // ma_encoder_uninit patches sizes while the handle is still open.
-    CloseEncoder();
-    ::FlushFileBuffers(static_cast<HANDLE>(m_file));
-    ::CloseHandle(static_cast<HANDLE>(m_file));
-    m_file = nullptr;
-
+    CloseFile(true);
 
     const std::filesystem::path src(m_partialPath);
     const std::wstring leaf = src.filename().wstring();
@@ -383,11 +381,7 @@ bool WavWriter::RescueTo(const std::wstring& rescueDir, std::wstring& outFinalPa
     if (!RepairPartialHeader(destPartial)) {
         Log::Warn(L"Rescue partial header repair failed; leaving file as-is");
         outFinalPath = destPartial;
-        m_partialPath.clear();
-        m_finalPath.clear();
-        m_folder.clear();
-        m_framesWritten = 0;
-        m_bytesSincePatch = 0;
+        ResetState();
         return !outFinalPath.empty();
     }
 
@@ -398,74 +392,43 @@ bool WavWriter::RescueTo(const std::wstring& rescueDir, std::wstring& outFinalPa
         outFinalPath = recovered;
     }
 
-    m_partialPath.clear();
-    m_finalPath.clear();
-    m_folder.clear();
-    m_framesWritten = 0;
-    m_bytesSincePatch = 0;
+    ResetState();
     return !outFinalPath.empty();
 }
 
 void WavWriter::Abandon() {
-    CloseEncoder();
-    if (m_file != nullptr) {
-        ::CloseHandle(static_cast<HANDLE>(m_file));
-        m_file = nullptr;
-    }
+    CloseFile();
     // Leave partial on disk for recovery.
-    m_partialPath.clear();
-    m_finalPath.clear();
-    m_folder.clear();
-    m_framesWritten = 0;
-    m_bytesSincePatch = 0;
+    ResetState();
 }
 
 void WavWriter::Discard() {
     const std::wstring partial = m_partialPath;
-    CloseEncoder();
-    if (m_file != nullptr) {
-        ::CloseHandle(static_cast<HANDLE>(m_file));
-        m_file = nullptr;
-    }
+    CloseFile();
     if (!partial.empty()) {
         ::DeleteFileW(partial.c_str());
     }
-    m_partialPath.clear();
-    m_finalPath.clear();
-    m_folder.clear();
-    m_framesWritten = 0;
-    m_bytesSincePatch = 0;
+    ResetState();
 }
 
 bool WavWriter::RepairPartialHeader(const std::wstring& partialPath) {
-    HANDLE file = ::CreateFileW(
-        partialPath.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
+    ATL::CHandle file;
+    if (!OpenExisting(file, partialPath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ)) {
         return false;
     }
 
     LARGE_INTEGER size{};
     if (!::GetFileSizeEx(file, &size) || size.QuadPart < static_cast<LONGLONG>(kHeaderBytes)) {
-        ::CloseHandle(file);
         return false;
     }
     if (!WavHeader::Read(file)) {
-        ::CloseHandle(file);
         return false;
     }
 
     const uint64_t dataBytes = std::min<uint64_t>(
         static_cast<uint64_t>(size.QuadPart) - kHeaderBytes,
         0xFFFFFFFFull);
-    const bool ok = WriteRiffSizes(file, dataBytes);
-    ::CloseHandle(file);
-    return ok;
+    return WriteRiffSizes(file, dataBytes);
 }
 
 std::vector<std::wstring> WavWriter::RecoverPartialsInFolder(const std::wstring& folder) {
@@ -485,20 +448,15 @@ std::vector<std::wstring> WavWriter::RecoverPartialsInFolder(const std::wstring&
             continue;
         }
 
-        LARGE_INTEGER size{};
-        HANDLE file = ::CreateFileW(
-            path.c_str(),
-            GENERIC_READ,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            nullptr,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr);
-        if (file == INVALID_HANDLE_VALUE) {
-            continue;
+        bool tooShort = false;
+        {
+            ATL::CHandle file;
+            if (!OpenExisting(file, path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE)) {
+                continue;
+            }
+            LARGE_INTEGER size{};
+            tooShort = !::GetFileSizeEx(file, &size) || size.QuadPart < static_cast<LONGLONG>(kHeaderBytes);
         }
-        const bool tooShort = !::GetFileSizeEx(file, &size) || size.QuadPart < 44;
-        ::CloseHandle(file);
         if (tooShort) {
             Log::Warn(L"Leaving short partial unrecovered: " + path);
             continue;

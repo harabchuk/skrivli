@@ -2,6 +2,7 @@
 
 #include "audio/WavHeader.hpp"
 #include "util/Log.hpp"
+#include "util/Scoped.hpp"
 
 #include <mfapi.h>
 #include <mfidl.h>
@@ -13,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <initializer_list>
 #include <vector>
 
 namespace {
@@ -81,6 +83,29 @@ bool ReadWavPcm16Stereo48k(const std::wstring& path, std::vector<int16_t>& pcm, 
     return true;
 }
 
+struct MfAttr {
+    const GUID& key;
+    const GUID* guidValue;
+    UINT32 uintValue;
+
+    MfAttr(const GUID& attrKey, const GUID& value)
+        : key(attrKey), guidValue(&value), uintValue(0) {}
+    MfAttr(const GUID& attrKey, UINT32 value)
+        : key(attrKey), guidValue(nullptr), uintValue(value) {}
+};
+
+HRESULT SetAttrs(IMFAttributes* attrs, std::initializer_list<MfAttr> list) {
+    for (const MfAttr& attr : list) {
+        const HRESULT hr = attr.guidValue != nullptr
+            ? attrs->SetGUID(attr.key, *attr.guidValue)
+            : attrs->SetUINT32(attr.key, attr.uintValue);
+        if (FAILED(hr)) {
+            return hr;
+        }
+    }
+    return S_OK;
+}
+
 HRESULT ConfigureSinkWriter(
     IMFSinkWriter* writer,
     DWORD* streamIndex) {
@@ -89,32 +114,15 @@ HRESULT ConfigureSinkWriter(
     if (FAILED(hr)) {
         return hr;
     }
-    hr = outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = outType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = outType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, kSampleRate);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = outType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, kChannels);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = outType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = outType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, kAacBitrate / 8);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    // AAC profile LC
-    hr = outType->SetUINT32(MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29);
+    hr = SetAttrs(outType.Get(), {
+        {MF_MT_MAJOR_TYPE, MFMediaType_Audio},
+        {MF_MT_SUBTYPE, MFAudioFormat_AAC},
+        {MF_MT_AUDIO_SAMPLES_PER_SECOND, kSampleRate},
+        {MF_MT_AUDIO_NUM_CHANNELS, kChannels},
+        {MF_MT_AUDIO_BITS_PER_SAMPLE, 16},
+        {MF_MT_AUDIO_AVG_BYTES_PER_SECOND, kAacBitrate / 8},
+        {MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29}, // AAC profile LC
+    });
     if (FAILED(hr)) {
         return hr;
     }
@@ -129,35 +137,16 @@ HRESULT ConfigureSinkWriter(
     if (FAILED(hr)) {
         return hr;
     }
-    hr = inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = inType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, kChannels);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, kSampleRate);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, kChannels * (kBitsPerSample / 8));
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, kBytesPerSecond);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, kBitsPerSample);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    hr = inType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
+    hr = SetAttrs(inType.Get(), {
+        {MF_MT_MAJOR_TYPE, MFMediaType_Audio},
+        {MF_MT_SUBTYPE, MFAudioFormat_PCM},
+        {MF_MT_AUDIO_NUM_CHANNELS, kChannels},
+        {MF_MT_AUDIO_SAMPLES_PER_SECOND, kSampleRate},
+        {MF_MT_AUDIO_BLOCK_ALIGNMENT, kChannels * (kBitsPerSample / 8)},
+        {MF_MT_AUDIO_AVG_BYTES_PER_SECOND, kBytesPerSecond},
+        {MF_MT_AUDIO_BITS_PER_SAMPLE, kBitsPerSample},
+        {MF_MT_ALL_SAMPLES_INDEPENDENT, static_cast<UINT32>(TRUE)},
+    });
     if (FAILED(hr)) {
         return hr;
     }
@@ -185,18 +174,17 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
 
     ::DeleteFileW(m4aPath.c_str());
 
-    HRESULT hr = ::MFStartup(MF_VERSION, MFSTARTUP_LITE);
-    if (FAILED(hr)) {
+    const ScopedMfStartup mfStartup;
+    if (!mfStartup.IsStarted()) {
         error = L"Media Foundation failed to start.";
         return false;
     }
 
     bool ok = false;
     Microsoft::WRL::ComPtr<IMFSinkWriter> writer;
-    hr = ::MFCreateSinkWriterFromURL(m4aPath.c_str(), nullptr, nullptr, &writer);
+    HRESULT hr = ::MFCreateSinkWriterFromURL(m4aPath.c_str(), nullptr, nullptr, &writer);
     if (FAILED(hr) || !writer) {
         error = L"Could not create M4A writer.";
-        ::MFShutdown();
         return false;
     }
 
@@ -204,7 +192,6 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
     hr = ConfigureSinkWriter(writer.Get(), &streamIndex);
     if (FAILED(hr)) {
         error = L"Could not configure AAC encoder.";
-        ::MFShutdown();
         ::DeleteFileW(m4aPath.c_str());
         return false;
     }
@@ -212,7 +199,6 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
     hr = writer->BeginWriting();
     if (FAILED(hr)) {
         error = L"AAC encoder BeginWriting failed.";
-        ::MFShutdown();
         ::DeleteFileW(m4aPath.c_str());
         return false;
     }
@@ -272,7 +258,6 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
     }
 
     writer.Reset();
-    ::MFShutdown();
 
     if (!ok) {
         ::DeleteFileW(m4aPath.c_str());

@@ -113,11 +113,11 @@ void DeviceManager::Shutdown() {
 }
 
 std::vector<AudioDeviceInfo> DeviceManager::EnumerateCapture() const {
-    return Enumerate(eCapture, eCommunications);
+    return Enumerate(eCapture);
 }
 
 std::vector<AudioDeviceInfo> DeviceManager::EnumerateRender() const {
-    return Enumerate(eRender, eConsole);
+    return Enumerate(eRender);
 }
 
 Microsoft::WRL::ComPtr<IMMDevice> DeviceManager::ResolveCaptureDevice(const std::wstring& savedId) const {
@@ -128,22 +128,8 @@ Microsoft::WRL::ComPtr<IMMDevice> DeviceManager::ResolveRenderDevice(const std::
     return Resolve(eRender, eConsole, savedId);
 }
 
-std::wstring DeviceManager::DefaultCaptureId() const {
-    auto device = GetDefault(eCapture, eCommunications);
-    if (!device) {
-        return {};
-    }
-    LPWSTR id = nullptr;
-    if (FAILED(device->GetId(&id)) || id == nullptr) {
-        return {};
-    }
-    std::wstring result(id);
-    ::CoTaskMemFree(id);
-    return result;
-}
-
-std::wstring DeviceManager::DefaultRenderId() const {
-    auto device = GetDefault(eRender, eConsole);
+std::wstring DeviceManager::DefaultId(EDataFlow flow, ERole role) const {
+    auto device = GetDefault(flow, role);
     if (!device) {
         return {};
     }
@@ -178,13 +164,13 @@ std::wstring DeviceManager::FriendlyName(IMMDevice* device) const {
     return name;
 }
 
-std::vector<AudioDeviceInfo> DeviceManager::Enumerate(EDataFlow flow, ERole defaultRole) const {
+std::vector<AudioDeviceInfo> DeviceManager::Enumerate(EDataFlow flow) const {
     std::vector<AudioDeviceInfo> devices;
     if (!m_enumerator) {
         return devices;
     }
 
-    const std::wstring defaultId = (flow == eCapture) ? DefaultCaptureId() : DefaultRenderId();
+    const std::wstring defaultId = DefaultId(flow, flow == eCapture ? eCommunications : eConsole);
 
     Microsoft::WRL::ComPtr<IMMDeviceCollection> collection;
     const HRESULT hr = m_enumerator->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection);
@@ -222,7 +208,6 @@ std::vector<AudioDeviceInfo> DeviceManager::Enumerate(EDataFlow flow, ERole defa
         devices.push_back(std::move(info));
     }
 
-    (void)defaultRole;
     return devices;
 }
 

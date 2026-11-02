@@ -51,10 +51,11 @@ private:
         void operator()(WavEncoder* encoder) const;
     };
 
-    bool SeekAndWriteSizes();
     bool WriteBytes(const void* data, size_t bytes, size_t& bytesWritten);
     bool SeekFile(int64_t offset, int origin);
-    void CloseEncoder();
+    // Uninitializes the encoder (it patches RIFF sizes) and then closes the handle.
+    void CloseFile(bool flush = false);
+    void ResetState();
     static std::wstring MakeBasePath(const std::wstring& folder);
     static std::wstring RecoveredPathFromPartial(const std::wstring& partialPath);
 
