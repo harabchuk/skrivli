@@ -57,7 +57,6 @@ private:
     std::atomic<bool> m_usedResampler{false};
     std::atomic<bool> m_sawSilent{false};
     std::atomic<bool> m_sawDiscontinuityFlag{false};
-    void* m_mmcssHandle = nullptr;
 
     AudioResampler m_resampler;
     std::vector<float> m_resampleScratch;

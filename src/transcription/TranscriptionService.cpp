@@ -9,6 +9,8 @@
 #include "transcription/ModelManager.hpp"
 #include "transcription/Resampler.hpp"
 #include "util/Log.hpp"
+#include "util/PostOwned.hpp"
+#include "util/Scoped.hpp"
 #include "util/Text.hpp"
 
 #include <objbase.h>
@@ -181,14 +183,7 @@ std::wstring TranscriptionService::ActivePath() const {
 }
 
 void TranscriptionService::PostNotify(UINT msg, TranscribeNotify* notify) {
-    const HWND hwnd = m_notifyHwnd;
-    if (hwnd == nullptr || !::IsWindow(hwnd)) {
-        delete notify;
-        return;
-    }
-    if (!::PostMessageW(hwnd, msg, 0, reinterpret_cast<LPARAM>(notify))) {
-        delete notify;
-    }
+    PostOwned(m_notifyHwnd, msg, std::unique_ptr<TranscribeNotify>(notify));
 }
 
 void TranscriptionService::UpdateSidecarStatus(
@@ -218,7 +213,7 @@ void TranscriptionService::UpdateSidecarStatus(
 }
 
 void TranscriptionService::WorkerMain() {
-    ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ScopedComInit com(COINIT_MULTITHREADED);
 
     while (m_running.load()) {
         Job job{};
@@ -249,8 +244,6 @@ void TranscriptionService::WorkerMain() {
             m_percent.store(0);
         }
     }
-
-    ::CoUninitialize();
 }
 
 void TranscriptionService::ProcessJob(Job job) {

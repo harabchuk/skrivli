@@ -2,6 +2,7 @@
 
 #include "audio/AudioFormat.hpp"
 #include "util/Log.hpp"
+#include "util/Scoped.hpp"
 
 #include <audioclient.h>
 #include <avrt.h>
@@ -90,25 +91,16 @@ void CaptureStream::Stop() {
 }
 
 void CaptureStream::ThreadMain() {
-    const HRESULT comHr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool comInitialized = SUCCEEDED(comHr) || comHr == S_FALSE || comHr == RPC_E_CHANGED_MODE;
+    {
+        ScopedComInit com(COINIT_MULTITHREADED);
+        {
+            ScopedMmcss mmcss(L"Audio");
+            CaptureLoop();
+        }
 
-    DWORD taskIndex = 0;
-    m_mmcssHandle = ::AvSetMmThreadCharacteristicsW(L"Audio", &taskIndex);
-
-    CaptureLoop();
-
-    if (m_mmcssHandle != nullptr) {
-        ::AvRevertMmThreadCharacteristics(m_mmcssHandle);
-        m_mmcssHandle = nullptr;
-    }
-
-    if (m_initEvent != nullptr) {
-        ::SetEvent(m_initEvent);
-    }
-
-    if (comInitialized && comHr != RPC_E_CHANGED_MODE) {
-        ::CoUninitialize();
+        if (m_initEvent != nullptr) {
+            ::SetEvent(m_initEvent);
+        }
     }
     m_running.store(false, std::memory_order_release);
 }

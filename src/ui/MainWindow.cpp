@@ -12,6 +12,8 @@
 #include "util/Hotkey.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/PostOwned.hpp"
+#include "util/Scoped.hpp"
 #include "util/Text.hpp"
 
 #include <iterator>
@@ -556,8 +558,7 @@ void MainWindow::StartM4aCompression(const std::wstring& wavPath) {
     const HWND hwnd = m_hWnd;
     const bool keepWav = Settings::Instance().Data().keepWav;
     std::thread([hwnd, wavPath, keepWav]() {
-        const HRESULT comHr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        const bool comOk = SUCCEEDED(comHr) || comHr == S_FALSE || comHr == RPC_E_CHANGED_MODE;
+        ScopedComInit com(COINIT_MULTITHREADED);
 
         std::wstring m4aPath;
         std::wstring error;
@@ -566,19 +567,12 @@ void MainWindow::StartM4aCompression(const std::wstring& wavPath) {
             if (!keepWav) {
                 ::DeleteFileW(wavPath.c_str());
             }
-            auto* heap = new std::wstring(m4aPath);
-            if (!::PostMessageW(hwnd, WM_APP_M4A_FINISHED, 0, reinterpret_cast<LPARAM>(heap))) {
-                delete heap;
-            }
+            PostOwned(hwnd, WM_APP_M4A_FINISHED, std::make_unique<std::wstring>(m4aPath));
         } else {
-            auto* heap = new std::wstring(error.empty() ? L"M4A compression failed." : error);
-            if (!::PostMessageW(hwnd, WM_APP_M4A_FAILED, 0, reinterpret_cast<LPARAM>(heap))) {
-                delete heap;
-            }
-        }
-
-        if (comOk && comHr != RPC_E_CHANGED_MODE) {
-            ::CoUninitialize();
+            PostOwned(
+                hwnd,
+                WM_APP_M4A_FAILED,
+                std::make_unique<std::wstring>(error.empty() ? L"M4A compression failed." : error));
         }
     }).detach();
 }

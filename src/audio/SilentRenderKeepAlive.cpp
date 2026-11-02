@@ -1,6 +1,7 @@
 #include "audio/SilentRenderKeepAlive.hpp"
 
 #include "audio/AudioFormat.hpp"
+#include "util/Scoped.hpp"
 
 #include <audioclient.h>
 #include <avrt.h>
@@ -43,19 +44,10 @@ void SilentRenderKeepAlive::Stop() {
 }
 
 void SilentRenderKeepAlive::ThreadMain() {
-    const HRESULT comHr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool comInitialized = SUCCEEDED(comHr) || comHr == S_FALSE || comHr == RPC_E_CHANGED_MODE;
-
-    DWORD taskIndex = 0;
-    HANDLE mmcss = ::AvSetMmThreadCharacteristicsW(L"Audio", &taskIndex);
-
-    RenderLoop();
-
-    if (mmcss != nullptr) {
-        ::AvRevertMmThreadCharacteristics(mmcss);
-    }
-    if (comInitialized && comHr != RPC_E_CHANGED_MODE) {
-        ::CoUninitialize();
+    {
+        ScopedComInit com(COINIT_MULTITHREADED);
+        ScopedMmcss mmcss(L"Audio");
+        RenderLoop();
     }
     m_running.store(false, std::memory_order_release);
 }

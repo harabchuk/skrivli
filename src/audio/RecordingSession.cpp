@@ -4,6 +4,7 @@
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
+#include "util/Scoped.hpp"
 #include "util/Text.hpp"
 
 #include <audioclient.h>
@@ -527,8 +528,7 @@ bool RecordingSession::TryReopenSystem(const wchar_t* reason) {
 }
 
 void RecordingSession::WriterMain() {
-    const HRESULT comHr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool comInitialized = SUCCEEDED(comHr) || comHr == S_FALSE || comHr == RPC_E_CHANGED_MODE;
+    ScopedComInit com(COINIT_MULTITHREADED);
 
     float block[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
     float micStem[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
@@ -652,9 +652,5 @@ void RecordingSession::WriterMain() {
                 m_stemWritersOpen = false;
             }
         }
-    }
-
-    if (comInitialized && comHr != RPC_E_CHANGED_MODE) {
-        ::CoUninitialize();
     }
 }

@@ -2,6 +2,7 @@
 
 #include "audio/AudioFormat.hpp"
 #include "util/Log.hpp"
+#include "util/Scoped.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -109,8 +110,7 @@ void LevelMonitor::Start(
 }
 
 void LevelMonitor::DrainMain() {
-    const HRESULT comHr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool comInitialized = SUCCEEDED(comHr) || comHr == S_FALSE || comHr == RPC_E_CHANGED_MODE;
+    ScopedComInit com(COINIT_MULTITHREADED);
 
     constexpr uint32_t kMaxPacketFrames = 8192;
     std::vector<float> scratch(static_cast<size_t>(kMaxPacketFrames) * AudioFormat::kChannels);
@@ -152,9 +152,5 @@ void LevelMonitor::DrainMain() {
         }
 
         ::Sleep(10);
-    }
-
-    if (comInitialized && comHr != RPC_E_CHANGED_MODE) {
-        ::CoUninitialize();
     }
 }
