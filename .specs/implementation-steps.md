@@ -192,7 +192,7 @@ Move UI types under `src/ui/` and update `CMakeLists.txt` includes. `MainWindow`
 
 **Spec:** §8.1, §5.
 
-- `CTabCtrl` fills the client area above the status bar: **Record** and **Recordings**.
+- Stock `CTabCtrl` centered above the pages: **Record** and **Recordings**. Pages fill the width below the strip.
 - Each page is a child `CDialogImpl` with `CDialogResize`: `DS_CONTROL | WS_CHILD` dialog resources `IDD_RECORD_PAGE` and `IDD_RECORDINGS_PAGE`.
 - Switching tabs shows one page and hides the other.
 - Placeholder copy only. Record's real controls arrive in M2; the recordings list arrives in M5.

@@ -248,7 +248,7 @@ Saved next to the audio as `<name>.md`:
 ### 8.1 Main window
 - Resizable `CFrameWindowImpl` (allow resizing and maximizing, unlike the current fixed style). Minimum size about 560×420; position and size are saved.
 - Menu bar: **File** (Open recordings folder, Settings…, Exit), **Help** (About).
-- Client area: `CTabCtrl` filling the client area, with the Record / Recordings labels centered in the strip. Each tab page is a child `CDialogImpl` (resource dialog, `DS_CONTROL | WS_CHILD`) so layout uses `CDialogResize`. Switching tabs shows/hides the pages.
+- Client area: a `CTabCtrl` (Record / Recordings) centered in the strip above the pages. The selected tab is white and open along its bottom. A hairline runs the width of the strip and breaks under the selected tab so that tab joins the page. Each tab page is a child `CDialogImpl` (resource dialog, `DS_CONTROL | WS_CHILD`) so layout uses `CDialogResize`. Switching tabs shows/hides the pages, which fill the width below the strip.
 - Status bar (`CMultiPaneStatusBarCtrl`): recording state, elapsed time, transcription progress.
 - Per-monitor DPI: handle `WM_DPICHANGED`, and scale fonts and the meter control.
 
