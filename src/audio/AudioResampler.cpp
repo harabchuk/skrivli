@@ -1,34 +1,84 @@
 #include "audio/AudioResampler.hpp"
 
 #include "audio/AudioFormat.hpp"
+#include "audio/MiniAudio.hpp"
 #include "util/Log.hpp"
 
-#include <mfapi.h>
-#include <mferror.h>
-#include <mfidl.h>
-#include <mftransform.h>
-#include <wmcodecdsp.h>
+#include <mmreg.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
+
+namespace {
+
+ma_format FormatFromWave(const WAVEFORMATEX* format) {
+    if (format == nullptr) {
+        return ma_format_unknown;
+    }
+
+    auto fromPcmBits = [](WORD bits) {
+        switch (bits) {
+        case 8:
+            return ma_format_u8;
+        case 16:
+            return ma_format_s16;
+        case 24:
+            return ma_format_s24;
+        case 32:
+            return ma_format_s32;
+        default:
+            return ma_format_unknown;
+        }
+    };
+
+    if (format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT && format->wBitsPerSample == 32) {
+        return ma_format_f32;
+    }
+    if (format->wFormatTag == WAVE_FORMAT_PCM) {
+        return fromPcmBits(format->wBitsPerSample);
+    }
+    if (format->wFormatTag == WAVE_FORMAT_EXTENSIBLE
+        && format->cbSize >= (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX))) {
+        const auto* extensible = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(format);
+        const WORD bits = extensible->Samples.wValidBitsPerSample != 0
+            ? extensible->Samples.wValidBitsPerSample
+            : format->wBitsPerSample;
+        if (extensible->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT && bits == 32) {
+            return ma_format_f32;
+        }
+        if (extensible->SubFormat == KSDATAFORMAT_SUBTYPE_PCM) {
+            return fromPcmBits(bits);
+        }
+    }
+    return ma_format_unknown;
+}
+
+}  // namespace
+
+struct AudioResampler::State {
+    ma_data_converter converter{};
+    uint32_t blockAlign = 0;
+    bool live = false;
+};
+
+void AudioResampler::StateDeleter::operator()(State* state) const {
+    if (state == nullptr) {
+        return;
+    }
+    if (state->live) {
+        ma_data_converter_uninit(&state->converter, nullptr);
+        state->live = false;
+    }
+    delete state;
+}
 
 AudioResampler::~AudioResampler() {
     Reset();
 }
 
 void AudioResampler::Reset() {
-    if (m_transform) {
-        m_transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
-        m_transform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
-        m_transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
-        m_transform.Reset();
-    }
-    if (m_mfStarted) {
-        ::MFShutdown();
-        m_mfStarted = false;
-    }
-    m_inputBlockAlign = 0;
-    m_outputBufferBytes = 0;
+    m_state.reset();
 }
 
 bool AudioResampler::Initialize(const void* inputFormatBytes) {
@@ -38,99 +88,49 @@ bool AudioResampler::Initialize(const void* inputFormatBytes) {
         return false;
     }
 
-    HRESULT hr = ::MFStartup(MF_VERSION, MFSTARTUP_LITE);
-    if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Error, L"MFStartup for resampler failed", hr);
-        return false;
-    }
-    m_mfStarted = true;
-
-    hr = ::CoCreateInstance(
-        CLSID_CResamplerMediaObject,
-        nullptr,
-        CLSCTX_INPROC_SERVER,
-        IID_PPV_ARGS(&m_transform));
-    if (FAILED(hr) || !m_transform) {
-        Log::WriteHResult(Log::Level::Error, L"CoCreateInstance(CLSID_CResamplerMediaObject) failed", hr);
-        Reset();
+    const ma_format inputSampleFormat = FormatFromWave(inputFormat);
+    if (inputSampleFormat == ma_format_unknown) {
+        Log::Error(L"Mix format is not supported by the miniaudio resampler");
         return false;
     }
 
-    if (!SetMediaTypes(inputFormat)) {
-        Reset();
+    const ma_uint32 bytesPerFrame = ma_get_bytes_per_frame(inputSampleFormat, inputFormat->nChannels);
+    if (bytesPerFrame == 0 || inputFormat->nBlockAlign != bytesPerFrame) {
+        Log::Error(L"Mix format block align does not match the miniaudio sample format");
         return false;
     }
 
-    hr = m_transform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
-    if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Warn, L"Resampler flush failed", hr);
-    }
-    hr = m_transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
-    if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Error, L"Resampler BEGIN_STREAMING failed", hr);
-        Reset();
+    ma_channel inputMap[MA_MAX_CHANNELS]{};
+    ma_channel outputMap[2]{};
+    ma_channel_map_init_standard(
+        ma_standard_channel_map_microsoft,
+        inputMap,
+        MA_MAX_CHANNELS,
+        inputFormat->nChannels);
+    ma_channel_map_init_standard(ma_standard_channel_map_microsoft, outputMap, 2, 2);
+
+    ma_data_converter_config config = ma_data_converter_config_init(
+        inputSampleFormat,
+        ma_format_f32,
+        inputFormat->nChannels,
+        AudioFormat::kChannels,
+        inputFormat->nSamplesPerSec,
+        AudioFormat::kSampleRate);
+    config.pChannelMapIn = inputMap;
+    config.pChannelMapOut = outputMap;
+    config.ditherMode = ma_dither_mode_none;
+    config.resampling.linear.lpfOrder = 8;
+
+    auto state = std::unique_ptr<State, StateDeleter>(new State());
+    state->blockAlign = bytesPerFrame;
+    const ma_result result = ma_data_converter_init(&config, nullptr, &state->converter);
+    if (result != MA_SUCCESS) {
+        Log::Error(L"miniaudio data converter init failed");
         return false;
     }
-    hr = m_transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
-    if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Error, L"Resampler START_OF_STREAM failed", hr);
-        Reset();
-        return false;
-    }
-
-    m_inputBlockAlign = inputFormat->nBlockAlign;
-    // Generous output buffer: up to ~4x rate change plus stereo float.
-    m_outputBufferBytes = std::max<uint32_t>(
-        4096u,
-        static_cast<uint32_t>(AudioFormat::kSampleRate / 5u) * AudioFormat::kChannels * sizeof(float) * 4u);
-
+    state->live = true;
+    m_state = std::move(state);
     Log::Info(L"Audio resampler ready (mix-format → 48 kHz stereo float)");
-    return true;
-}
-
-bool AudioResampler::SetMediaTypes(const void* inputFormatBytes) {
-    const auto* inputFormat = static_cast<const WAVEFORMATEX*>(inputFormatBytes);
-    if (inputFormat == nullptr) {
-        return false;
-    }
-    Microsoft::WRL::ComPtr<IMFMediaType> inputType;
-    HRESULT hr = ::MFCreateMediaType(&inputType);
-    if (FAILED(hr) || !inputType) {
-        return false;
-    }
-    hr = ::MFInitMediaTypeFromWaveFormatEx(
-        inputType.Get(),
-        inputFormat,
-        sizeof(WAVEFORMATEX) + inputFormat->cbSize);
-    if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Error, L"MFInitMediaTypeFromWaveFormatEx (input) failed", hr);
-        return false;
-    }
-    hr = m_transform->SetInputType(0, inputType.Get(), 0);
-    if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Error, L"Resampler SetInputType failed", hr);
-        return false;
-    }
-
-    auto outWave = AudioFormat::MakeFloatStereo48k();
-    Microsoft::WRL::ComPtr<IMFMediaType> outputType;
-    hr = ::MFCreateMediaType(&outputType);
-    if (FAILED(hr) || !outputType) {
-        return false;
-    }
-    hr = ::MFInitMediaTypeFromWaveFormatEx(
-        outputType.Get(),
-        reinterpret_cast<const WAVEFORMATEX*>(&outWave),
-        sizeof(WAVEFORMATEXTENSIBLE));
-    if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Error, L"MFInitMediaTypeFromWaveFormatEx (output) failed", hr);
-        return false;
-    }
-    hr = m_transform->SetOutputType(0, outputType.Get(), 0);
-    if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Error, L"Resampler SetOutputType failed", hr);
-        return false;
-    }
     return true;
 }
 
@@ -142,84 +142,51 @@ bool AudioResampler::Process(
     uint32_t& outFrames) {
     outFrames = 0;
     outInterleavedStereo.clear();
-    if (!m_transform || inputBytes == nullptr || inputByteCount == 0 || inputFrames == 0) {
+    if (m_state == nullptr || !m_state->live || inputBytes == nullptr || inputByteCount == 0 || inputFrames == 0) {
         return false;
     }
-    if (m_inputBlockAlign == 0 || inputByteCount < inputFrames * m_inputBlockAlign) {
-        return false;
-    }
-
-    Microsoft::WRL::ComPtr<IMFSample> inputSample;
-    HRESULT hr = ::MFCreateSample(&inputSample);
-    if (FAILED(hr) || !inputSample) {
-        return false;
-    }
-    Microsoft::WRL::ComPtr<IMFMediaBuffer> inputBuffer;
-    hr = ::MFCreateMemoryBuffer(inputByteCount, &inputBuffer);
-    if (FAILED(hr) || !inputBuffer) {
-        return false;
-    }
-    BYTE* dest = nullptr;
-    hr = inputBuffer->Lock(&dest, nullptr, nullptr);
-    if (FAILED(hr) || dest == nullptr) {
-        return false;
-    }
-    std::memcpy(dest, inputBytes, inputByteCount);
-    inputBuffer->Unlock();
-    inputBuffer->SetCurrentLength(inputByteCount);
-    if (FAILED(inputSample->AddBuffer(inputBuffer.Get()))) {
+    if (inputByteCount < inputFrames * m_state->blockAlign) {
         return false;
     }
 
-    hr = m_transform->ProcessInput(0, inputSample.Get(), 0);
-    if (FAILED(hr)) {
-        return false;
+    ma_uint64 expected = 0;
+    if (ma_data_converter_get_expected_output_frame_count(&m_state->converter, inputFrames, &expected) != MA_SUCCESS
+        || expected == 0) {
+        expected = static_cast<ma_uint64>(inputFrames) + 256;
     }
+    expected += 64;
+    outInterleavedStereo.resize(static_cast<size_t>(expected) * AudioFormat::kChannels);
 
-    for (;;) {
-        Microsoft::WRL::ComPtr<IMFSample> outputSample;
-        Microsoft::WRL::ComPtr<IMFMediaBuffer> outputBuffer;
-        hr = ::MFCreateSample(&outputSample);
-        if (FAILED(hr) || !outputSample) {
+    const auto* cursor = static_cast<const std::byte*>(inputBytes);
+    ma_uint64 framesLeft = inputFrames;
+    size_t produced = 0;
+    while (framesLeft > 0) {
+        ma_uint64 inCount = framesLeft;
+        ma_uint64 outSpace = (outInterleavedStereo.size() / AudioFormat::kChannels) - produced;
+        if (outSpace == 0) {
+            outInterleavedStereo.resize(outInterleavedStereo.size() + static_cast<size_t>(AudioFormat::kChannels) * 1024);
+            outSpace = (outInterleavedStereo.size() / AudioFormat::kChannels) - produced;
+        }
+
+        const ma_result result = ma_data_converter_process_pcm_frames(
+            &m_state->converter,
+            cursor,
+            &inCount,
+            outInterleavedStereo.data() + produced * AudioFormat::kChannels,
+            &outSpace);
+        if (result != MA_SUCCESS) {
+            outInterleavedStereo.clear();
             return false;
         }
-        hr = ::MFCreateMemoryBuffer(m_outputBufferBytes, &outputBuffer);
-        if (FAILED(hr) || !outputBuffer) {
-            return false;
-        }
-        outputSample->AddBuffer(outputBuffer.Get());
-
-        MFT_OUTPUT_DATA_BUFFER outData{};
-        outData.pSample = outputSample.Get();
-        DWORD status = 0;
-        hr = m_transform->ProcessOutput(0, 1, &outData, &status);
-        if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+        if (inCount == 0 && outSpace == 0) {
             break;
         }
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        Microsoft::WRL::ComPtr<IMFMediaBuffer> resultBuffer;
-        if (FAILED(outputSample->ConvertToContiguousBuffer(&resultBuffer)) || !resultBuffer) {
-            return false;
-        }
-
-        BYTE* data = nullptr;
-        DWORD maxLen = 0;
-        DWORD curLen = 0;
-        if (FAILED(resultBuffer->Lock(&data, &maxLen, &curLen)) || data == nullptr) {
-            return false;
-        }
-
-        const uint32_t frames = curLen / (AudioFormat::kChannels * sizeof(float));
-        const size_t sampleCount = static_cast<size_t>(frames) * AudioFormat::kChannels;
-        const size_t oldSize = outInterleavedStereo.size();
-        outInterleavedStereo.resize(oldSize + sampleCount);
-        std::memcpy(outInterleavedStereo.data() + oldSize, data, sampleCount * sizeof(float));
-        outFrames += frames;
-        resultBuffer->Unlock();
+        cursor += static_cast<size_t>(inCount) * m_state->blockAlign;
+        framesLeft -= inCount;
+        produced += static_cast<size_t>(outSpace);
     }
 
+    outInterleavedStereo.resize(produced * AudioFormat::kChannels);
+    outFrames = static_cast<uint32_t>(produced);
     return true;
 }

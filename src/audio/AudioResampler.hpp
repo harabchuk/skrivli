@@ -1,15 +1,11 @@
 #pragma once
 
-#include <mfapi.h>
-#include <mftransform.h>
-#include <wrl/client.h>
-
 #include <cstdint>
+#include <memory>
 #include <vector>
 
-// Media Foundation Audio Resampler DSP wrapper. Converts device mix format
-// packets to 48 kHz stereo float. Setup once at stream start; no per-packet
-// allocation of the transform itself.
+// miniaudio data converter. Turns a device mix-format packet into 48 kHz
+// stereo float. Set up once at stream start.
 class AudioResampler {
 public:
     AudioResampler() = default;
@@ -31,13 +27,13 @@ public:
         std::vector<float>& outInterleavedStereo,
         uint32_t& outFrames);
 
-    bool IsReady() const { return m_transform != nullptr; }
+    bool IsReady() const { return m_state != nullptr; }
 
 private:
-    bool SetMediaTypes(const void* inputFormat);
+    struct State;
+    struct StateDeleter {
+        void operator()(State* state) const;
+    };
 
-    Microsoft::WRL::ComPtr<IMFTransform> m_transform;
-    uint32_t m_inputBlockAlign = 0;
-    uint32_t m_outputBufferBytes = 0;
-    bool m_mfStarted = false;
+    std::unique_ptr<State, StateDeleter> m_state;
 };

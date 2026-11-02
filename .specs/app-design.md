@@ -51,7 +51,7 @@ Housekeeping before feature work:
 | UI | WTL 10 + ATL (Win32), Common Controls v6 | Native, tiny, already in use |
 | Audio capture | WASAPI shared mode, event-driven (`IAudioClient` / `IAudioCaptureClient`) | Needed for both mic and loopback |
 | System audio | `AUDCLNT_STREAMFLAGS_LOOPBACK` on the default render endpoint | Standard way to capture "what you hear" |
-| Format conversion | `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM \| SRC_DEFAULT_QUALITY` → 48 kHz float | Lets Windows resample both devices to one internal format; fallback: Media Foundation Audio Resampler DSP |
+| Format conversion | `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM \| SRC_DEFAULT_QUALITY` → 48 kHz float | Lets Windows resample both devices to one internal format; fallback: miniaudio data converter |
 | Container | WAV (PCM 16-bit, 48 kHz, stereo) while recording; optional post-encode to M4A/AAC via Media Foundation `IMFSinkWriter` | WAV is simple and crash-tolerant; M4A is ~10× smaller |
 | Transcription | **whisper.cpp** (ggml, CPU), statically linked via `FetchContent` | Local, MIT, fast on CPU, quantized models |
 | Default model | `ggml-base-q5_1.bin` (~57 MB); offer `tiny`, `base`, `small` (q5) | Good speed/quality balance on laptops |
@@ -123,8 +123,8 @@ src/
     RecordingSession.{hpp,cpp}    # owns all of the above for one recording
     LevelMonitor.{hpp,cpp}        # idle mic/system peak metering (no disk I/O)
   transcription/
-    AudioFileReader.{hpp,cpp}     # WAV / M4A → float PCM (MF Source Reader for M4A)
-    Resampler.{hpp,cpp}           # 48k → 16k (FIR low-pass + decimate by 3), stereo → mono
+    AudioFileReader.{hpp,cpp}     # WAV via miniaudio; M4A via MF Source Reader → 48 kHz float
+    Resampler.{hpp,cpp}           # 48k stereo → 16k mono (miniaudio low-pass + linear resample)
     WhisperEngine.{hpp,cpp}       # thin wrapper over whisper.cpp
     ModelManager.{hpp,cpp}        # model discovery, download, checksum
     MarkdownFormatter.{hpp,cpp}
@@ -155,7 +155,7 @@ tests/
 
 ### 6.2 CaptureStream
 - `IAudioClient::Initialize(AUDCLNT_SHAREMODE_SHARED, EVENTCALLBACK | AUTOCONVERTPCM | SRC_DEFAULT_QUALITY [| LOOPBACK], 200 ms buffer, ..., &internalFormat)`, where `internalFormat` = **48 kHz, 2 ch, 32-bit float** (`WAVE_FORMAT_EXTENSIBLE`, `KSDATAFORMAT_SUBTYPE_IEEE_FLOAT`).
-  - If `AUTOCONVERTPCM` is rejected (older drivers/OS), initialize with `GetMixFormat()` and run the Media Foundation Audio Resampler DSP (`CLSID_CResamplerMediaObject`) inside the capture thread.
+  - If `AUTOCONVERTPCM` is rejected (older drivers/OS), initialize with `GetMixFormat()` and convert to 48 kHz stereo float with a miniaudio data converter inside the capture thread.
 - The loop waits on the event (with a 100 ms timeout), drains all packets via `GetBuffer` / `ReleaseBuffer`, and pushes frames + `u64QPCPosition` into the ring buffer.
 - `AUDCLNT_BUFFERFLAGS_SILENT` → push zeros. `AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY` → log it and let the mixer resync on the QPC timestamp.
 - `AUDCLNT_E_DEVICE_INVALIDATED` → stop the stream, notify the session, and reopen on the new default device. The gap is filled with silence, so the recording keeps going.
@@ -171,14 +171,14 @@ WASAPI loopback delivers **no packets** while nothing is playing, which would ma
 - Each source ring buffer stores `(qpcOfFirstFrame, frames)`. The mixer converts QPC to a timeline frame index. A gap larger than about 5 ms becomes inserted silence. Overlap from a duplicate or late packet is dropped.
 - The mixer emits 10 ms blocks (480 frames) once both sources have covered the block, **or** once the block is more than 150 ms behind "now" (the missing source is treated as silence). That bounds latency and survives a stalled device.
 - **Drift control**: mic and output devices run on different crystals. Track each buffer's fill level with a moving average. If it diverges by more than 20 ms, drop or duplicate one frame per correction step, spread out so it's inaudible for speech. A tiny-ratio resampler is a later improvement.
-- **Mixdown**: `out = clamp(micGain * mic + sysGain * sys)`. Mic is mono-summed and duplicated to both channels. Default gains: mic 1.0, system 0.8. A simple soft limiter (tanh above -1 dBFS) prevents clipping.
+- **Mixdown**: `out = clamp(micGain * mic + sysGain * sys)`. Mic is mono-summed (miniaudio channel converter) and duplicated to both channels; the sum uses `ma_mix_pcm_frames_f32`. Default gains: mic 1.0, system 0.8. A simple soft limiter (tanh above -1 dBFS) prevents clipping.
 - **Mic AGC** (optional, off by default): when enabled, replace the fixed mic gain with app-side automatic gain control in the mixer. Measure mic RMS over ~0.75 s, target speech around −18 dBFS, raise gain slowly and cut quickly, clamp to 0.5×–4×, ignore levels below −45 dBFS (noise gate), and interpolate gain across each 10 ms block to avoid pumping. This adjusts recording volume only — not the Windows mic input level. Driver “communications processing” remains a separate, inconsistent option.
 - Peak levels per source (and mixed) go into atomics for the UI meters. The effective mic gain (manual or AGC) is also published for the Record-tab readout.
 - Optional setting (off by default): also save `*.mic.wav` / `*.system.wav` stems. Useful later for diarization ("You" vs. "Others").
 
 ### 6.5 Writing files
 - Filename: `<folder>\MeetingBuddy_2026-11-01_13-18-00.wav` (local time; collisions get a `-2` suffix).
-- While recording, write to `*.wav.partial`. `WavWriter` writes the RIFF header up front and rewrites the size fields every 2 s plus on close. On stop, flush, close, and rename to `.wav`.
+- While recording, write to `*.wav.partial`. `WavWriter` uses the miniaudio WAV encoder (float in, PCM 16-bit out) and rewrites the RIFF size fields every 2 s plus on close. On stop, flush, close, and rename to `.wav`.
 - On startup, `RecordingLibrary` finds leftover `.partial` files (from a crash), fixes their headers, and renames them to `*.recovered.wav`.
 - Check free disk space before start and every 30 s (`GetDiskFreeSpaceExW`); stop gracefully below 200 MB and notify.
 - Optional post-step: "Compress to M4A (AAC 128 kbps)" via `IMFSinkWriter` on a worker, then delete the WAV if the user opts in.
@@ -204,8 +204,8 @@ WASAPI loopback delivers **no packets** while nothing is playing, which would ma
   - Optionally enable whisper.cpp's built-in VAD (Silero model) to skip silence and reduce hallucinations on long quiet stretches.
 
 ### 7.2 Input preparation
-- `AudioFileReader` reads WAV directly, or M4A via `IMFSourceReader` to float PCM.
-- `Resampler`: stereo to mono (average), then 48 kHz to **16 kHz** with a windowed-sinc FIR low-pass and decimation by 3 (an exact integer ratio, so it's simple and good quality). Output is `std::vector<float>`.
+- `AudioFileReader` decodes WAV (and FLAC/MP3) with miniaudio to 48 kHz stereo float. M4A/AAC still goes through `IMFSourceReader`, then a miniaudio data converter when the decoded rate or channel count is not already 48 kHz stereo.
+- `Resampler`: stereo to mono (average), then 48 kHz to **16 kHz** with miniaudio's Butterworth low-pass (order 8) and linear resampler. Output is `std::vector<float>`.
 - For long recordings (over 1 h), stream in 30-minute chunks with a small overlap to keep memory bounded, and offset the timestamps.
 
 ### 7.3 Models

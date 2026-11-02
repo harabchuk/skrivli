@@ -16,9 +16,9 @@ Read the relevant section of the spec before implementing a feature. If you chan
 | Language | C++23 (MSVC, `/W4 /permissive- /utf-8 /Zc:preprocessor`), Unicode only (`UNICODE`, `_UNICODE`) |
 | UI | WTL 10 on ATL/Win32, Common Controls v6, RichEdit 4.1 (`MSFTEDIT_CLASS`) |
 | Audio | WASAPI shared mode, event-driven; mic = `eCapture`, system = loopback on `eRender` |
-| Media | Media Foundation (resampler DSP fallback, M4A encode/decode) |
+| Media | miniaudio 0.11 (WAV encode/decode, resample, mix); Media Foundation for M4A encode/decode |
 | Transcription | whisper.cpp (ggml, CPU, static) — default model `ggml-base-q5_1.bin` |
-| Build | CMake ≥ 3.24, `FetchContent` for WTL, Glaze, whisper.cpp, GoogleTest |
+| Build | CMake ≥ 3.24, `FetchContent` for WTL, Glaze, whisper.cpp, miniaudio, GoogleTest |
 | Generator | Visual Studio 18 2026 x64 (`CMakePresets.json` preset `default`), output in `build/` |
 | Target OS | Windows 10 1903+ x64 |
 
@@ -115,7 +115,7 @@ lock-free `RingBuffer`. No allocations, locks, logging, or I/O in the hot path.
 
 - Internal format: **48 kHz, stereo, 32-bit float**. Request it with
 `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY`. If that fails,
-use `GetMixFormat()` + the MF Audio Resampler DSP.
+use `GetMixFormat()` + a miniaudio data converter.
 - Loopback delivers no packets during silence. Always run `SilentRenderKeepAlive` (feeds zeros to the
 same render device), **and** fill gaps in the mixer from `u64QPCPosition`.
 - Mixer: align by QPC; a gap over 5 ms becomes silence; emit a block when both sources cover it or it is
@@ -141,7 +141,7 @@ Default recordings folder: `%USERPROFILE%\Documents\MeetingBuddy`.
 
 - **Optional**: never transcribe unless the user clicks *Transcribe* or enables auto-transcribe
 (default off).
-- Input: decode → mono → 16 kHz (FIR low-pass + decimate by 3) → `std::vector<float>`. Chunk recordings
+- Input: decode → mono → 16 kHz (miniaudio low-pass + linear resample) → `std::vector<float>`. Chunk recordings
 longer than 1 h into 30 min pieces and offset the timestamps.
 - whisper.cpp: `whisper_init_from_file_with_params`, `whisper_full_default_params(WHISPER_SAMPLING_GREEDY)`,
 `language="auto"`, `n_threads = hw-1`, use `progress_callback` / `abort_callback`, and read segments with

@@ -47,6 +47,27 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(whisper)
 
+# miniaudio 0.11.22 — WAV encode/decode, resampling, channel conversion, and mixing.
+# Device I/O stays on WASAPI in this app. Keep these options in sync with src/audio/MiniAudio.hpp.
+set(MINIAUDIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(MINIAUDIO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_EXTRA_NODES ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_LIBVORBIS ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_LIBOPUS ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_DEVICEIO ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_THREADING ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_GENERATION ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_RESOURCE_MANAGER ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_NODE_GRAPH ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_ENGINE ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        0.11.22
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(miniaudio)
+
 set(MEETINGBUDDY_AUDIO_SOURCES
     src/audio/DeviceManager.cpp
     src/audio/CaptureStream.cpp
@@ -115,6 +136,7 @@ target_compile_definitions(MeetingBuddy PRIVATE
 
 target_link_libraries(MeetingBuddy PRIVATE
     whisper
+    miniaudio
     glaze::glaze
     ole32
     uuid
@@ -186,6 +208,7 @@ if(MEETINGBUDDY_BUILD_TESTS)
 
     target_link_libraries(MeetingBuddyTests PRIVATE
         GTest::gtest_main
+        miniaudio
         glaze::glaze
         ole32
         uuid

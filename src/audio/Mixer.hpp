@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 class Mixer {
@@ -24,6 +25,10 @@ public:
     static constexpr float kAgcReleasePerBlock = 0.015f; // slow raise when quiet
 
     Mixer() = default;
+    ~Mixer();
+
+    Mixer(const Mixer&) = delete;
+    Mixer& operator=(const Mixer&) = delete;
 
     void Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain, bool micAgc = false);
 
@@ -78,6 +83,12 @@ private:
     bool BlockReady(int64_t nowFrame) const;
     void ReadSourceBlock(SourceBuffer& source, int64_t blockStart, float* dest);
     void TrimSource(SourceBuffer& source, int64_t keepFrom);
+    struct Downmix;
+    struct DownmixDeleter {
+        void operator()(Downmix* downmix) const;
+    };
+
+    void EnsureDownmix();
     void ApplyDriftCorrection();
     void UpdateAgc(float blockRms);
     float CurrentMicGain() const;
@@ -95,6 +106,7 @@ private:
 
     SourceBuffer m_mic;
     SourceBuffer m_sys;
+    std::unique_ptr<Downmix, DownmixDeleter> m_downmix;
 
     std::vector<float> m_packetScratch;
 

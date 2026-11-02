@@ -412,7 +412,7 @@ Replace the placeholder page:
 **Spec:** §6.2, §13.
 
 - Confirm silent packets and discontinuities already take the M2/M3 paths; add a test or a logged session note where the code cannot be unit-tested without hardware.
-- When `AUTOCONVERTPCM` fails, initialize with `GetMixFormat()` and convert to 48 kHz stereo float with the Media Foundation Audio Resampler DSP (`CLSID_CResamplerMediaObject`) **before** the ring push. The ring format does not change. Link `mfplat` / `mfuuid` when this lands.
+- When `AUTOCONVERTPCM` fails, initialize with `GetMixFormat()` and convert to 48 kHz stereo float with a miniaudio data converter **before** the ring push. The ring format does not change.
 - Resampler setup happens at stream start, not per packet on a fresh allocation.
 
 ### M4.3 Missing devices, exclusive mode, privacy
@@ -562,15 +562,15 @@ No UI polish in this milestone beyond enough of a control to enqueue a job and s
 
 `src/transcription/AudioFileReader` decodes a recording to 48 kHz stereo float.
 
-- WAV: read the file the app writes (and a standard PCM WAV).
-- M4A: `IMFSourceReader` (`mfreadwrite`). M4A files are optional until M8, but the reader can land now.
+- WAV: miniaudio decoder (`ma_decoder`), including the PCM WAV the app writes.
+- M4A: `IMFSourceReader` (`mfreadwrite`), then miniaudio if the decoded stream is not already 48 kHz stereo. M4A files are optional until M8, but the reader can land now.
 - Report duration. Do not resample to 16 kHz here.
 
 ### M6.3 Resampler
 
 **Spec:** §7.2, §11.
 
-`src/transcription/Resampler`: average stereo to mono, then 48 kHz → 16 kHz with a windowed-sinc FIR low-pass and decimation by 3. Output `std::vector<float>`.
+`src/transcription/Resampler`: average stereo to mono, then 48 kHz → 16 kHz with miniaudio's low-pass and linear resampler. Output `std::vector<float>`.
 
 **Tests:** a 1 kHz sine keeps frequency and amplitude; a 10 kHz tone is attenuated. No whisper dependency.
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -45,15 +46,26 @@ public:
     static bool IsWritableDirectory(const std::wstring& folder);
 
 private:
-    bool WriteHeader();
+    friend struct WavEncoderCallbacks;
+
+    struct WavEncoder;
+    struct WavEncoderDeleter {
+        void operator()(WavEncoder* encoder) const;
+    };
+
     bool SeekAndWriteSizes();
+    bool WriteBytes(const void* data, size_t bytes, size_t& bytesWritten);
+    bool SeekFile(int64_t offset, int origin);
+    void CloseEncoder();
     static std::wstring MakeBasePath(const std::wstring& folder);
     static std::wstring RecoveredPathFromPartial(const std::wstring& partialPath);
 
+    std::unique_ptr<WavEncoder, WavEncoderDeleter> m_encoder;
     void* m_file = nullptr; // HANDLE
     std::wstring m_folder;
     std::wstring m_partialPath;
     std::wstring m_finalPath;
     uint64_t m_framesWritten = 0;
     uint64_t m_bytesSincePatch = 0;
+    std::vector<int16_t> m_pcmScratch;
 };

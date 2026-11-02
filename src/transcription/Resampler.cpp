@@ -1,36 +1,48 @@
 #include "transcription/Resampler.hpp"
 
-#include <cmath>
+#include "audio/MiniAudio.hpp"
+
 #include <cstddef>
+#include <vector>
 
 namespace {
 
-constexpr int kTaps = 63; // odd length
-constexpr double kPi = 3.14159265358979323846;
+constexpr uint32_t kInputRate = 48000;
+constexpr uint32_t kOutputRate = 16000;
+constexpr uint32_t kLpfOrder = 8;
 
-// Low-pass cutoff ≈ 0.9 * 8 kHz / 48 kHz so the 16 kHz Nyquist is preserved.
-double Sinc(double x) {
-    if (std::abs(x) < 1e-8) {
-        return 1.0;
+bool PushFrames(
+    ma_data_converter& converter,
+    const float* input,
+    ma_uint64 inputChannels,
+    ma_uint64& framesLeft,
+    std::vector<float>& out,
+    size_t& produced) {
+    const float* cursor = input;
+    while (framesLeft > 0) {
+        ma_uint64 inCount = framesLeft;
+        ma_uint64 outSpace = out.size() - produced;
+        if (outSpace == 0) {
+            out.resize(produced + static_cast<size_t>(framesLeft) + 64);
+            outSpace = out.size() - produced;
+        }
+        const ma_result result = ma_data_converter_process_pcm_frames(
+            &converter,
+            cursor,
+            &inCount,
+            out.data() + produced,
+            &outSpace);
+        if (result != MA_SUCCESS) {
+            return false;
+        }
+        if (inCount == 0 && outSpace == 0) {
+            break;
+        }
+        cursor += static_cast<size_t>(inCount) * static_cast<size_t>(inputChannels);
+        framesLeft -= inCount;
+        produced += static_cast<size_t>(outSpace);
     }
-    return std::sin(kPi * x) / (kPi * x);
-}
-
-void BuildKernel(float kernel[kTaps]) {
-    constexpr double fc = 0.15; // cycles per input sample
-    const int mid = kTaps / 2;
-    double sum = 0.0;
-    for (int i = 0; i < kTaps; ++i) {
-        const double n = static_cast<double>(i - mid);
-        const double sinc = 2.0 * fc * Sinc(2.0 * fc * n);
-        const double window = 0.54 - 0.46 * std::cos(2.0 * kPi * static_cast<double>(i) / static_cast<double>(kTaps - 1));
-        const double v = sinc * window;
-        kernel[i] = static_cast<float>(v);
-        sum += v;
-    }
-    for (int i = 0; i < kTaps; ++i) {
-        kernel[i] = static_cast<float>(kernel[i] / sum);
-    }
+    return true;
 }
 
 }  // namespace
@@ -40,29 +52,56 @@ std::vector<float> Resampler::Stereo48kToMono16k(const float* interleavedStereo,
         return {};
     }
 
-    std::vector<float> mono(frameCount);
-    for (size_t i = 0; i < frameCount; ++i) {
-        mono[i] = 0.5f * (interleavedStereo[i * 2] + interleavedStereo[i * 2 + 1]);
+    ma_data_converter_config config = ma_data_converter_config_init(
+        ma_format_f32,
+        ma_format_f32,
+        2,
+        1,
+        kInputRate,
+        kOutputRate);
+    config.channelMixMode = ma_channel_mix_mode_rectangular;
+    config.ditherMode = ma_dither_mode_none;
+    // Order 8 is the highest Butterworth miniaudio will build. It is what keeps a
+    // 10 kHz tone under the 16 kHz Nyquist instead of aliasing through linear interpolation.
+    config.resampling.linear.lpfOrder = kLpfOrder;
+
+    ma_data_converter converter{};
+    if (ma_data_converter_init(&config, nullptr, &converter) != MA_SUCCESS) {
+        return {};
     }
 
-    float kernel[kTaps]{};
-    BuildKernel(kernel);
-    const int mid = kTaps / 2;
+    const size_t target = frameCount / 3;
+    ma_uint64 expected = 0;
+    if (ma_data_converter_get_expected_output_frame_count(&converter, frameCount, &expected) != MA_SUCCESS) {
+        expected = static_cast<ma_uint64>(target);
+    }
+    const ma_uint64 latency = ma_data_converter_get_input_latency(&converter);
 
-    const size_t outCount = frameCount / 3;
-    std::vector<float> out(outCount);
-    for (size_t o = 0; o < outCount; ++o) {
-        const size_t center = o * 3;
-        double acc = 0.0;
-        for (int t = 0; t < kTaps; ++t) {
-            const int64_t idx = static_cast<int64_t>(center) + (t - mid);
-            float sample = 0.0f;
-            if (idx >= 0 && static_cast<size_t>(idx) < frameCount) {
-                sample = mono[static_cast<size_t>(idx)];
-            }
-            acc += static_cast<double>(sample) * static_cast<double>(kernel[t]);
+    std::vector<float> out(static_cast<size_t>(expected + latency + 64));
+    ma_uint64 framesLeft = frameCount;
+    size_t produced = 0;
+    if (!PushFrames(converter, interleavedStereo, 2, framesLeft, out, produced)) {
+        ma_data_converter_uninit(&converter, nullptr);
+        return {};
+    }
+
+    // Pull the filter tail so a short clip is not missing its last output frames.
+    if (latency > 0) {
+        std::vector<float> silence(static_cast<size_t>(latency) * 2, 0.0f);
+        ma_uint64 flushFrames = latency;
+        if (!PushFrames(converter, silence.data(), 2, flushFrames, out, produced)) {
+            ma_data_converter_uninit(&converter, nullptr);
+            return {};
         }
-        out[o] = static_cast<float>(acc);
     }
+
+    ma_data_converter_uninit(&converter, nullptr);
+
+    if (produced > target) {
+        const size_t lead = produced - target;
+        out.erase(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(lead));
+        produced = target;
+    }
+    out.resize(produced);
     return out;
 }

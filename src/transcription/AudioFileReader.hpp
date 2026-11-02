@@ -13,6 +13,7 @@ struct DecodedAudio {
 
 class AudioFileReader {
 public:
-    // Decodes WAV (PCM) or M4A to 48 kHz stereo float. Does not resample to 16 kHz.
+    // Decodes WAV (miniaudio) or M4A (Media Foundation) to 48 kHz stereo float.
+    // Does not resample to 16 kHz.
     static bool Read(const std::wstring& path, DecodedAudio& out, std::wstring& error);
 };

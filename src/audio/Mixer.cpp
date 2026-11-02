@@ -1,7 +1,46 @@
 #include "audio/Mixer.hpp"
 
+#include "audio/MiniAudio.hpp"
+
 #include <algorithm>
 #include <cmath>
+
+struct Mixer::Downmix {
+    ma_channel_converter converter{};
+    bool live = false;
+};
+
+void Mixer::DownmixDeleter::operator()(Downmix* downmix) const {
+    if (downmix == nullptr) {
+        return;
+    }
+    if (downmix->live) {
+        ma_channel_converter_uninit(&downmix->converter, nullptr);
+        downmix->live = false;
+    }
+    delete downmix;
+}
+
+Mixer::~Mixer() = default;
+
+void Mixer::EnsureDownmix() {
+    if (m_downmix != nullptr && m_downmix->live) {
+        return;
+    }
+    auto downmix = std::unique_ptr<Downmix, DownmixDeleter>(new Downmix());
+    const ma_channel_converter_config config = ma_channel_converter_config_init(
+        ma_format_f32,
+        AudioFormat::kChannels,
+        nullptr,
+        1,
+        nullptr,
+        ma_channel_mix_mode_rectangular);
+    if (ma_channel_converter_init(&config, nullptr, &downmix->converter) != MA_SUCCESS) {
+        return;
+    }
+    downmix->live = true;
+    m_downmix = std::move(downmix);
+}
 
 void Mixer::Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain, bool micAgc) {
     m_startQpc = startQpc;
@@ -16,6 +55,7 @@ void Mixer::Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float
     m_mic.Clear();
     m_sys.Clear();
     m_packetScratch.resize(4096 * AudioFormat::kChannels);
+    EnsureDownmix();
     m_peakMic.store(0.0f, std::memory_order_relaxed);
     m_peakSys.store(0.0f, std::memory_order_relaxed);
     m_peakMix.store(0.0f, std::memory_order_relaxed);
@@ -170,7 +210,7 @@ bool Mixer::BlockReady(int64_t nowFrame) const {
 
 void Mixer::ReadSourceBlock(SourceBuffer& source, int64_t blockStart, float* dest) {
     const int64_t blockEnd = blockStart + AudioFormat::kBlockFrames;
-    std::fill(dest, dest + AudioFormat::kBlockFrames * AudioFormat::kChannels, 0.0f);
+    ma_silence_pcm_frames(dest, AudioFormat::kBlockFrames, ma_format_f32, AudioFormat::kChannels);
     if (!source.hasData) {
         return;
     }
@@ -183,11 +223,13 @@ void Mixer::ReadSourceBlock(SourceBuffer& source, int64_t blockStart, float* des
 
     const int64_t destOffset = copyStart - blockStart;
     const int64_t srcOffset = copyStart - source.startFrame;
-    const size_t sampleCount = static_cast<size_t>(copyEnd - copyStart) * AudioFormat::kChannels;
-    std::copy(
+    const size_t frameCount = static_cast<size_t>(copyEnd - copyStart);
+    ma_copy_pcm_frames(
+        dest + static_cast<size_t>(destOffset) * AudioFormat::kChannels,
         source.samples.data() + static_cast<size_t>(srcOffset) * AudioFormat::kChannels,
-        source.samples.data() + static_cast<size_t>(srcOffset) * AudioFormat::kChannels + sampleCount,
-        dest + static_cast<size_t>(destOffset) * AudioFormat::kChannels);
+        frameCount,
+        ma_format_f32,
+        AudioFormat::kChannels);
 }
 
 void Mixer::TrimSource(SourceBuffer& source, int64_t keepFrom) {
@@ -302,17 +344,31 @@ bool Mixer::Process(
     ReadSourceBlock(m_mic, m_nextBlockFrame, micBlock);
     ReadSourceBlock(m_sys, m_nextBlockFrame, sysBlock);
 
+    float micMono[AudioFormat::kBlockFrames];
+    const bool downmixed = m_downmix != nullptr && m_downmix->live
+        && ma_channel_converter_process_pcm_frames(
+               &m_downmix->converter,
+               micMono,
+               micBlock,
+               AudioFormat::kBlockFrames)
+            == MA_SUCCESS;
+    if (!downmixed) {
+        for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
+            micMono[i] = 0.5f * (micBlock[i * 2] + micBlock[i * 2 + 1]);
+        }
+    }
+
     float micPeak = 0.0f;
     float sysPeak = 0.0f;
     float mixPeak = 0.0f;
     double micPower = 0.0;
 
     for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
-        const float micL = micBlock[i * 2];
-        const float micR = micBlock[i * 2 + 1];
-        const float micMono = 0.5f * (micL + micR);
-        micPeak = (std::max)(micPeak, std::fabs(micMono));
-        micPower += static_cast<double>(micMono) * static_cast<double>(micMono);
+        micPeak = (std::max)(micPeak, std::fabs(micMono[i]));
+        micPower += static_cast<double>(micMono[i]) * static_cast<double>(micMono[i]);
+        const float sysL = sysBlock[i * 2];
+        const float sysR = sysBlock[i * 2 + 1];
+        sysPeak = (std::max)(sysPeak, (std::max)(std::fabs(sysL), std::fabs(sysR)));
     }
 
     if (m_micAgc) {
@@ -323,30 +379,35 @@ bool Mixer::Process(
     const float gainEnd = CurrentMicGain();
     m_effectiveMicGain.store(gainEnd, std::memory_order_release);
 
+    float micScaled[AudioFormat::kBlockFrames * AudioFormat::kChannels];
     for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
-        const float micL = micBlock[i * 2];
-        const float micR = micBlock[i * 2 + 1];
-        const float micMono = 0.5f * (micL + micR);
-        const float sysL = sysBlock[i * 2];
-        const float sysR = sysBlock[i * 2 + 1];
-
-        sysPeak = (std::max)(sysPeak, (std::max)(std::fabs(sysL), std::fabs(sysR)));
-
-        if (outMicStem != nullptr) {
-            outMicStem[i * 2] = SoftLimit(micMono);
-            outMicStem[i * 2 + 1] = SoftLimit(micMono);
-        }
-        if (outSysStem != nullptr) {
-            outSysStem[i * 2] = SoftLimit(sysL);
-            outSysStem[i * 2 + 1] = SoftLimit(sysR);
-        }
-
         const float t = static_cast<float>(i) / static_cast<float>(AudioFormat::kBlockFrames);
         const float micGain = gainStart + (gainEnd - gainStart) * t;
-        float outL = micGain * micMono + m_systemGain * sysL;
-        float outR = micGain * micMono + m_systemGain * sysR;
-        outL = SoftLimit(outL);
-        outR = SoftLimit(outR);
+        const float scaled = micGain * micMono[i];
+        micScaled[i * 2] = scaled;
+        micScaled[i * 2 + 1] = scaled;
+
+        if (outMicStem != nullptr) {
+            outMicStem[i * 2] = SoftLimit(micMono[i]);
+            outMicStem[i * 2 + 1] = SoftLimit(micMono[i]);
+        }
+        if (outSysStem != nullptr) {
+            outSysStem[i * 2] = SoftLimit(sysBlock[i * 2]);
+            outSysStem[i * 2 + 1] = SoftLimit(sysBlock[i * 2 + 1]);
+        }
+    }
+
+    ma_silence_pcm_frames(outInterleavedStereo, AudioFormat::kBlockFrames, ma_format_f32, AudioFormat::kChannels);
+    ma_mix_pcm_frames_f32(outInterleavedStereo, micScaled, AudioFormat::kBlockFrames, AudioFormat::kChannels, 1.0f);
+    ma_mix_pcm_frames_f32(
+        outInterleavedStereo,
+        sysBlock,
+        AudioFormat::kBlockFrames,
+        AudioFormat::kChannels,
+        m_systemGain);
+    for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
+        const float outL = SoftLimit(outInterleavedStereo[i * 2]);
+        const float outR = SoftLimit(outInterleavedStereo[i * 2 + 1]);
         outInterleavedStereo[i * 2] = outL;
         outInterleavedStereo[i * 2 + 1] = outR;
         mixPeak = (std::max)(mixPeak, (std::max)(std::fabs(outL), std::fabs(outR)));

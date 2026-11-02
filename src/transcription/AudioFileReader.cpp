@@ -1,7 +1,6 @@
 #include "transcription/AudioFileReader.hpp"
 
-#include "storage/RecordingSidecar.hpp"
-#include "util/Log.hpp"
+#include "audio/MiniAudio.hpp"
 
 #include <mfapi.h>
 #include <mfidl.h>
@@ -9,10 +8,8 @@
 #include <wrl/client.h>
 
 #include <algorithm>
-#include <cmath>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <vector>
 
 namespace {
@@ -25,143 +22,151 @@ bool EndsWithIgnoreCase(const std::wstring& value, const wchar_t* suffix) {
     return _wcsicmp(value.c_str() + (value.size() - len), suffix) == 0;
 }
 
-void ResampleLinearStereo(
-    const std::vector<float>& in,
-    uint32_t inRate,
-    uint16_t inChannels,
-    std::vector<float>& out48Stereo) {
-    if (inRate == 0 || inChannels == 0 || in.empty()) {
-        out48Stereo.clear();
-        return;
+bool ConvertToStereo48k(
+    const float* interleaved,
+    size_t frameCount,
+    uint32_t sampleRate,
+    uint32_t channels,
+    std::vector<float>& outStereo,
+    std::wstring& error) {
+    outStereo.clear();
+    if (frameCount == 0 || channels == 0 || sampleRate == 0) {
+        return true;
+    }
+    if (channels > MA_MAX_CHANNELS) {
+        error = L"Audio file has too many channels.";
+        return false;
+    }
+    if (sampleRate == 48000 && channels == 2) {
+        outStereo.assign(interleaved, interleaved + frameCount * 2);
+        return true;
     }
 
-    const size_t inFrames = in.size() / inChannels;
-    if (inFrames == 0) {
-        out48Stereo.clear();
-        return;
+    ma_data_converter_config config = ma_data_converter_config_init(
+        ma_format_f32,
+        ma_format_f32,
+        channels,
+        2,
+        sampleRate,
+        48000);
+    config.ditherMode = ma_dither_mode_none;
+    config.resampling.linear.lpfOrder = 8;
+
+    ma_data_converter converter{};
+    if (ma_data_converter_init(&config, nullptr, &converter) != MA_SUCCESS) {
+        error = L"Could not resample decoded audio.";
+        return false;
     }
 
-    if (inRate == 48000 && inChannels == 2) {
-        out48Stereo = in;
-        return;
+    ma_uint64 expected = 0;
+    if (ma_data_converter_get_expected_output_frame_count(&converter, frameCount, &expected) != MA_SUCCESS) {
+        expected = frameCount;
     }
+    const ma_uint64 latency = ma_data_converter_get_input_latency(&converter);
+    outStereo.resize(static_cast<size_t>(expected + latency + 64) * 2);
 
-    const double outFramesD = static_cast<double>(inFrames) * 48000.0 / static_cast<double>(inRate);
-    const size_t outFrames = static_cast<size_t>((std::max)(1.0, static_cast<double>(std::llround(outFramesD))));
-    out48Stereo.assign(outFrames * 2, 0.0f);
-
-    for (size_t of = 0; of < outFrames; ++of) {
-        const double src = static_cast<double>(of) * static_cast<double>(inRate) / 48000.0;
-        const size_t i0 = static_cast<size_t>(src);
-        const size_t i1 = (std::min)(i0 + 1, inFrames - 1);
-        const float t = static_cast<float>(src - static_cast<double>(i0));
-
-        float l0 = 0.0f;
-        float r0 = 0.0f;
-        float l1 = 0.0f;
-        float r1 = 0.0f;
-        if (inChannels == 1) {
-            l0 = r0 = in[i0];
-            l1 = r1 = in[i1];
-        } else {
-            l0 = in[i0 * inChannels];
-            r0 = in[i0 * inChannels + 1];
-            l1 = in[i1 * inChannels];
-            r1 = in[i1 * inChannels + 1];
+    ma_uint64 framesLeft = frameCount;
+    size_t produced = 0;
+    const float* cursor = interleaved;
+    while (framesLeft > 0) {
+        ma_uint64 inCount = framesLeft;
+        ma_uint64 outSpace = (outStereo.size() / 2) - produced;
+        if (outSpace == 0) {
+            outStereo.resize(outStereo.size() + 4096);
+            outSpace = (outStereo.size() / 2) - produced;
         }
-        out48Stereo[of * 2] = l0 + (l1 - l0) * t;
-        out48Stereo[of * 2 + 1] = r0 + (r1 - r0) * t;
+        const ma_result result = ma_data_converter_process_pcm_frames(
+            &converter,
+            cursor,
+            &inCount,
+            outStereo.data() + produced * 2,
+            &outSpace);
+        if (result != MA_SUCCESS) {
+            ma_data_converter_uninit(&converter, nullptr);
+            error = L"Could not resample decoded audio.";
+            outStereo.clear();
+            return false;
+        }
+        if (inCount == 0 && outSpace == 0) {
+            break;
+        }
+        cursor += static_cast<size_t>(inCount) * channels;
+        framesLeft -= inCount;
+        produced += static_cast<size_t>(outSpace);
     }
+
+    if (latency > 0) {
+        std::vector<float> silence(static_cast<size_t>(latency) * channels, 0.0f);
+        ma_uint64 flushFrames = latency;
+        const float* silenceCursor = silence.data();
+        while (flushFrames > 0) {
+            ma_uint64 inCount = flushFrames;
+            ma_uint64 outSpace = (outStereo.size() / 2) - produced;
+            if (outSpace == 0) {
+                outStereo.resize(outStereo.size() + 4096);
+                outSpace = (outStereo.size() / 2) - produced;
+            }
+            const ma_result result = ma_data_converter_process_pcm_frames(
+                &converter,
+                silenceCursor,
+                &inCount,
+                outStereo.data() + produced * 2,
+                &outSpace);
+            if (result != MA_SUCCESS || (inCount == 0 && outSpace == 0)) {
+                break;
+            }
+            silenceCursor += static_cast<size_t>(inCount) * channels;
+            flushFrames -= inCount;
+            produced += static_cast<size_t>(outSpace);
+        }
+    }
+
+    ma_data_converter_uninit(&converter, nullptr);
+    outStereo.resize(produced * 2);
+    return true;
 }
 
-bool ReadWavFile(const std::wstring& path, DecodedAudio& out, std::wstring& error) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        error = L"Could not open WAV file.";
-        return false;
-    }
-
-    file.seekg(0, std::ios::end);
-    const std::streamoff size = file.tellg();
-    if (size < 44) {
-        error = L"WAV file is too small.";
-        return false;
-    }
-    file.seekg(0, std::ios::beg);
-
-    std::vector<char> bytes(static_cast<size_t>(size));
-    file.read(bytes.data(), size);
-    if (!file) {
-        error = L"Failed to read WAV file.";
-        return false;
-    }
-
-    if (std::memcmp(bytes.data(), "RIFF", 4) != 0 || std::memcmp(bytes.data() + 8, "WAVE", 4) != 0) {
-        error = L"Not a RIFF/WAVE file.";
-        return false;
-    }
-
-    uint16_t audioFormat = 0;
-    uint16_t channels = 0;
-    uint32_t sampleRate = 0;
-    uint16_t bitsPerSample = 0;
-    const char* dataPtr = nullptr;
-    uint32_t dataSize = 0;
-
-    size_t offset = 12;
-    while (offset + 8 <= bytes.size()) {
-        const char* chunkId = bytes.data() + offset;
-        uint32_t chunkSize = 0;
-        std::memcpy(&chunkSize, bytes.data() + offset + 4, 4);
-        const size_t chunkData = offset + 8;
-        if (chunkData + chunkSize > bytes.size()) {
-            break;
-        }
-
-        if (std::memcmp(chunkId, "fmt ", 4) == 0 && chunkSize >= 16) {
-            std::memcpy(&audioFormat, bytes.data() + chunkData, 2);
-            std::memcpy(&channels, bytes.data() + chunkData + 2, 2);
-            std::memcpy(&sampleRate, bytes.data() + chunkData + 4, 4);
-            std::memcpy(&bitsPerSample, bytes.data() + chunkData + 14, 2);
-        } else if (std::memcmp(chunkId, "data", 4) == 0) {
-            dataPtr = bytes.data() + chunkData;
-            dataSize = chunkSize;
-            break;
-        }
-
-        offset = chunkData + chunkSize + (chunkSize & 1u);
-    }
-
-    if (dataPtr == nullptr || channels == 0 || sampleRate == 0 || bitsPerSample == 0) {
-        error = L"WAV is missing fmt/data chunks.";
-        return false;
-    }
-
-    std::vector<float> interleaved;
-    if (audioFormat == 1 && bitsPerSample == 16) {
-        const size_t sampleCount = dataSize / 2;
-        interleaved.resize(sampleCount);
-        for (size_t i = 0; i < sampleCount; ++i) {
-            int16_t sample = 0;
-            std::memcpy(&sample, dataPtr + i * 2, 2);
-            interleaved[i] = static_cast<float>(sample) / 32768.0f;
-        }
-    } else if (audioFormat == 3 && bitsPerSample == 32) {
-        const size_t sampleCount = dataSize / 4;
-        interleaved.resize(sampleCount);
-        std::memcpy(interleaved.data(), dataPtr, sampleCount * 4);
-    } else {
-        error = L"Unsupported WAV format (need PCM16 or float32).";
-        return false;
-    }
-
-    const size_t frames = interleaved.size() / channels;
-    out.durationSeconds = static_cast<double>(frames) / static_cast<double>(sampleRate);
+void FinishDecoded(DecodedAudio& out) {
     out.sampleRate = 48000;
     out.channels = 2;
-    ResampleLinearStereo(interleaved, sampleRate, channels, out.interleavedStereo);
-    out.durationSeconds =
-        static_cast<double>(out.interleavedStereo.size() / 2) / 48000.0;
+    out.durationSeconds = static_cast<double>(out.interleavedStereo.size() / 2) / 48000.0;
+}
+
+bool ReadWithMiniaudio(const std::wstring& path, DecodedAudio& out, std::wstring& error) {
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 2, 48000);
+    config.ditherMode = ma_dither_mode_none;
+    config.resampling.linear.lpfOrder = 8;
+
+    ma_decoder decoder{};
+    if (ma_decoder_init_file_w(path.c_str(), &config, &decoder) != MA_SUCCESS) {
+        error = L"Could not open audio file.";
+        return false;
+    }
+
+    constexpr ma_uint64 kChunkFrames = 48000;
+    std::vector<float> chunk(static_cast<size_t>(kChunkFrames) * 2);
+    ma_uint64 total = 0;
+    for (;;) {
+        ma_uint64 framesRead = 0;
+        const ma_result result = ma_decoder_read_pcm_frames(&decoder, chunk.data(), kChunkFrames, &framesRead);
+        if (framesRead > 0) {
+            const size_t samples = static_cast<size_t>(framesRead) * 2;
+            out.interleavedStereo.resize(static_cast<size_t>(total) * 2 + samples);
+            std::memcpy(out.interleavedStereo.data() + static_cast<size_t>(total) * 2, chunk.data(), samples * sizeof(float));
+            total += framesRead;
+        }
+        if (framesRead == 0 || framesRead < kChunkFrames || result == MA_AT_END) {
+            if (result != MA_SUCCESS && result != MA_AT_END && framesRead == 0 && total == 0) {
+                ma_decoder_uninit(&decoder);
+                error = L"Failed to decode audio.";
+                return false;
+            }
+            break;
+        }
+    }
+
+    ma_decoder_uninit(&decoder);
+    FinishDecoded(out);
     return true;
 }
 
@@ -264,10 +269,11 @@ bool ReadWithMediaFoundation(const std::wstring& path, DecodedAudio& out, std::w
         return false;
     }
 
-    out.sampleRate = 48000;
-    out.channels = 2;
-    ResampleLinearStereo(interleaved, sampleRate, static_cast<uint16_t>(channels), out.interleavedStereo);
-    out.durationSeconds = static_cast<double>(out.interleavedStereo.size() / 2) / 48000.0;
+    const size_t frames = interleaved.size() / channels;
+    if (!ConvertToStereo48k(interleaved.data(), frames, sampleRate, channels, out.interleavedStereo, error)) {
+        return false;
+    }
+    FinishDecoded(out);
     return true;
 }
 
@@ -280,8 +286,8 @@ bool AudioFileReader::Read(const std::wstring& path, DecodedAudio& out, std::wst
         return false;
     }
 
-    if (EndsWithIgnoreCase(path, L".wav")) {
-        return ReadWavFile(path, out, error);
+    if (EndsWithIgnoreCase(path, L".wav") || EndsWithIgnoreCase(path, L".flac") || EndsWithIgnoreCase(path, L".mp3")) {
+        return ReadWithMiniaudio(path, out, error);
     }
     if (EndsWithIgnoreCase(path, L".m4a") || EndsWithIgnoreCase(path, L".mp4") || EndsWithIgnoreCase(path, L".aac")) {
         return ReadWithMediaFoundation(path, out, error);

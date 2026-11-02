@@ -1,10 +1,10 @@
 #include "audio/WavWriter.hpp"
 
+#include "audio/MiniAudio.hpp"
 #include "util/Log.hpp"
 #include "util/Paths.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -14,6 +14,7 @@
 namespace {
 
 constexpr uint64_t kPatchIntervalBytes = 48000ull * 2ull * 2ull * 2ull; // ~2 s of PCM16 stereo
+constexpr uint32_t kHeaderBytes = 44;
 
 #pragma pack(push, 1)
 struct WavHeader {
@@ -33,11 +34,7 @@ struct WavHeader {
 };
 #pragma pack(pop)
 
-int16_t FloatToPcm16(float sample) {
-    const float clamped = std::clamp(sample, -1.0f, 1.0f);
-    const float scaled = clamped * 32767.0f;
-    return static_cast<int16_t>(std::lrintf(scaled));
-}
+static_assert(sizeof(WavHeader) == kHeaderBytes);
 
 bool WriteAll(HANDLE file, const void* data, DWORD bytes) {
     const BYTE* cursor = static_cast<const BYTE*>(data);
@@ -55,8 +52,77 @@ bool WriteAll(HANDLE file, const void* data, DWORD bytes) {
 
 }  // namespace
 
+struct WavWriter::WavEncoder {
+    ma_encoder encoder{};
+    bool live = false;
+};
+
+void WavWriter::WavEncoderDeleter::operator()(WavEncoder* encoder) const {
+    if (encoder == nullptr) {
+        return;
+    }
+    if (encoder->live) {
+        ma_encoder_uninit(&encoder->encoder);
+        encoder->live = false;
+    }
+    delete encoder;
+}
+
+struct WavEncoderCallbacks {
+    static ma_result Write(ma_encoder* encoder, const void* data, size_t bytes, size_t* bytesWritten) {
+        auto* self = static_cast<WavWriter*>(encoder->pUserData);
+        size_t written = 0;
+        if (self == nullptr || !self->WriteBytes(data, bytes, written)) {
+            return MA_ERROR;
+        }
+        if (bytesWritten != nullptr) {
+            *bytesWritten = written;
+        }
+        return MA_SUCCESS;
+    }
+
+    static ma_result Seek(ma_encoder* encoder, ma_int64 offset, ma_seek_origin origin) {
+        auto* self = static_cast<WavWriter*>(encoder->pUserData);
+        if (self == nullptr || !self->SeekFile(offset, static_cast<int>(origin))) {
+            return MA_ERROR;
+        }
+        return MA_SUCCESS;
+    }
+};
+
 WavWriter::~WavWriter() {
     Abandon();
+}
+
+bool WavWriter::WriteBytes(const void* data, size_t bytes, size_t& bytesWritten) {
+    bytesWritten = 0;
+    if (m_file == nullptr || data == nullptr || bytes > 0xFFFFFFFFull) {
+        return false;
+    }
+    if (!WriteAll(static_cast<HANDLE>(m_file), data, static_cast<DWORD>(bytes))) {
+        return false;
+    }
+    bytesWritten = bytes;
+    return true;
+}
+
+bool WavWriter::SeekFile(int64_t offset, int origin) {
+    if (m_file == nullptr) {
+        return false;
+    }
+    DWORD method = FILE_BEGIN;
+    if (origin == static_cast<int>(ma_seek_origin_current)) {
+        method = FILE_CURRENT;
+    } else if (origin == static_cast<int>(ma_seek_origin_end)) {
+        method = FILE_END;
+    }
+    LARGE_INTEGER distance{};
+    distance.QuadPart = offset;
+    return ::SetFilePointerEx(static_cast<HANDLE>(m_file), distance, nullptr, method) != FALSE;
+}
+
+void WavWriter::CloseEncoder() {
+    m_encoder.reset();
 }
 
 bool WavWriter::IsWritableDirectory(const std::wstring& folder) {
@@ -178,10 +244,26 @@ bool WavWriter::OpenFinalPath(const std::wstring& finalWavPath) {
     }
 
     m_file = file;
-    if (!WriteHeader()) {
+
+    auto encoder = std::unique_ptr<WavEncoder, WavEncoderDeleter>(new WavEncoder());
+    const ma_encoder_config config = ma_encoder_config_init(
+        ma_encoding_format_wav,
+        ma_format_s16,
+        kChannels,
+        kSampleRate);
+    const ma_result result = ma_encoder_init(
+        &WavEncoderCallbacks::Write,
+        &WavEncoderCallbacks::Seek,
+        this,
+        &config,
+        &encoder->encoder);
+    if (result != MA_SUCCESS) {
+        Log::Error(L"Failed to open miniaudio WAV encoder");
         Abandon();
         return false;
     }
+    encoder->live = true;
+    m_encoder = std::move(encoder);
     return true;
 }
 
@@ -200,11 +282,6 @@ bool WavWriter::Open(const std::wstring& folder) {
     return OpenFinalPath(base + L".wav");
 }
 
-bool WavWriter::WriteHeader() {
-    WavHeader header{};
-    return WriteAll(static_cast<HANDLE>(m_file), &header, sizeof(header));
-}
-
 bool WavWriter::SeekAndWriteSizes() {
     if (m_file == nullptr) {
         return false;
@@ -215,40 +292,56 @@ bool WavWriter::SeekAndWriteSizes() {
         return false;
     }
 
-    WavHeader header{};
-    header.dataSize = static_cast<uint32_t>(dataBytes);
-    header.riffSize = static_cast<uint32_t>(36 + dataBytes);
+    const uint32_t dataSize = static_cast<uint32_t>(dataBytes);
+    const uint32_t riffSize = static_cast<uint32_t>(36 + dataBytes);
 
-    if (::SetFilePointer(static_cast<HANDLE>(m_file), 0, nullptr, FILE_BEGIN) == INVALID_SET_FILE_POINTER
-        && ::GetLastError() != NO_ERROR) {
+    if (!SeekFile(4, static_cast<int>(ma_seek_origin_start))) {
         return false;
     }
-    if (!WriteAll(static_cast<HANDLE>(m_file), &header, sizeof(header))) {
+    if (!WriteAll(static_cast<HANDLE>(m_file), &riffSize, sizeof(riffSize))) {
+        return false;
+    }
+    // Canonical PCM header: "data" size sits at byte 40.
+    if (!SeekFile(40, static_cast<int>(ma_seek_origin_start))) {
+        return false;
+    }
+    if (!WriteAll(static_cast<HANDLE>(m_file), &dataSize, sizeof(dataSize))) {
         return false;
     }
 
     LARGE_INTEGER end{};
-    end.QuadPart = static_cast<LONGLONG>(sizeof(WavHeader) + dataBytes);
+    end.QuadPart = static_cast<LONGLONG>(kHeaderBytes + dataBytes);
     return ::SetFilePointerEx(static_cast<HANDLE>(m_file), end, nullptr, FILE_BEGIN) != FALSE;
 }
 
 bool WavWriter::WriteFloatFrames(const float* interleavedStereo, uint32_t frameCount) {
-    if (m_file == nullptr || interleavedStereo == nullptr || frameCount == 0) {
+    if (m_encoder == nullptr || !m_encoder->live || interleavedStereo == nullptr || frameCount == 0) {
         return false;
     }
 
-    std::vector<int16_t> pcm(static_cast<size_t>(frameCount) * kChannels);
-    for (uint32_t i = 0; i < frameCount * kChannels; ++i) {
-        pcm[i] = FloatToPcm16(interleavedStereo[i]);
-    }
+    m_pcmScratch.resize(static_cast<size_t>(frameCount) * kChannels);
+    ma_convert_pcm_frames_format(
+        m_pcmScratch.data(),
+        ma_format_s16,
+        interleavedStereo,
+        ma_format_f32,
+        frameCount,
+        kChannels,
+        ma_dither_mode_none);
 
-    const DWORD bytes = static_cast<DWORD>(pcm.size() * sizeof(int16_t));
-    if (!WriteAll(static_cast<HANDLE>(m_file), pcm.data(), bytes)) {
+    ma_uint64 framesWritten = 0;
+    const ma_result result = ma_encoder_write_pcm_frames(
+        &m_encoder->encoder,
+        m_pcmScratch.data(),
+        frameCount,
+        &framesWritten);
+    if (result != MA_SUCCESS || framesWritten != frameCount) {
         Log::Error(L"WAV write failed");
         return false;
     }
 
-    m_framesWritten += frameCount;
+    const uint64_t bytes = static_cast<uint64_t>(framesWritten) * kChannels * (kBitsPerSample / 8);
+    m_framesWritten += framesWritten;
     m_bytesSincePatch += bytes;
     if (m_bytesSincePatch >= kPatchIntervalBytes) {
         if (!PatchHeader()) {
@@ -275,6 +368,7 @@ bool WavWriter::Finalize(std::wstring& outFinalPath) {
         return false;
     }
 
+    CloseEncoder();
     ::FlushFileBuffers(static_cast<HANDLE>(m_file));
     ::CloseHandle(static_cast<HANDLE>(m_file));
     m_file = nullptr;
@@ -306,6 +400,7 @@ bool WavWriter::RescueTo(const std::wstring& rescueDir, std::wstring& outFinalPa
     if (!SeekAndWriteSizes()) {
         Log::Error(L"Failed to patch WAV header before rescue");
     }
+    CloseEncoder();
     ::FlushFileBuffers(static_cast<HANDLE>(m_file));
     ::CloseHandle(static_cast<HANDLE>(m_file));
     m_file = nullptr;
@@ -350,6 +445,7 @@ bool WavWriter::RescueTo(const std::wstring& rescueDir, std::wstring& outFinalPa
 }
 
 void WavWriter::Abandon() {
+    CloseEncoder();
     if (m_file != nullptr) {
         ::CloseHandle(static_cast<HANDLE>(m_file));
         m_file = nullptr;
@@ -364,6 +460,7 @@ void WavWriter::Abandon() {
 
 void WavWriter::Discard() {
     const std::wstring partial = m_partialPath;
+    CloseEncoder();
     if (m_file != nullptr) {
         ::CloseHandle(static_cast<HANDLE>(m_file));
         m_file = nullptr;

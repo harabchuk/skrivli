@@ -156,7 +156,7 @@ void CaptureStream::CaptureLoop() {
         nullptr);
 
     if (FAILED(hr)) {
-        Log::WriteHResult(Log::Level::Warn, L"AUTOCONVERTPCM Initialize failed; trying mix-format + MF resampler", hr);
+        Log::WriteHResult(Log::Level::Warn, L"AUTOCONVERTPCM Initialize failed; trying mix-format + miniaudio resampler", hr);
 
         hr = audioClient->GetMixFormat(&mixFormat);
         if (FAILED(hr) || mixFormat == nullptr) {
