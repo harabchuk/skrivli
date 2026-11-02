@@ -19,31 +19,31 @@ public:
     ~DeviceManager();
 
     DeviceManager(const DeviceManager&) = delete;
-    DeviceManager& operator=(const DeviceManager&) = delete;
+    auto operator=(const DeviceManager&) -> DeviceManager& = delete;
 
     bool Initialize(HWND notifyHwnd);
     void Shutdown();
 
-    std::vector<AudioDeviceInfo> EnumerateCapture() const;
-    std::vector<AudioDeviceInfo> EnumerateRender() const;
+    auto EnumerateCapture() const -> std::vector<AudioDeviceInfo>;
+    auto EnumerateRender() const -> std::vector<AudioDeviceInfo>;
 
     // Empty id → default for the flow. Missing saved id falls back to default.
-    Microsoft::WRL::ComPtr<IMMDevice> ResolveCaptureDevice(const std::wstring& savedId) const;
-    Microsoft::WRL::ComPtr<IMMDevice> ResolveRenderDevice(const std::wstring& savedId) const;
+    auto ResolveCaptureDevice(const std::wstring& savedId) const -> Microsoft::WRL::ComPtr<IMMDevice>;
+    auto ResolveRenderDevice(const std::wstring& savedId) const -> Microsoft::WRL::ComPtr<IMMDevice>;
 
-    std::wstring FriendlyName(IMMDevice* device) const;
+    auto FriendlyName(IMMDevice* device) const -> std::wstring;
 
 private:
     class NotificationClient;
 
-    std::vector<AudioDeviceInfo> Enumerate(EDataFlow flow) const;
-    std::wstring DefaultId(EDataFlow flow, ERole role) const;
-    Microsoft::WRL::ComPtr<IMMDevice> Resolve(
+    auto Enumerate(EDataFlow flow) const -> std::vector<AudioDeviceInfo>;
+    auto DefaultId(EDataFlow flow, ERole role) const -> std::wstring;
+    auto Resolve(
         EDataFlow flow,
         ERole defaultRole,
-        const std::wstring& savedId) const;
-    Microsoft::WRL::ComPtr<IMMDevice> GetDefault(EDataFlow flow, ERole role) const;
-    Microsoft::WRL::ComPtr<IMMDevice> GetById(const std::wstring& id) const;
+        const std::wstring& savedId) const -> Microsoft::WRL::ComPtr<IMMDevice>;
+    auto GetDefault(EDataFlow flow, ERole role) const -> Microsoft::WRL::ComPtr<IMMDevice>;
+    auto GetById(const std::wstring& id) const -> Microsoft::WRL::ComPtr<IMMDevice>;
 
     Microsoft::WRL::ComPtr<IMMDeviceEnumerator> m_enumerator;
     Microsoft::WRL::ComPtr<IMMNotificationClient> m_client;

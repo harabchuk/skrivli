@@ -42,7 +42,7 @@ private:
         bool SettingsData::* field;
     };
     static constexpr size_t kCheckboxCount = 11;
-    std::array<CheckboxBinding, kCheckboxCount> Checkboxes();
+    auto Checkboxes() -> std::array<CheckboxBinding, kCheckboxCount>;
 
     void LoadFromSettings();
     bool CollectTo(SettingsData& out, std::wstring& error);

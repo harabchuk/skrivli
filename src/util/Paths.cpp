@@ -6,9 +6,9 @@
 
 namespace {
 
-std::wstring KnownFolder(REFKNOWNFOLDERID id) {
+auto KnownFolder(REFKNOWNFOLDERID id) -> std::wstring {
     PWSTR raw = nullptr;
-    const HRESULT hr = ::SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, nullptr, &raw);
+    const auto hr = ::SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, nullptr, &raw);
     if (FAILED(hr) || raw == nullptr) {
         return {};
     }
@@ -17,7 +17,7 @@ std::wstring KnownFolder(REFKNOWNFOLDERID id) {
     return path;
 }
 
-std::wstring Join(const std::wstring& root, const wchar_t* leaf) {
+auto Join(const std::wstring& root, const wchar_t* leaf) -> std::wstring {
     if (root.empty()) {
         return {};
     }
@@ -30,27 +30,27 @@ std::wstring Join(const std::wstring& root, const wchar_t* leaf) {
 
 namespace Paths {
 
-std::wstring SettingsDir() {
+auto SettingsDir() -> std::wstring {
     return Join(KnownFolder(FOLDERID_RoamingAppData), L"MeetingBuddy");
 }
 
-std::wstring SettingsFile() {
+auto SettingsFile() -> std::wstring {
     return Join(SettingsDir(), L"settings.json");
 }
 
-std::wstring ModelsDir() {
+auto ModelsDir() -> std::wstring {
     return Join(KnownFolder(FOLDERID_LocalAppData), L"MeetingBuddy\\models");
 }
 
-std::wstring LogsDir() {
+auto LogsDir() -> std::wstring {
     return Join(KnownFolder(FOLDERID_LocalAppData), L"MeetingBuddy\\logs");
 }
 
-std::wstring RescueDir() {
+auto RescueDir() -> std::wstring {
     return Join(KnownFolder(FOLDERID_LocalAppData), L"MeetingBuddy\\rescue");
 }
 
-std::wstring DefaultRecordingsDir() {
+auto DefaultRecordingsDir() -> std::wstring {
     return Join(KnownFolder(FOLDERID_Documents), L"MeetingBuddy");
 }
 

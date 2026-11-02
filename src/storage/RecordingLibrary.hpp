@@ -25,7 +25,7 @@ struct RecordingEntry {
 class RecordingLibrary {
 public:
     // Runs partial recovery, then scans folder for *.wav / *.m4a.
-    static std::vector<RecordingEntry> Scan(const std::wstring& folder);
+    static auto Scan(const std::wstring& folder) -> std::vector<RecordingEntry>;
 
     static bool WriteSidecarForAudio(
         const std::wstring& audioPath,
@@ -35,6 +35,6 @@ public:
     static bool DeleteToRecycleBin(const RecordingEntry& entry, std::wstring& error);
 
     static double ReadWavDurationSeconds(const std::wstring& wavPath);
-    static std::wstring JsonPathForAudio(const std::wstring& audioPath);
-    static std::wstring MdPathForAudio(const std::wstring& audioPath);
+    static auto JsonPathForAudio(const std::wstring& audioPath) -> std::wstring;
+    static auto MdPathForAudio(const std::wstring& audioPath) -> std::wstring;
 };

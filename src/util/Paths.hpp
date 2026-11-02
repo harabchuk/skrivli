@@ -4,12 +4,12 @@
 
 namespace Paths {
 
-std::wstring SettingsDir();
-std::wstring SettingsFile();
-std::wstring ModelsDir();
-std::wstring LogsDir();
-std::wstring RescueDir();
-std::wstring DefaultRecordingsDir();
+auto SettingsDir() -> std::wstring;
+auto SettingsFile() -> std::wstring;
+auto ModelsDir() -> std::wstring;
+auto LogsDir() -> std::wstring;
+auto RescueDir() -> std::wstring;
+auto DefaultRecordingsDir() -> std::wstring;
 
 bool EnsureDirectory(const std::wstring& path);
 bool EnsureAppDataDirectories();

@@ -34,7 +34,7 @@ bool DeviceCombo::Select(const std::wstring& id) {
     return false;
 }
 
-std::wstring DeviceCombo::SelectedId() const {
+auto DeviceCombo::SelectedId() const -> std::wstring {
     const int sel = m_combo.GetCurSel();
     if (sel < 0 || static_cast<size_t>(sel) >= m_ids.size()) {
         return {};

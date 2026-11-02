@@ -18,7 +18,7 @@ enum class WriteMode {
     Atomic,
 };
 
-std::optional<std::string> ReadFileBytes(const std::wstring& path, StripBom stripBom = StripBom::No);
+auto ReadFileBytes(const std::wstring& path, StripBom stripBom = StripBom::No) -> std::optional<std::string>;
 bool WriteFileBytes(const std::wstring& path, std::string_view data, WriteMode mode = WriteMode::Direct);
 
 // Creates the folder if needed and verifies a file can be created inside it.

@@ -28,14 +28,14 @@ constexpr int kMicGainSliderMin = 0;
 constexpr int kMicGainSliderMax = 40; // 0.0 .. 4.0 in 0.1 steps
 constexpr float kMicGainStep = 0.1f;
 
-std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
+auto FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) -> std::wstring {
     if (frequency == 0) {
         frequency = 1;
     }
     return Text::FormatHms(elapsedQpc / frequency);
 }
 
-std::wstring FormatDb(float db) {
+auto FormatDb(float db) -> std::wstring {
     if (db <= -59.5f) {
         return L"--- dB";
     }
@@ -44,7 +44,7 @@ std::wstring FormatDb(float db) {
     return buffer;
 }
 
-std::wstring FormatGainMultiplier(float gain) {
+auto FormatGainMultiplier(float gain) -> std::wstring {
     wchar_t buffer[32]{};
     std::swprintf(buffer, 32, L"%.1f\u00D7", static_cast<double>(gain));
     return buffer;
@@ -77,7 +77,7 @@ HFONT CreateFirstAvailableFont(std::initializer_list<const wchar_t*> faces, int 
     return nullptr;
 }
 
-std::vector<DeviceCombo::Item> ToComboItems(const std::vector<AudioDeviceInfo>& devices) {
+auto ToComboItems(const std::vector<AudioDeviceInfo>& devices) -> std::vector<DeviceCombo::Item> {
     std::vector<DeviceCombo::Item> items;
     items.reserve(devices.size());
     for (const auto& device : devices) {
@@ -448,7 +448,7 @@ void RecordView::LayoutFieldRows() {
 
 void RecordView::SyncControlsToSettings() {
     const auto& settings = Settings::Instance().Data();
-    const std::wstring folder = Settings::Instance().RecordingsFolder();
+    const auto folder = Settings::Instance().RecordingsFolder();
     m_folderEdit.SetWindowText(folder.c_str());
     if (m_micGain.IsWindow()) {
         const int pos = GainToSliderPos(settings.micGain);
@@ -528,8 +528,8 @@ void RecordView::RefreshDevices() {
         return;
     }
 
-    const std::wstring selectedMic = Settings::Instance().Data().micDeviceId;
-    const std::wstring selectedSys = Settings::Instance().Data().systemDeviceId;
+    const auto selectedMic = Settings::Instance().Data().micDeviceId;
+    const auto selectedSys = Settings::Instance().Data().systemDeviceId;
 
     const auto capture = m_devices->EnumerateCapture();
     m_micCombo.Fill(ToComboItems(capture));

@@ -15,15 +15,15 @@ public:
 
     void Attach(HWND combo) { m_combo.Attach(combo); }
     bool IsWindow() const { return m_combo.IsWindow(); }
-    WTL::CComboBox& Combo() { return m_combo; }
-    const WTL::CComboBox& Combo() const { return m_combo; }
+    auto Combo() -> WTL::CComboBox& { return m_combo; }
+    auto Combo() const -> const WTL::CComboBox& { return m_combo; }
 
     void Fill(const std::vector<Item>& items);
     int Add(const std::wstring& label, const std::wstring& id);
     // Returns false when no row has this id; the selection then falls back to the first row
     // with an empty id, or row 0 when there is none.
     bool Select(const std::wstring& id);
-    std::wstring SelectedId() const;
+    auto SelectedId() const -> std::wstring;
 
 private:
     WTL::CComboBox m_combo;

@@ -44,7 +44,7 @@ RecordingSidecar RecordingSidecar::ForAudio(const std::wstring& audioPath) {
 
 namespace Sidecar {
 
-std::string FormatLocalTimestamp(const SYSTEMTIME& local) {
+auto FormatLocalTimestamp(const SYSTEMTIME& local) -> std::string {
     char buf[32]{};
     std::snprintf(
         buf,
@@ -59,7 +59,7 @@ std::string FormatLocalTimestamp(const SYSTEMTIME& local) {
     return buf;
 }
 
-std::string FormatLocalTimestampNow() {
+auto FormatLocalTimestampNow() -> std::string {
     SYSTEMTIME local{};
     ::GetLocalTime(&local);
     return FormatLocalTimestamp(local);
@@ -70,7 +70,7 @@ bool Load(const std::wstring& jsonPath, RecordingSidecar& out) {
     if (!bytes.has_value()) {
         return false;
     }
-    const std::string& json = *bytes;
+    const auto& json = *bytes;
     if (json.empty()) {
         return false;
     }

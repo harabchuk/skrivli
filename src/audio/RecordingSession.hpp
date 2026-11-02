@@ -42,7 +42,7 @@ public:
     ~RecordingSession();
 
     RecordingSession(const RecordingSession&) = delete;
-    RecordingSession& operator=(const RecordingSession&) = delete;
+    auto operator=(const RecordingSession&) -> RecordingSession& = delete;
 
     void SetNotifyHwnd(HWND hwnd) { m_notifyHwnd = hwnd; }
     void SetDeviceManager(DeviceManager* devices) { m_devices = devices; }
@@ -68,7 +68,7 @@ public:
 
     State GetState() const { return m_state.load(std::memory_order_acquire); }
     bool IsActive() const {
-        const State state = GetState();
+        const auto state = GetState();
         return state == State::Starting || state == State::Recording || state == State::Stopping;
     }
 
@@ -77,9 +77,9 @@ public:
     float EffectiveMicGain() const { return m_mixer.EffectiveMicGain(); }
     uint64_t StartQpc() const { return m_startQpc.load(std::memory_order_acquire); }
 
-    std::vector<std::wstring> TakeDeviceNotes();
-    std::wstring MicDeviceName() const;
-    std::wstring SystemDeviceName() const;
+    auto TakeDeviceNotes() -> std::vector<std::wstring>;
+    auto MicDeviceName() const -> std::wstring;
+    auto SystemDeviceName() const -> std::wstring;
     SYSTEMTIME StartLocalTime() const { return m_startLocal; }
     double ElapsedSeconds() const;
 
@@ -92,7 +92,7 @@ private:
         bool Open(IMMDevice* device, const wchar_t* reason);
         void NoteBufferFlags();
         void Stop();
-        Microsoft::WRL::ComPtr<IMMDevice> Resolve(const DeviceManager& devices) const;
+        auto Resolve(const DeviceManager& devices) const -> Microsoft::WRL::ComPtr<IMMDevice>;
 
         RecordingSession& owner;
         CaptureStream stream;
@@ -150,7 +150,7 @@ private:
     void AddDeviceNote(const std::wstring& note);
     static bool IsPrivacyDenied(HRESULT hr);
     static bool IsDeviceBusy(HRESULT hr);
-    static std::wstring DescribeCaptureError(HRESULT hr, bool isMic);
+    static auto DescribeCaptureError(HRESULT hr, bool isMic) -> std::wstring;
 
     HWND m_notifyHwnd = nullptr;
     DeviceManager* m_devices = nullptr;

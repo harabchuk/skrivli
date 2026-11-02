@@ -20,7 +20,7 @@ T ReadField(const char* header, uint32_t offset) {
 
 }  // namespace
 
-std::optional<WavHeader> WavHeader::Read(HANDLE file) {
+auto WavHeader::Read(HANDLE file) -> std::optional<WavHeader> {
     if (file == INVALID_HANDLE_VALUE || file == nullptr) {
         return std::nullopt;
     }

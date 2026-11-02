@@ -22,7 +22,7 @@ float ParseFloat(const CString& text, float fallback) {
         return fallback;
     }
     wchar_t* end = nullptr;
-    const float value = std::wcstof(text.GetString(), &end);
+    const auto value = std::wcstof(text.GetString(), &end);
     if (end == text.GetString()) {
         return fallback;
     }
@@ -34,14 +34,14 @@ int ParseInt(const CString& text, int fallback) {
         return fallback;
     }
     wchar_t* end = nullptr;
-    const long value = std::wcstol(text.GetString(), &end, 10);
+    const auto value = std::wcstol(text.GetString(), &end, 10);
     if (end == text.GetString()) {
         return fallback;
     }
     return static_cast<int>(value);
 }
 
-std::wstring FormatGain(float value) {
+auto FormatGain(float value) -> std::wstring {
     wchar_t buf[32]{};
     std::swprintf(buf, 32, L"%.2f", static_cast<double>(value));
     return buf;
@@ -77,7 +77,7 @@ BOOL SettingsDialog::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_hotkey.Attach(GetDlgItem(IDC_SET_HOTKEY));
 
     // Same flat dropdown look as the Record view.
-    for (WTL::CComboBox* combo : { &m_mic.Combo(), &m_sys.Combo(), &m_model.Combo(), &m_language }) {
+    for (auto* combo : { &m_mic.Combo(), &m_sys.Combo(), &m_model.Combo(), &m_language }) {
         if (combo->IsWindow()) {
             ::SetWindowTheme(combo->m_hWnd, L"CFD", nullptr);
         }
@@ -95,7 +95,7 @@ void SettingsDialog::FillLanguageCombo() {
     static const wchar_t* kLangs[] = {
         L"auto", L"en", L"de", L"fr", L"es", L"it", L"pt", L"nl", L"pl", L"ru",
         L"uk", L"zh", L"ja", L"ko", L"sv", L"no", L"da", L"fi", L"tr", L"cs"};
-    for (const wchar_t* lang : kLangs) {
+    for (const auto* lang : kLangs) {
         m_language.AddString(lang);
     }
 }
@@ -103,7 +103,7 @@ void SettingsDialog::FillLanguageCombo() {
 void SettingsDialog::FillModelCombo() {
     std::vector<DeviceCombo::Item> items;
     for (const auto& info : ModelManager::OfferedModels()) {
-        std::wstring label = info.displayName;
+        auto label = info.displayName;
         if (ModelManager::IsPresent(info.fileName)) {
             label += L" (installed)";
         }
@@ -120,7 +120,7 @@ void SettingsDialog::FillDeviceCombo(
     std::vector<DeviceCombo::Item> items;
     items.push_back({capture ? L"Default communications device" : L"Default output device", {}});
     for (const auto& device : devices) {
-        std::wstring label = device.name;
+        auto label = device.name;
         if (device.isDefault) {
             label += L" (default)";
         }
@@ -130,7 +130,7 @@ void SettingsDialog::FillDeviceCombo(
     combo.Select(selectedId);
 }
 
-std::array<SettingsDialog::CheckboxBinding, SettingsDialog::kCheckboxCount> SettingsDialog::Checkboxes() {
+auto SettingsDialog::Checkboxes() -> std::array<CheckboxBinding, kCheckboxCount> {
     return {{
         {&m_micAgc, &SettingsData::micAgc},
         {&m_saveStems, &SettingsData::saveStems},
@@ -193,11 +193,11 @@ void SettingsDialog::OnBrowseFolder(UINT /*code*/, int /*id*/, HWND /*control*/)
 }
 
 void SettingsDialog::OnModelDownload(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const std::wstring file = m_model.SelectedId();
+    const auto file = m_model.SelectedId();
     if (file.empty()) {
         return;
     }
-    const ModelInfo* info = ModelManager::Find(file);
+    const auto* info = ModelManager::Find(file);
     if (info == nullptr) {
         return;
     }
@@ -258,7 +258,7 @@ bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) {
         return false;
     }
 
-    const std::wstring modelFile = m_model.SelectedId();
+    const auto modelFile = m_model.SelectedId();
     if (!modelFile.empty()) {
         out.model = modelFile;
     }
@@ -282,7 +282,7 @@ bool SettingsDialog::CollectTo(SettingsData& out, std::wstring& error) {
     m_hotkey.GetWindowText(hotkeyText);
     out.hotkey = hotkeyText.GetString();
     if (out.hotkeyEnabled) {
-        const HotkeyChord chord = Hotkey::Parse(out.hotkey);
+        const auto chord = Hotkey::Parse(out.hotkey);
         if (!chord.valid) {
             error = L"Hotkey must look like Ctrl+Alt+R.";
             return false;
@@ -301,7 +301,7 @@ void SettingsDialog::OnOk(UINT /*code*/, int /*id*/, HWND /*control*/) {
         return;
     }
 
-    const std::wstring previousFolder = Settings::Instance().RecordingsFolder();
+    const auto previousFolder = Settings::Instance().RecordingsFolder();
     Settings::Instance().Data() = next;
     if (!Settings::Instance().Save()) {
         ui::ShowMessage(m_hWnd, L"Failed to save settings.", MB_OK | MB_ICONERROR);

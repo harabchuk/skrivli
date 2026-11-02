@@ -28,7 +28,7 @@ void Mixer::EnsureDownmix() {
         return;
     }
     auto downmix = std::unique_ptr<Downmix, DownmixDeleter>(new Downmix());
-    const ma_channel_converter_config config = ma_channel_converter_config_init(
+    const auto config = ma_channel_converter_config_init(
         ma_format_f32,
         AudioFormat::kChannels,
         nullptr,
@@ -95,7 +95,7 @@ void Mixer::UpdateAgc(float blockRms) {
         return;
     }
 
-    const float desired = std::clamp(kAgcTargetLinear / m_agcRms, kAgcMinGain, kAgcMaxGain);
+    const auto desired = std::clamp(kAgcTargetLinear / m_agcRms, kAgcMinGain, kAgcMaxGain);
     const float coef = desired < m_agcGain ? kAgcAttackPerBlock : kAgcReleasePerBlock;
     m_agcPrevGain = m_agcGain;
     m_agcGain = m_agcGain + (desired - m_agcGain) * coef;
@@ -145,7 +145,7 @@ void Mixer::IngestPacket(SourceBuffer& source, int64_t frameIndex, const float* 
     }
 
     EnsureCapacity(source, writeFrame, writeFrames);
-    float* dest = source.samples.data()
+    auto* dest = source.samples.data()
         + static_cast<size_t>(writeFrame - source.startFrame) * AudioFormat::kChannels;
     std::copy(
         writeData,
@@ -168,7 +168,7 @@ void Mixer::DrainRing(RingBuffer& ring, SourceBuffer& source) {
         if (qpc < m_startQpc) {
             continue;
         }
-        const int64_t frameIndex = AudioFormat::QpcToFrames(qpc - m_startQpc, m_qpcFrequency);
+        const auto frameIndex = AudioFormat::QpcToFrames(qpc - m_startQpc, m_qpcFrequency);
         IngestPacket(source, frameIndex, m_packetScratch.data(), frames);
         (void)flags;
     }
@@ -193,15 +193,15 @@ void Mixer::ReadSourceBlock(SourceBuffer& source, int64_t blockStart, float* des
         return;
     }
 
-    const int64_t copyStart = (std::max)(blockStart, source.startFrame);
-    const int64_t copyEnd = (std::min)(blockEnd, source.endFrame);
+    const auto copyStart = (std::max)(blockStart, source.startFrame);
+    const auto copyEnd = (std::min)(blockEnd, source.endFrame);
     if (copyStart >= copyEnd) {
         return;
     }
 
     const int64_t destOffset = copyStart - blockStart;
     const int64_t srcOffset = copyStart - source.startFrame;
-    const size_t frameCount = static_cast<size_t>(copyEnd - copyStart);
+    const auto frameCount = static_cast<size_t>(copyEnd - copyStart);
     ma_copy_pcm_frames(
         dest + static_cast<size_t>(destOffset) * AudioFormat::kChannels,
         source.samples.data() + static_cast<size_t>(srcOffset) * AudioFormat::kChannels,
@@ -229,8 +229,8 @@ void Mixer::ApplyDriftCorrection() {
         return;
     }
 
-    const double micFill = static_cast<double>(m_mic.endFrame - m_nextBlockFrame);
-    const double sysFill = static_cast<double>(m_sys.endFrame - m_nextBlockFrame);
+    const auto micFill = static_cast<double>(m_mic.endFrame - m_nextBlockFrame);
+    const auto sysFill = static_cast<double>(m_sys.endFrame - m_nextBlockFrame);
     constexpr double alpha = 0.05;
     m_mic.fillAverage = (1.0 - alpha) * m_mic.fillAverage + alpha * micFill;
     m_sys.fillAverage = (1.0 - alpha) * m_sys.fillAverage + alpha * sysFill;
@@ -263,7 +263,7 @@ void Mixer::ApplyDriftCorrection() {
 }
 
 float Mixer::SoftLimit(float sample) {
-    const float absSample = std::fabs(sample);
+    const auto absSample = std::fabs(sample);
     if (absSample <= kLimiterStart) {
         return sample;
     }
@@ -337,7 +337,7 @@ bool Mixer::Process(
     }
 
     const float gainStart = m_micAgc ? m_agcPrevGain : m_micGain;
-    const float gainEnd = CurrentMicGain();
+    const auto gainEnd = CurrentMicGain();
     m_effectiveMicGain.store(gainEnd, std::memory_order_release);
 
     float micScaled[AudioFormat::kBlockFrames * AudioFormat::kChannels];
@@ -367,8 +367,8 @@ bool Mixer::Process(
         AudioFormat::kChannels,
         m_systemGain);
     for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
-        const float outL = SoftLimit(outInterleavedStereo[i * 2]);
-        const float outR = SoftLimit(outInterleavedStereo[i * 2 + 1]);
+        const auto outL = SoftLimit(outInterleavedStereo[i * 2]);
+        const auto outR = SoftLimit(outInterleavedStereo[i * 2 + 1]);
         outInterleavedStereo[i * 2] = outL;
         outInterleavedStereo[i * 2 + 1] = outR;
     }

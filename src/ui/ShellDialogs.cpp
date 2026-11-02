@@ -9,7 +9,7 @@ namespace ui {
 
 namespace {
 
-std::optional<std::wstring> ShowAndGetPath(IFileDialog* dialog, HWND owner) {
+auto ShowAndGetPath(IFileDialog* dialog, HWND owner) -> std::optional<std::wstring> {
     if (FAILED(dialog->Show(owner))) {
         return std::nullopt;
     }
@@ -32,7 +32,7 @@ void ApplyFilters(IFileDialog* dialog, std::span<const FileFilter> filters) {
     }
     std::vector<COMDLG_FILTERSPEC> specs;
     specs.reserve(filters.size());
-    for (const FileFilter& filter : filters) {
+    for (const auto& filter : filters) {
         specs.push_back({filter.name, filter.spec});
     }
     dialog->SetFileTypes(static_cast<UINT>(specs.size()), specs.data());
@@ -40,9 +40,9 @@ void ApplyFilters(IFileDialog* dialog, std::span<const FileFilter> filters) {
 
 }  // namespace
 
-std::optional<std::wstring> PickFolder(HWND owner) {
+auto PickFolder(HWND owner) -> std::optional<std::wstring> {
     Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
-    const HRESULT hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&dialog));
+    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&dialog));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }
@@ -52,12 +52,12 @@ std::optional<std::wstring> PickFolder(HWND owner) {
     return ShowAndGetPath(dialog.Get(), owner);
 }
 
-std::optional<std::wstring> PickOpenFile(
+auto PickOpenFile(
     HWND owner,
     std::span<const FileFilter> filters,
-    const wchar_t* title) {
+    const wchar_t* title) -> std::optional<std::wstring> {
     Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
-    const HRESULT hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
+    const auto hr = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }
@@ -68,13 +68,13 @@ std::optional<std::wstring> PickOpenFile(
     return ShowAndGetPath(dialog.Get(), owner);
 }
 
-std::optional<std::wstring> PickSaveFile(
+auto PickSaveFile(
     HWND owner,
     std::span<const FileFilter> filters,
     const wchar_t* defaultExt,
-    const std::wstring& fileName) {
+    const std::wstring& fileName) -> std::optional<std::wstring> {
     Microsoft::WRL::ComPtr<IFileSaveDialog> dialog;
-    const HRESULT hr = ::CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
+    const auto hr = ::CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
     if (FAILED(hr) || !dialog) {
         return std::nullopt;
     }

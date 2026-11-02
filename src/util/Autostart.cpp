@@ -10,9 +10,9 @@ namespace {
 
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
-std::wstring QuotedExePath() {
+auto QuotedExePath() -> std::wstring {
     wchar_t path[MAX_PATH]{};
-    const DWORD len = ::GetModuleFileNameW(nullptr, path, MAX_PATH);
+    const auto len = ::GetModuleFileNameW(nullptr, path, MAX_PATH);
     if (len == 0 || len >= MAX_PATH) {
         return {};
     }
@@ -23,8 +23,8 @@ std::wstring QuotedExePath() {
 
 namespace Autostart {
 
-std::wstring CommandLineForRunKey(bool startMinimized) {
-    std::wstring cmd = QuotedExePath();
+auto CommandLineForRunKey(bool startMinimized) -> std::wstring {
+    auto cmd = QuotedExePath();
     if (cmd.empty()) {
         return {};
     }
@@ -41,14 +41,14 @@ bool IsEnabled() {
     }
     DWORD type = 0;
     DWORD size = 0;
-    const LONG rc = ::RegQueryValueExW(key, kRunValueName, nullptr, &type, nullptr, &size);
+    const auto rc = ::RegQueryValueExW(key, kRunValueName, nullptr, &type, nullptr, &size);
     ::RegCloseKey(key);
     return rc == ERROR_SUCCESS && type == REG_SZ;
 }
 
 bool Apply(bool enable, bool startMinimized) {
     HKEY key = nullptr;
-    const LONG openRc = ::RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &key);
+    const auto openRc = ::RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &key);
     if (openRc != ERROR_SUCCESS) {
         Log::Error(L"Failed to open HKCU Run key for autostart");
         return false;
@@ -56,12 +56,12 @@ bool Apply(bool enable, bool startMinimized) {
 
     bool ok = true;
     if (enable) {
-        const std::wstring cmd = CommandLineForRunKey(startMinimized);
+        const auto cmd = CommandLineForRunKey(startMinimized);
         if (cmd.empty()) {
             ::RegCloseKey(key);
             return false;
         }
-        const LONG rc = ::RegSetValueExW(
+        const auto rc = ::RegSetValueExW(
             key,
             kRunValueName,
             0,
@@ -73,7 +73,7 @@ bool Apply(bool enable, bool startMinimized) {
             ok = false;
         }
     } else {
-        const LONG rc = ::RegDeleteValueW(key, kRunValueName);
+        const auto rc = ::RegDeleteValueW(key, kRunValueName);
         if (rc != ERROR_SUCCESS && rc != ERROR_FILE_NOT_FOUND) {
             Log::Error(L"Failed to remove Start with Windows Run value");
             ok = false;

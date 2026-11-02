@@ -104,7 +104,7 @@ void DirectoryWatcher::ThreadMain() {
             nullptr);
 
         if (!started) {
-            const DWORD err = ::GetLastError();
+            const auto err = ::GetLastError();
             ::CloseHandle(overlapped.hEvent);
             if (err == ERROR_NOTIFY_ENUM_DIR) {
                 if (m_hwnd != nullptr && ::IsWindow(m_hwnd)) {
@@ -116,7 +116,7 @@ void DirectoryWatcher::ThreadMain() {
         }
 
         HANDLE waitHandles[2] = {m_stopEvent, overlapped.hEvent};
-        const DWORD wait = ::WaitForMultipleObjects(2, waitHandles, FALSE, INFINITE);
+        const auto wait = ::WaitForMultipleObjects(2, waitHandles, FALSE, INFINITE);
         if (wait == WAIT_OBJECT_0) {
             ::CancelIoEx(m_dirHandle, &overlapped);
             ::CloseHandle(overlapped.hEvent);
@@ -125,7 +125,7 @@ void DirectoryWatcher::ThreadMain() {
 
         DWORD transferred = 0;
         if (!::GetOverlappedResult(m_dirHandle, &overlapped, &transferred, FALSE)) {
-            const DWORD err = ::GetLastError();
+            const auto err = ::GetLastError();
             ::CloseHandle(overlapped.hEvent);
             if (err == ERROR_NOTIFY_ENUM_DIR) {
                 if (m_hwnd != nullptr && ::IsWindow(m_hwnd)) {

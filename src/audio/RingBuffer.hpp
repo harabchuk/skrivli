@@ -25,7 +25,7 @@ public:
     }
 
     RingBuffer(const RingBuffer&) = delete;
-    RingBuffer& operator=(const RingBuffer&) = delete;
+    auto operator=(const RingBuffer&) -> RingBuffer& = delete;
 
     uint32_t CapacityFrames() const { return m_capacityFrames; }
 

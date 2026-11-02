@@ -25,7 +25,7 @@ public:
     ~CaptureStream();
 
     CaptureStream(const CaptureStream&) = delete;
-    CaptureStream& operator=(const CaptureStream&) = delete;
+    auto operator=(const CaptureStream&) -> CaptureStream& = delete;
 
     // Starts capture on a worker thread. Blocks until Initialize succeeds or fails.
     bool Start(

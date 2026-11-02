@@ -27,7 +27,7 @@ public:
     ~Mixer();
 
     Mixer(const Mixer&) = delete;
-    Mixer& operator=(const Mixer&) = delete;
+    auto operator=(const Mixer&) -> Mixer& = delete;
 
     void Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float systemGain, bool micAgc = false);
 

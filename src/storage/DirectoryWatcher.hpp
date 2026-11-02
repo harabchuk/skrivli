@@ -14,11 +14,11 @@ public:
     ~DirectoryWatcher();
 
     DirectoryWatcher(const DirectoryWatcher&) = delete;
-    DirectoryWatcher& operator=(const DirectoryWatcher&) = delete;
+    auto operator=(const DirectoryWatcher&) -> DirectoryWatcher& = delete;
 
     bool Start(const std::wstring& folder, HWND hwnd, UINT notifyMsg);
     void Stop();
-    const std::wstring& Folder() const { return m_folder; }
+    auto Folder() const -> const std::wstring& { return m_folder; }
 
 private:
     void ThreadMain();

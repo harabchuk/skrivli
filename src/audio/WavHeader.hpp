@@ -19,7 +19,7 @@ struct WavHeader {
     // Seeks to the start of `file` and reads the header. On success the file pointer is at
     // `kHeaderBytes`, i.e. the first PCM byte. Fails when fewer than 44 bytes are available or
     // the RIFF/WAVE tags are missing.
-    static std::optional<WavHeader> Read(HANDLE file);
+    static auto Read(HANDLE file) -> std::optional<WavHeader>;
 
     // Zero when the header describes no audio (missing channels, rate, or bit depth).
     double DurationSeconds() const;

@@ -16,7 +16,7 @@ public:
     ~WavWriter();
 
     WavWriter(const WavWriter&) = delete;
-    WavWriter& operator=(const WavWriter&) = delete;
+    auto operator=(const WavWriter&) -> WavWriter& = delete;
 
     // Opens `<folder>\MeetingBuddy_YYYY-MM-DD_HH-MM-SS.wav.partial`.
     bool Open(const std::wstring& folder);
@@ -33,15 +33,15 @@ public:
     void Discard();
 
     bool IsOpen() const { return m_file != nullptr; }
-    const std::wstring& PartialPath() const { return m_partialPath; }
-    const std::wstring& FinalPath() const { return m_finalPath; }
-    const std::wstring& Folder() const { return m_folder; }
+    auto PartialPath() const -> const std::wstring& { return m_partialPath; }
+    auto FinalPath() const -> const std::wstring& { return m_finalPath; }
+    auto Folder() const -> const std::wstring& { return m_folder; }
     uint64_t FramesWritten() const { return m_framesWritten; }
 
     // Patch RIFF/`data` sizes from file length (MiniAudio already wrote the header).
     static bool RepairPartialHeader(const std::wstring& partialPath);
     // Scan folder for `*.wav.partial`, repair, rename to `*.recovered.wav`.
-    static std::vector<std::wstring> RecoverPartialsInFolder(const std::wstring& folder);
+    static auto RecoverPartialsInFolder(const std::wstring& folder) -> std::vector<std::wstring>;
     static bool FolderHasFreeSpace(const std::wstring& folder, uint64_t minBytes = kMinFreeBytes);
 private:
     friend struct WavEncoderCallbacks;
@@ -56,8 +56,8 @@ private:
     // Uninitializes the encoder (it patches RIFF sizes) and then closes the handle.
     void CloseFile(bool flush = false);
     void ResetState();
-    static std::wstring MakeBasePath(const std::wstring& folder);
-    static std::wstring RecoveredPathFromPartial(const std::wstring& partialPath);
+    static auto MakeBasePath(const std::wstring& folder) -> std::wstring;
+    static auto RecoveredPathFromPartial(const std::wstring& partialPath) -> std::wstring;
 
     std::unique_ptr<WavEncoder, WavEncoderDeleter> m_encoder;
     void* m_file = nullptr; // HANDLE

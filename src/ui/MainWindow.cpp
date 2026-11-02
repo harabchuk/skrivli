@@ -28,7 +28,7 @@ RECT MakeRect(int x, int y, int width, int height) {
     return rect;
 }
 
-std::wstring FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) {
+auto FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) -> std::wstring {
     if (frequency == 0) {
         frequency = 1;
     }
@@ -73,12 +73,12 @@ LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
 }
 
 void MainWindow::RecoverPartialRecordings() {
-    const std::wstring folder = Settings::Instance().RecordingsFolder();
+    const auto folder = Settings::Instance().RecordingsFolder();
     auto recovered = WavWriter::RecoverPartialsInFolder(folder);
     auto rescued = WavWriter::RecoverPartialsInFolder(Paths::RescueDir());
     recovered.insert(recovered.end(), rescued.begin(), rescued.end());
     for (const auto& path : recovered) {
-        RecordingSidecar side = RecordingSidecar::ForAudio(path);
+        auto side = RecordingSidecar::ForAudio(path);
         side.deviceNotes.push_back("Recovered from partial file");
         RecordingLibrary::WriteSidecarForAudio(path, side);
     }
@@ -95,7 +95,7 @@ void MainWindow::WriteSidecarForPath(const std::wstring& audioPath) {
         return;
     }
 
-    RecordingSidecar side = RecordingSidecar::ForAudio(audioPath);
+    auto side = RecordingSidecar::ForAudio(audioPath);
     side.startLocal = Sidecar::FormatLocalTimestamp(m_session.StartLocalTime());
     if (side.durationSeconds <= 0.0) {
         side.durationSeconds = m_session.ElapsedSeconds();
@@ -134,10 +134,10 @@ void MainWindow::ApplyStatusPaneWidths() {
         return;
     }
 
-    const UINT dpi = ::GetDpiForWindow(m_hWnd);
+    const auto dpi = ::GetDpiForWindow(m_hWnd);
     auto measure = [&](const wchar_t* text) -> int {
         CClientDC dc(m_status.m_hWnd);
-        HFONT old = dc.SelectFont(m_status.GetFont());
+        const auto old = dc.SelectFont(m_status.GetFont());
         SIZE size{};
         dc.GetTextExtent(text, static_cast<int>(wcslen(text)), &size);
         dc.SelectFont(old);
@@ -152,7 +152,7 @@ void MainWindow::ApplyStatusPaneWidths() {
 void MainWindow::CreateTabs() {
     const DWORD style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | TCS_TABS;
     m_tabs.Create(m_hWnd, rcDefault, nullptr, style, 0, IDC_TAB_MAIN);
-    const UINT dpi = ::GetDpiForWindow(m_hWnd);
+    const auto dpi = ::GetDpiForWindow(m_hWnd);
     m_tabs.SetPadding(CSize(ui::Scale(14, dpi), ui::Scale(6, dpi)));
 
     TCITEMW item{};
@@ -192,7 +192,7 @@ void MainWindow::ApplyDpiFonts(UINT dpi) {
 
     const HFONT font = m_uiFont;
     if (m_tabs.IsWindow()) {
-        const UINT tabDpi = ::GetDpiForWindow(m_tabs.m_hWnd);
+        const auto tabDpi = ::GetDpiForWindow(m_tabs.m_hWnd);
         m_tabs.SetPadding(CSize(ui::Scale(14, tabDpi), ui::Scale(6, tabDpi)));
         m_tabs.SetFont(font);
     }
@@ -219,7 +219,7 @@ void MainWindow::SetStatusRecording() {
 }
 
 void MainWindow::UpdateRecordingUi() {
-    const uint64_t start = m_session.StartQpc();
+    const auto start = m_session.StartQpc();
     if (start == 0) {
         return;
     }
@@ -227,9 +227,9 @@ void MainWindow::UpdateRecordingUi() {
     LARGE_INTEGER freq{};
     ::QueryPerformanceCounter(&now);
     ::QueryPerformanceFrequency(&freq);
-    const std::wstring elapsed =
+    const auto elapsed =
         FormatElapsed(static_cast<uint64_t>(now.QuadPart) - start, static_cast<uint64_t>(freq.QuadPart));
-    const std::wstring tip = L"Recording " + elapsed;
+    const auto tip = L"Recording " + elapsed;
     m_tray.SetTip(tip.c_str());
     m_status.SetPaneText(IDC_STATUS_PANE_TIME, elapsed.c_str());
 }
@@ -502,7 +502,7 @@ void MainWindow::RegisterConfiguredHotkey() {
     if (!settings.hotkeyEnabled) {
         return;
     }
-    const HotkeyChord chord = Hotkey::Parse(settings.hotkey);
+    const auto chord = Hotkey::Parse(settings.hotkey);
     if (!chord.valid) {
         if (!m_hotkeyWarned) {
             m_hotkeyWarned = true;
@@ -617,7 +617,7 @@ void MainWindow::HideToTray() {
 void MainWindow::ToggleFromTrayClick() {
     // Collapse press+release (and any echoed legacy) notifications from one click.
     constexpr DWORD kMinToggleIntervalMs = 250;
-    const DWORD now = ::GetTickCount();
+    const auto now = ::GetTickCount();
     if (now - m_lastTrayToggleTick < kMinToggleIntervalMs) {
         return;
     }
@@ -675,7 +675,7 @@ void MainWindow::RestoreWindowPlacement() {
 }
 
 bool MainWindow::IsPlacementOnAnyMonitor(const RECT& windowRect) const {
-    const HMONITOR monitor = ::MonitorFromRect(&windowRect, MONITOR_DEFAULTTONULL);
+    const auto monitor = ::MonitorFromRect(&windowRect, MONITOR_DEFAULTTONULL);
     return monitor != nullptr;
 }
 
@@ -780,7 +780,7 @@ LRESULT MainWindow::OnM4aFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, 
     m_compressingM4a = false;
     const auto message = TakeOwned<std::wstring>(lParam);
     SetTranscribeStatusText(L"Compress failed");
-    const std::wstring wav = m_pendingCompressWav;
+    const auto wav = m_pendingCompressWav;
     m_pendingCompressWav.clear();
     if (message && !message->empty()) {
         m_tray.ShowBalloon(L"MeetingBuddy", message->c_str());
@@ -796,7 +796,7 @@ LRESULT MainWindow::OnRecordingError(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lPa
     if (m_session.IsActive()) {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
-    const std::wstring text = message ? *message : std::wstring{};
+    const auto text = message ? *message : std::wstring{};
     EnterIdleUi({}, false, &text);
     return 0;
 }
@@ -840,7 +840,7 @@ LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM l
     KillTimer(IDT_RECORD_ELAPSED);
     if (path && !path->empty()) {
         WriteSidecarForPath(*path);
-        const std::wstring text = L"Recording folder unavailable. Saved to:\n" + *path;
+        const auto text = L"Recording folder unavailable. Saved to:\n" + *path;
         m_tray.ShowBalloon(L"MeetingBuddy", text.c_str());
         ui::ShowMessage(m_hWnd, text.c_str(), MB_OK | MB_ICONWARNING);
         Log::Warn(text);
@@ -877,7 +877,7 @@ void MainWindow::OnFileExit(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void MainWindow::OnOpenRecordingsFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const std::wstring folder = Settings::Instance().RecordingsFolder();
+    const auto folder = Settings::Instance().RecordingsFolder();
     Paths::EnsureDirectory(folder);
     ::ShellExecuteW(m_hWnd, L"explore", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
@@ -906,7 +906,7 @@ void MainWindow::OnSettings(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void MainWindow::OnAbout(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    std::wstring text = std::wstring(kAppName) + L" " + kAppVersion + L"\n\n"
+    auto text = std::wstring(kAppName) + L" " + kAppVersion + L"\n\n"
         + L"Local meeting recorder and optional transcription.\n\n"
         + L"Transcription is local. The only network use is a model download you start.";
     ::MessageBoxW(m_hWnd, text.c_str(), L"About MeetingBuddy", MB_OK | MB_ICONINFORMATION);
@@ -955,7 +955,7 @@ LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
     SetTranscribeStatusText(L"Ready");
     RefreshRecordingsList();
     if (notify && !notify->audioPath.empty()) {
-        const std::wstring mdPath = RecordingLibrary::MdPathForAudio(notify->audioPath);
+        const auto mdPath = RecordingLibrary::MdPathForAudio(notify->audioPath);
         m_balloonTranscriptPath = mdPath;
         m_tray.ShowBalloon(L"MeetingBuddy", L"Transcript ready — click to open");
         if (IsWindowVisible() && !IsIconic()) {

@@ -13,17 +13,17 @@ struct FileFilter {
     const wchar_t* spec;
 };
 
-std::optional<std::wstring> PickFolder(HWND owner);
+auto PickFolder(HWND owner) -> std::optional<std::wstring>;
 
-std::optional<std::wstring> PickOpenFile(
+auto PickOpenFile(
     HWND owner,
     std::span<const FileFilter> filters,
-    const wchar_t* title);
+    const wchar_t* title) -> std::optional<std::wstring>;
 
-std::optional<std::wstring> PickSaveFile(
+auto PickSaveFile(
     HWND owner,
     std::span<const FileFilter> filters,
     const wchar_t* defaultExt,
-    const std::wstring& fileName);
+    const std::wstring& fileName) -> std::optional<std::wstring>;
 
 }  // namespace ui

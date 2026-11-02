@@ -137,7 +137,7 @@ void RecordingsView::OnDestroy() {
 }
 
 void RecordingsView::EnsureWatching() {
-    const std::wstring folder = Settings::Instance().RecordingsFolder();
+    const auto folder = Settings::Instance().RecordingsFolder();
     Paths::EnsureDirectory(folder);
     if (m_watcher.Folder() != folder) {
         m_watcher.Start(folder, m_hWnd, WM_APP_LIBRARY_CHANGED);
@@ -149,7 +149,7 @@ void RecordingsView::ApplyUiFont(HFONT font) {
         return;
     }
     SetFont(font);
-    for (HWND child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr; child = ::GetWindow(child, GW_HWNDNEXT)) {
+    for (auto child = ::GetWindow(m_hWnd, GW_CHILD); child != nullptr; child = ::GetWindow(child, GW_HWNDNEXT)) {
         ::SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
     }
     if (m_list.IsWindow()) {
@@ -237,7 +237,7 @@ void RecordingsView::FitColumns() {
 
 void RecordingsView::UpdateActionEnabled() {
     const bool hasSel = SelectedIndex() >= 0;
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     const bool canView = entry != nullptr && entry->hasMarkdown;
     EnableActions(hasSel, canView);
 }
@@ -261,19 +261,19 @@ int RecordingsView::SelectedIndex() const {
     return m_list.GetSelectedIndex();
 }
 
-const RecordingEntry* RecordingsView::SelectedEntry() const {
+auto RecordingsView::SelectedEntry() const -> const RecordingEntry* {
     const int sel = SelectedIndex();
     if (sel < 0) {
         return nullptr;
     }
-    const size_t index = static_cast<size_t>(m_list.GetItemData(sel));
+    const auto index = static_cast<size_t>(m_list.GetItemData(sel));
     if (index >= m_entries.size()) {
         return nullptr;
     }
     return &m_entries[index];
 }
 
-std::wstring RecordingsView::FormatDuration(double seconds) {
+auto RecordingsView::FormatDuration(double seconds) -> std::wstring {
     if (seconds < 0.0) {
         seconds = 0.0;
     }
@@ -290,7 +290,7 @@ std::wstring RecordingsView::FormatDuration(double seconds) {
     return buf;
 }
 
-std::wstring RecordingsView::FormatSize(uint64_t bytes) {
+auto RecordingsView::FormatSize(uint64_t bytes) -> std::wstring {
     wchar_t buf[64]{};
     if (bytes < 1024) {
         std::swprintf(buf, 64, L"%llu B", static_cast<unsigned long long>(bytes));
@@ -302,11 +302,11 @@ std::wstring RecordingsView::FormatSize(uint64_t bytes) {
     return buf;
 }
 
-std::wstring RecordingsView::FormatDate(const std::wstring& startLocal) {
+auto RecordingsView::FormatDate(const std::wstring& startLocal) -> std::wstring {
     return Text::IsoToDisplayMinute(startLocal);
 }
 
-std::wstring RecordingsView::TranscriptLabel(const RecordingEntry& entry) {
+auto RecordingsView::TranscriptLabel(const RecordingEntry& entry) -> std::wstring {
     switch (entry.transcriptStatus) {
     case TranscriptStatus::Queued:
         return L"Queued";
@@ -367,7 +367,7 @@ bool RecordingsView::PromptRename(std::wstring& stemName) {
 }
 
 void RecordingsView::OnPlay(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     if (entry == nullptr) {
         return;
     }
@@ -375,7 +375,7 @@ void RecordingsView::OnPlay(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void RecordingsView::OnTranscribe(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     if (entry == nullptr) {
         return;
     }
@@ -391,7 +391,7 @@ void RecordingsView::OnTranscribe(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void RecordingsView::OnView(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     if (entry == nullptr || !entry->hasMarkdown) {
         return;
     }
@@ -399,20 +399,20 @@ void RecordingsView::OnView(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void RecordingsView::OnOpenFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     if (entry == nullptr) {
         return;
     }
-    const std::wstring params = L"/select,\"" + entry->audioPath + L"\"";
+    const auto params = L"/select,\"" + entry->audioPath + L"\"";
     ::ShellExecuteW(m_hWnd, L"open", L"explorer.exe", params.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
 void RecordingsView::OnRename(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     if (entry == nullptr) {
         return;
     }
-    std::wstring stem = std::filesystem::path(entry->stem).filename().wstring();
+    auto stem = std::filesystem::path(entry->stem).filename().wstring();
     if (!PromptRename(stem)) {
         return;
     }
@@ -425,7 +425,7 @@ void RecordingsView::OnRename(UINT /*code*/, int /*id*/, HWND /*control*/) {
 }
 
 void RecordingsView::OnDelete(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     if (entry == nullptr) {
         return;
     }
@@ -458,7 +458,7 @@ LRESULT RecordingsView::OnColumnClick(LPNMHDR header) {
 }
 
 LRESULT RecordingsView::OnDoubleClick(LPNMHDR /*header*/) {
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     if (entry != nullptr && entry->hasMarkdown) {
         OnView(0, 0, nullptr);
     } else {
@@ -472,7 +472,7 @@ LRESULT RecordingsView::OnGetInfoTip(LPNMHDR header) {
     if (tip == nullptr || tip->iItem < 0) {
         return 0;
     }
-    const size_t index = static_cast<size_t>(m_list.GetItemData(tip->iItem));
+    const auto index = static_cast<size_t>(m_list.GetItemData(tip->iItem));
     if (index >= m_entries.size()) {
         return 0;
     }
@@ -486,12 +486,12 @@ LRESULT RecordingsView::OnGetInfoTip(LPNMHDR header) {
 LRESULT RecordingsView::OnRightClick(LPNMHDR /*header*/) {
     CMenu menu;
     menu.LoadMenu(IDR_RECORDINGS_MENU);
-    CMenuHandle popup = menu.GetSubMenu(0);
+    auto popup = menu.GetSubMenu(0);
     if (popup.m_hMenu == nullptr) {
         return 0;
     }
 
-    const RecordingEntry* entry = SelectedEntry();
+    const auto* entry = SelectedEntry();
     EnableMenuActions(popup, entry != nullptr, entry != nullptr && entry->hasMarkdown);
 
     POINT cursor{};

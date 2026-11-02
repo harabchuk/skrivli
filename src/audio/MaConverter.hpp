@@ -13,7 +13,7 @@ public:
     ~MaConverter();
 
     MaConverter(const MaConverter&) = delete;
-    MaConverter& operator=(const MaConverter&) = delete;
+    auto operator=(const MaConverter&) -> MaConverter& = delete;
 
     // Replaces any previous converter. `config.formatOut` must be ma_format_f32.
     bool Init(const ma_data_converter_config& config);

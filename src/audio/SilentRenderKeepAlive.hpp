@@ -14,7 +14,7 @@ public:
     ~SilentRenderKeepAlive();
 
     SilentRenderKeepAlive(const SilentRenderKeepAlive&) = delete;
-    SilentRenderKeepAlive& operator=(const SilentRenderKeepAlive&) = delete;
+    auto operator=(const SilentRenderKeepAlive&) -> SilentRenderKeepAlive& = delete;
 
     bool Start(IMMDevice* renderDevice);
     void Stop();

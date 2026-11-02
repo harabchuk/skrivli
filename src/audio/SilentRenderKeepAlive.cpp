@@ -60,7 +60,7 @@ void SilentRenderKeepAlive::RenderLoop() {
     }
 
     Microsoft::WRL::ComPtr<IAudioClient> audioClient;
-    HRESULT hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &audioClient);
+    auto hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &audioClient);
     if (FAILED(hr) || !audioClient) {
         return;
     }
@@ -118,7 +118,7 @@ void SilentRenderKeepAlive::RenderLoop() {
     }
 
     while (!m_stop.load(std::memory_order_acquire)) {
-        const DWORD wait = ::WaitForSingleObject(eventHandle, AudioFormat::kEventTimeoutMs);
+        const auto wait = ::WaitForSingleObject(eventHandle, AudioFormat::kEventTimeoutMs);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT) {
             break;
         }

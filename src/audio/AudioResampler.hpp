@@ -12,7 +12,7 @@ public:
     ~AudioResampler();
 
     AudioResampler(const AudioResampler&) = delete;
-    AudioResampler& operator=(const AudioResampler&) = delete;
+    auto operator=(const AudioResampler&) -> AudioResampler& = delete;
 
     // inputFormat is a WAVEFORMATEX* (possibly WAVEFORMATEXTENSIBLE).
     bool Initialize(const void* inputFormat);

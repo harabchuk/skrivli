@@ -10,7 +10,7 @@
 
 namespace {
 
-std::string Trim(std::string text) {
+auto Trim(std::string text) -> std::string {
     const auto notSpace = [](unsigned char ch) { return ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n'; };
     while (!text.empty() && !notSpace(static_cast<unsigned char>(text.front()))) {
         text.erase(text.begin());
@@ -21,21 +21,21 @@ std::string Trim(std::string text) {
     return text;
 }
 
-std::string FormatTimestamp(int64_t tenthsOfMs) {
+auto FormatTimestamp(int64_t tenthsOfMs) -> std::string {
     if (tenthsOfMs < 0) {
         tenthsOfMs = 0;
     }
     return Text::FormatHms<std::string>(static_cast<uint64_t>(tenthsOfMs / 100));
 }
 
-std::string FormatDuration(double seconds) {
+auto FormatDuration(double seconds) -> std::string {
     if (seconds < 0.0) {
         seconds = 0.0;
     }
     return Text::FormatHms<std::string>(static_cast<uint64_t>(std::llround(seconds)));
 }
 
-std::vector<TranscriptSegment> DedupAndTrim(const std::vector<TranscriptSegment>& segments) {
+auto DedupAndTrim(const std::vector<TranscriptSegment>& segments) -> std::vector<TranscriptSegment> {
     std::vector<TranscriptSegment> out;
     out.reserve(segments.size());
     int repeat = 0;
@@ -63,7 +63,7 @@ std::vector<TranscriptSegment> DedupAndTrim(const std::vector<TranscriptSegment>
 
 }  // namespace
 
-std::string MarkdownFormatter::Format(const TranscriptMeta& meta, const std::vector<TranscriptSegment>& segments) {
+auto MarkdownFormatter::Format(const TranscriptMeta& meta, const std::vector<TranscriptSegment>& segments) -> std::string {
     const auto cleaned = DedupAndTrim(segments);
 
     std::ostringstream ss;

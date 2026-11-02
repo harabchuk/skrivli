@@ -14,7 +14,7 @@ constexpr uint32_t kLpfOrder = 8;
 
 }  // namespace
 
-std::vector<float> Resampler::Stereo48kToMono16k(const float* interleavedStereo, size_t frameCount) {
+auto Resampler::Stereo48kToMono16k(const float* interleavedStereo, size_t frameCount) -> std::vector<float> {
     if (interleavedStereo == nullptr || frameCount == 0) {
         return {};
     }

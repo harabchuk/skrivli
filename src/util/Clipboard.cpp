@@ -6,14 +6,14 @@ bool Clipboard::SetUnicodeText(HWND owner, const std::wstring& text) {
     }
     ::EmptyClipboard();
 
-    const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
-    HGLOBAL mem = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+    const auto bytes = (text.size() + 1) * sizeof(wchar_t);
+    const auto mem = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
     if (mem == nullptr) {
         ::CloseClipboard();
         return false;
     }
 
-    void* locked = ::GlobalLock(mem);
+    auto* locked = ::GlobalLock(mem);
     if (locked == nullptr) {
         ::GlobalFree(mem);
         ::CloseClipboard();

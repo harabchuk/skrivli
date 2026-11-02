@@ -25,13 +25,13 @@ namespace {
 
 constexpr uint64_t kIdleUnloadMs = 5ull * 60ull * 1000ull;
 
-std::string TitleFromStartLocal(const std::string& startLocal) {
+auto TitleFromStartLocal(const std::string& startLocal) -> std::string {
     return startLocal.empty() ? "Meeting" : Text::IsoToDisplayMinute(startLocal);
 }
 
-std::string RecordedRange(const RecordingSidecar& side) {
-    const std::string start = Text::IsoToDisplayMinute(side.startLocal);
-    std::string end = Text::IsoToDisplayMinute(side.endLocal);
+auto RecordedRange(const RecordingSidecar& side) -> std::string {
+    const auto start = Text::IsoToDisplayMinute(side.startLocal);
+    auto end = Text::IsoToDisplayMinute(side.endLocal);
     if (end.size() >= 16 && start.size() >= 10 && end.compare(0, 10, start, 0, 10) == 0) {
         // Same day → show end time only after en-dash.
         end = end.substr(11);
@@ -47,7 +47,7 @@ std::string RecordedRange(const RecordingSidecar& side) {
 
 }  // namespace
 
-TranscriptionService& TranscriptionService::Instance() {
+auto TranscriptionService::Instance() -> TranscriptionService& {
     static TranscriptionService instance;
     return instance;
 }
@@ -93,8 +93,8 @@ bool TranscriptionService::Enqueue(HWND ownerForModelUi, const std::wstring& aud
     Start();
 
     const auto& settings = Settings::Instance().Data();
-    std::wstring modelFile = settings.model.empty() ? ModelManager::kDefaultModel : settings.model;
-    const std::wstring modelPath = ModelManager::EnsureModel(ownerForModelUi, modelFile);
+    auto modelFile = settings.model.empty() ? ModelManager::kDefaultModel : settings.model;
+    const auto modelPath = ModelManager::EnsureModel(ownerForModelUi, modelFile);
     if (modelPath.empty()) {
         return false;
     }
@@ -183,7 +183,7 @@ void TranscriptionService::UpdateSidecarStatus(
     const std::string& model,
     const std::string& language) {
     RecordingSidecar side{};
-    const std::wstring jsonPath = RecordingLibrary::JsonPathForAudio(audioPath);
+    const auto jsonPath = RecordingLibrary::JsonPathForAudio(audioPath);
     if (!Sidecar::Load(jsonPath, side)) {
         side = RecordingSidecar::ForAudio(audioPath);
     }
@@ -359,8 +359,8 @@ void TranscriptionService::ProcessJob(Job job) {
     meta.languageConfigured = job.language;
     meta.languageDetected = detectedLanguage;
 
-    const std::string markdown = MarkdownFormatter::Format(meta, allSegments);
-    const std::wstring mdPath = RecordingLibrary::MdPathForAudio(job.audioPath);
+    const auto markdown = MarkdownFormatter::Format(meta, allSegments);
+    const auto mdPath = RecordingLibrary::MdPathForAudio(job.audioPath);
     if (!MarkdownFormatter::WriteUtf8NoBom(mdPath, markdown)) {
         FailJob(job, TranscriptStatus::Failed, L"Failed to write markdown");
         return;

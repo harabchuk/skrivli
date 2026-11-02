@@ -14,7 +14,7 @@ namespace Hotkey {
 // Parses chords like "Ctrl+Alt+R", "Ctrl+Shift+F9". Case-insensitive.
 HotkeyChord Parse(const std::wstring& text);
 
-std::wstring Format(const HotkeyChord& chord);
+auto Format(const HotkeyChord& chord) -> std::wstring;
 
 bool Register(HWND hwnd, int id, const HotkeyChord& chord);
 void Unregister(HWND hwnd, int id);

@@ -23,7 +23,7 @@ struct TranscribeNotify {
 
 class TranscriptionService {
 public:
-    static TranscriptionService& Instance();
+    static auto Instance() -> TranscriptionService&;
 
     void SetNotifyHwnd(HWND hwnd);
     void Start();

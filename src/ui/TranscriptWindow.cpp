@@ -26,7 +26,7 @@ std::map<std::wstring, TranscriptWindow*> TranscriptWindow::s_open;
 
 namespace {
 
-std::wstring NormalizePathKey(const std::wstring& path) {
+auto NormalizePathKey(const std::wstring& path) -> std::wstring {
     std::wstring key = path;
     for (auto& ch : key) {
         if (ch == L'/') {
@@ -40,7 +40,7 @@ std::wstring NormalizePathKey(const std::wstring& path) {
 int CountWords(const std::wstring& text) {
     int count = 0;
     bool inWord = false;
-    for (wchar_t ch : text) {
+    for (const auto ch : text) {
         const bool space = iswspace(ch) != 0;
         if (!space && !inWord) {
             ++count;
@@ -76,11 +76,11 @@ BOOL TranscriptWindow::PreTranslateMessage(MSG* msg) {
     return FALSE;
 }
 
-TranscriptWindow* TranscriptWindow::OpenOrActivate(const std::wstring& mdPath) {
+auto TranscriptWindow::OpenOrActivate(const std::wstring& mdPath) -> TranscriptWindow* {
     if (mdPath.empty()) {
         return nullptr;
     }
-    const std::wstring key = NormalizePathKey(mdPath);
+    const auto key = NormalizePathKey(mdPath);
     const auto it = s_open.find(key);
     if (it != s_open.end() && it->second != nullptr && it->second->IsWindow()) {
         it->second->ShowWindow(SW_RESTORE);
@@ -119,7 +119,7 @@ void TranscriptWindow::CloseAll() {
 }
 
 LRESULT TranscriptWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
-    WTL::CMessageLoop* loop = _Module.GetMessageLoop();
+    auto* loop = _Module.GetMessageLoop();
     if (loop != nullptr) {
         loop->AddMessageFilter(this);
     }
@@ -133,7 +133,7 @@ LRESULT TranscriptWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
 
     m_hWndClient = nullptr;
     const DWORD toolbarStyle = WS_CHILD | WS_VISIBLE | CCS_TOP | TBSTYLE_LIST | TBSTYLE_WRAPABLE | TBSTYLE_TOOLTIPS;
-    HWND toolbarHwnd = ::CreateWindowExW(
+    auto toolbarHwnd = ::CreateWindowExW(
         0,
         TOOLBARCLASSNAMEW,
         nullptr,
@@ -165,7 +165,7 @@ LRESULT TranscriptWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     m_status.SetPanes(panes, 1, true);
 
     const DWORD style = WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_NOHIDESEL;
-    HWND edit = ::CreateWindowExW(
+    auto edit = ::CreateWindowExW(
         WS_EX_CLIENTEDGE,
         MSFTEDIT_CLASS,
         L"",
@@ -201,7 +201,7 @@ bool TranscriptWindow::LoadFile(const std::wstring& mdPath) {
     }
     m_utf8Source = std::move(*bytes);
 
-    const std::wstring wide = Text::Utf8ToWide(m_utf8Source);
+    const auto wide = Text::Utf8ToWide(m_utf8Source);
     m_edit.SetWindowText(wide.c_str());
     ApplyLightStyling();
     UpdateWordCount();
@@ -212,7 +212,7 @@ bool TranscriptWindow::LoadFile(const std::wstring& mdPath) {
     m_path = mdPath;
     s_open[NormalizePathKey(m_path)] = this;
 
-    const std::wstring title = L"Transcript — " + std::filesystem::path(mdPath).filename().wstring();
+    const auto title = L"Transcript — " + std::filesystem::path(mdPath).filename().wstring();
     SetWindowText(title.c_str());
     LayoutChildren();
     return true;
@@ -241,7 +241,7 @@ void TranscriptWindow::ApplyLightStyling() {
     // Headings starting with '#'
     size_t lineStart = 0;
     while (lineStart < body.size()) {
-        size_t lineEnd = body.find(L'\n', lineStart);
+        auto lineEnd = body.find(L'\n', lineStart);
         if (lineEnd == std::wstring::npos) {
             lineEnd = body.size();
         }
@@ -261,7 +261,7 @@ void TranscriptWindow::ApplyLightStyling() {
     // **[hh:mm:ss]** timestamps
     size_t pos = 0;
     while ((pos = body.find(L"**[", pos)) != std::wstring::npos) {
-        const size_t end = body.find(L"]**", pos);
+        const auto end = body.find(L"]**", pos);
         if (end == std::wstring::npos) {
             break;
         }
@@ -285,19 +285,19 @@ void TranscriptWindow::UpdateWordCount() {
     m_status.SetPaneText(0, buf);
 }
 
-std::wstring TranscriptWindow::GetPlainText() const {
+auto TranscriptWindow::GetPlainText() const -> std::wstring {
     CString text;
     const_cast<TranscriptWindow*>(this)->m_edit.GetWindowText(text);
     return text.GetString();
 }
 
-std::wstring TranscriptWindow::GetSelectionOrAll() const {
+auto TranscriptWindow::GetSelectionOrAll() const -> std::wstring {
     CHARRANGE range{};
     const_cast<TranscriptWindow*>(this)->m_edit.GetSel(range);
     if (range.cpMin == range.cpMax) {
         return GetPlainText();
     }
-    const std::wstring all = GetPlainText();
+    const auto all = GetPlainText();
     if (range.cpMin < 0 || range.cpMax > static_cast<LONG>(all.size()) || range.cpMin > range.cpMax) {
         return all;
     }
@@ -305,7 +305,7 @@ std::wstring TranscriptWindow::GetSelectionOrAll() const {
 }
 
 bool TranscriptWindow::CopyPlainMarkdown(bool selectionOnly) {
-    const std::wstring text = selectionOnly ? GetSelectionOrAll() : GetPlainText();
+    const auto text = selectionOnly ? GetSelectionOrAll() : GetPlainText();
     return Clipboard::SetUnicodeText(m_hWnd, text);
 }
 
@@ -342,7 +342,7 @@ void TranscriptWindow::OnClose() {
 }
 
 void TranscriptWindow::OnDestroy() {
-    WTL::CMessageLoop* loop = _Module.GetMessageLoop();
+    auto* loop = _Module.GetMessageLoop();
     if (loop != nullptr) {
         loop->RemoveMessageFilter(this);
     }
@@ -392,7 +392,7 @@ void TranscriptWindow::OnSaveAs(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (!picked) {
         return;
     }
-    const std::wstring& dest = *picked;
+    const auto& dest = *picked;
     if (!MarkdownFormatter::WriteUtf8NoBom(dest, m_utf8Source)) {
         ui::ShowMessage(m_hWnd, L"Could not save the transcript.", MB_OK | MB_ICONWARNING);
     }
@@ -449,7 +449,7 @@ LRESULT TranscriptWindow::OnFindMsg(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lPar
         flags |= FR_DOWN;
     }
 
-    const LRESULT found = m_edit.SendMessage(EM_FINDTEXTEXW, flags, reinterpret_cast<LPARAM>(&ft));
+    const auto found = m_edit.SendMessage(EM_FINDTEXTEXW, flags, reinterpret_cast<LPARAM>(&ft));
     if (found >= 0) {
         m_edit.SetSel(ft.chrgText);
         m_edit.SendMessage(EM_SCROLLCARET, 0, 0);

@@ -17,7 +17,7 @@ public:
     ~LevelMonitor();
 
     LevelMonitor(const LevelMonitor&) = delete;
-    LevelMonitor& operator=(const LevelMonitor&) = delete;
+    auto operator=(const LevelMonitor&) -> LevelMonitor& = delete;
 
     void SetDeviceManager(DeviceManager* devices) { m_devices = devices; }
 

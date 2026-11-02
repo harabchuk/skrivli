@@ -25,7 +25,7 @@ public:
     }
 
     ScopedComInit(const ScopedComInit&) = delete;
-    ScopedComInit& operator=(const ScopedComInit&) = delete;
+    auto operator=(const ScopedComInit&) -> ScopedComInit& = delete;
 
     HRESULT Result() const noexcept { return m_hr; }
 
@@ -51,7 +51,7 @@ public:
     }
 
     ScopedMmcss(const ScopedMmcss&) = delete;
-    ScopedMmcss& operator=(const ScopedMmcss&) = delete;
+    auto operator=(const ScopedMmcss&) -> ScopedMmcss& = delete;
 
     bool IsRegistered() const noexcept { return m_handle != nullptr; }
 
@@ -72,7 +72,7 @@ public:
     }
 
     ScopedMfStartup(const ScopedMfStartup&) = delete;
-    ScopedMfStartup& operator=(const ScopedMfStartup&) = delete;
+    auto operator=(const ScopedMfStartup&) -> ScopedMfStartup& = delete;
 
     HRESULT Result() const noexcept { return m_hr; }
     bool IsStarted() const noexcept { return SUCCEEDED(m_hr); }

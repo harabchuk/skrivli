@@ -5,7 +5,7 @@
 
 namespace {
 
-std::wstring Trim(std::wstring value) {
+auto Trim(std::wstring value) -> std::wstring {
     while (!value.empty() && iswspace(value.front())) {
         value.erase(value.begin());
     }
@@ -15,14 +15,14 @@ std::wstring Trim(std::wstring value) {
     return value;
 }
 
-std::wstring ToLower(std::wstring value) {
+auto ToLower(std::wstring value) -> std::wstring {
     for (auto& ch : value) {
         ch = static_cast<wchar_t>(towlower(ch));
     }
     return value;
 }
 
-std::vector<std::wstring> SplitPlus(const std::wstring& text) {
+auto SplitPlus(const std::wstring& text) -> std::vector<std::wstring> {
     std::vector<std::wstring> parts;
     std::wstring current;
     for (wchar_t ch : text) {
@@ -38,7 +38,7 @@ std::vector<std::wstring> SplitPlus(const std::wstring& text) {
 }
 
 UINT ParseKeyToken(const std::wstring& token) {
-    const std::wstring lower = ToLower(token);
+    const auto lower = ToLower(token);
     if (lower == L"ctrl" || lower == L"control") {
         return 0; // modifier
     }
@@ -71,7 +71,7 @@ UINT ParseKeyToken(const std::wstring& token) {
 }
 
 bool IsModifierToken(const std::wstring& token) {
-    const std::wstring lower = ToLower(token);
+    const auto lower = ToLower(token);
     return lower == L"ctrl" || lower == L"control" || lower == L"alt" || lower == L"shift"
         || lower == L"win" || lower == L"windows";
 }
@@ -93,7 +93,7 @@ HotkeyChord Parse(const std::wstring& text) {
         if (part.empty()) {
             continue;
         }
-        const std::wstring lower = ToLower(part);
+        const auto lower = ToLower(part);
         if (lower == L"ctrl" || lower == L"control") {
             modifiers |= MOD_CONTROL;
             continue;
@@ -128,7 +128,7 @@ HotkeyChord Parse(const std::wstring& text) {
     return chord;
 }
 
-std::wstring Format(const HotkeyChord& chord) {
+auto Format(const HotkeyChord& chord) -> std::wstring {
     if (!chord.valid) {
         return {};
     }

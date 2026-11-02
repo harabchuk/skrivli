@@ -17,7 +17,7 @@ public:
     ~WhisperEngine();
 
     WhisperEngine(const WhisperEngine&) = delete;
-    WhisperEngine& operator=(const WhisperEngine&) = delete;
+    auto operator=(const WhisperEngine&) -> WhisperEngine& = delete;
 
     bool EnsureLoaded(const std::wstring& modelPath, std::wstring& error);
     void Unload();

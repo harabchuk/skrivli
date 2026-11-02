@@ -41,7 +41,7 @@ namespace Sidecar {
 bool Load(const std::wstring& jsonPath, RecordingSidecar& out);
 bool Save(const std::wstring& jsonPath, const RecordingSidecar& data);
 
-std::string FormatLocalTimestamp(const SYSTEMTIME& local);
-std::string FormatLocalTimestampNow();
+auto FormatLocalTimestamp(const SYSTEMTIME& local) -> std::string;
+auto FormatLocalTimestampNow() -> std::string;
 
 }  // namespace Sidecar

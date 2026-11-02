@@ -88,9 +88,9 @@ void RecordingSession::CaptureSource::Stop() {
     }
 }
 
-Microsoft::WRL::ComPtr<IMMDevice> RecordingSession::CaptureSource::Resolve(
-    const DeviceManager& devices) const {
-    const std::wstring id = usesDefault ? std::wstring{} : deviceId;
+auto RecordingSession::CaptureSource::Resolve(
+    const DeviceManager& devices) const -> Microsoft::WRL::ComPtr<IMMDevice> {
+    const auto id = usesDefault ? std::wstring{} : deviceId;
     return mode == CaptureStream::Mode::Microphone
         ? devices.ResolveCaptureDevice(id)
         : devices.ResolveRenderDevice(id);
@@ -163,7 +163,7 @@ bool RecordingSession::IsDeviceBusy(HRESULT hr) {
         || hr == AUDCLNT_E_ENDPOINT_CREATE_FAILED;
 }
 
-std::wstring RecordingSession::DescribeCaptureError(HRESULT hr, bool isMic) {
+auto RecordingSession::DescribeCaptureError(HRESULT hr, bool isMic) -> std::wstring {
     const wchar_t* which = isMic ? L"microphone" : L"system audio";
     if (IsPrivacyDenied(hr)) {
         return L"Microphone access is denied. Enable microphone privacy in Windows Settings.";
@@ -182,23 +182,23 @@ void RecordingSession::AddDeviceNote(const std::wstring& note) {
     Log::Info(L"Device note: " + note);
 }
 
-std::vector<std::wstring> RecordingSession::TakeDeviceNotes() {
+auto RecordingSession::TakeDeviceNotes() -> std::vector<std::wstring> {
     std::lock_guard<std::mutex> lock(m_notesMutex);
     std::vector<std::wstring> notes;
     notes.swap(m_deviceNotes);
     return notes;
 }
 
-std::wstring RecordingSession::MicDeviceName() const {
+auto RecordingSession::MicDeviceName() const -> std::wstring {
     return m_mic.name;
 }
 
-std::wstring RecordingSession::SystemDeviceName() const {
+auto RecordingSession::SystemDeviceName() const -> std::wstring {
     return m_sys.name;
 }
 
 double RecordingSession::ElapsedSeconds() const {
-    const uint64_t start = m_startQpc.load(std::memory_order_acquire);
+    const auto start = m_startQpc.load(std::memory_order_acquire);
     if (start == 0) {
         return 0.0;
     }
@@ -274,7 +274,7 @@ void RecordingSession::ResetForStart(
     m_micGain = micGain;
     m_micAgc = micAgc;
     m_systemGain = systemGain;
-    for (CaptureSource* source : {&m_mic, &m_sys}) {
+    for (auto* source : {&m_mic, &m_sys}) {
         source->enabled = false;
         source->name.clear();
         source->notedSilent = false;
@@ -298,7 +298,7 @@ bool RecordingSession::OpenOutputFiles(const std::wstring& folder, RecordingStar
     }
 
     if (m_saveStems) {
-        std::wstring stemBase = m_writer.FinalPath();
+        auto stemBase = m_writer.FinalPath();
         const std::wstring wavExt = L".wav";
         if (Text::EndsWithIgnoreCase(stemBase, wavExt)) {
             stemBase.erase(stemBase.size() - wavExt.size());
@@ -334,7 +334,7 @@ bool RecordingSession::OpenSources(RecordingStartResult& result) {
     }
 
     if (sysPresent && !m_sys.Open(renderDevice.Get(), nullptr)) {
-        const HRESULT hr = m_sys.stream.FatalError();
+        const auto hr = m_sys.stream.FatalError();
         Log::Warn(DescribeCaptureError(hr, false));
         if (IsDeviceBusy(hr) && micPresent) {
             result.warning = L"System audio unavailable (in use). Recording microphone only.";
@@ -349,7 +349,7 @@ bool RecordingSession::OpenSources(RecordingStartResult& result) {
     }
 
     if (micPresent && !m_mic.Open(micDevice.Get(), nullptr)) {
-        const HRESULT hr = m_mic.stream.FatalError();
+        const auto hr = m_mic.stream.FatalError();
         if (IsPrivacyDenied(hr)) {
             TeardownCapture();
             m_stems.Discard();
@@ -390,7 +390,7 @@ RecordingStartResult RecordingSession::Start(
     std::lock_guard<std::mutex> lock(m_startStopMutex);
     RecordingStartResult result{};
 
-    const State state = GetState();
+    const auto state = GetState();
     if (state != State::Idle && state != State::Error) {
         Log::Warn(L"RecordingSession::Start ignored — invalid state");
         result.error = L"A recording is already in progress.";
@@ -445,7 +445,7 @@ RecordingStartResult RecordingSession::Start(
 void RecordingSession::Stop(StopMode mode) {
     std::lock_guard<std::mutex> lock(m_startStopMutex);
 
-    const State state = GetState();
+    const auto state = GetState();
     if (state != State::Recording && state != State::Starting) {
         if (m_writerThread.joinable()) {
             m_stopWriter.store(true, std::memory_order_release);
@@ -540,12 +540,12 @@ void RecordingSession::ServiceDevices() {
 }
 
 bool RecordingSession::CheckDiskSpace(ULONGLONG& lastCheck) {
-    const ULONGLONG nowTick = ::GetTickCount64();
+    const auto nowTick = ::GetTickCount64();
     if (nowTick - lastCheck < kDiskCheckIntervalMs) {
         return true;
     }
     lastCheck = nowTick;
-    const std::wstring folder = m_writer.Folder();
+    const auto folder = m_writer.Folder();
     if (!folder.empty() && !WavWriter::FolderHasFreeSpace(folder)) {
         Post(WM_APP_LOW_DISK);
         m_stopWriter.store(true, std::memory_order_release);
@@ -594,7 +594,7 @@ void RecordingSession::WriterMain() {
     float block[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
     float micStem[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
     float sysStem[AudioFormat::kBlockFrames * AudioFormat::kChannels]{};
-    ULONGLONG lastDiskCheck = ::GetTickCount64();
+    auto lastDiskCheck = ::GetTickCount64();
     bool rescued = false;
 
     while (!m_stopWriter.load(std::memory_order_acquire)) {

@@ -9,7 +9,7 @@ public:
     ~TrayIcon();
 
     TrayIcon(const TrayIcon&) = delete;
-    TrayIcon& operator=(const TrayIcon&) = delete;
+    auto operator=(const TrayIcon&) -> TrayIcon& = delete;
 
     bool Add(HWND owner);
     void Remove();

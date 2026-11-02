@@ -79,13 +79,13 @@ private:
     void EnableActions(bool hasSel, bool canView);
     static void EnableMenuActions(WTL::CMenuHandle popup, bool hasSel, bool canView);
     int SelectedIndex() const;
-    const RecordingEntry* SelectedEntry() const;
+    auto SelectedEntry() const -> const RecordingEntry*;
     void ApplySort();
     void ToggleSort(Column column);
-    static std::wstring FormatDuration(double seconds);
-    static std::wstring FormatSize(uint64_t bytes);
-    static std::wstring FormatDate(const std::wstring& startLocal);
-    static std::wstring TranscriptLabel(const RecordingEntry& entry);
+    static auto FormatDuration(double seconds) -> std::wstring;
+    static auto FormatSize(uint64_t bytes) -> std::wstring;
+    static auto FormatDate(const std::wstring& startLocal) -> std::wstring;
+    static auto TranscriptLabel(const RecordingEntry& entry) -> std::wstring;
     bool PromptRename(std::wstring& stemName);
 
     WTL::CListViewCtrl m_list;

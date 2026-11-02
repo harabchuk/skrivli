@@ -15,7 +15,7 @@ namespace {
 constexpr unsigned char kBomBytes[] = {0xEF, 0xBB, 0xBF};
 
 bool WriteDirect(const std::wstring& path, std::string_view data) {
-    HANDLE file = ::CreateFileW(
+    const auto file = ::CreateFileW(
         path.c_str(),
         GENERIC_WRITE,
         FILE_SHARE_READ,
@@ -34,14 +34,14 @@ bool WriteDirect(const std::wstring& path, std::string_view data) {
 
 }  // namespace
 
-std::optional<std::string> ReadFileBytes(const std::wstring& path, StripBom stripBom) {
+auto ReadFileBytes(const std::wstring& path, StripBom stripBom) -> std::optional<std::string> {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         return std::nullopt;
     }
     std::ostringstream ss;
     ss << file.rdbuf();
-    std::string bytes = ss.str();
+    auto bytes = ss.str();
     if (stripBom == StripBom::Yes
         && bytes.size() >= sizeof(kBomBytes)
         && static_cast<unsigned char>(bytes[0]) == kBomBytes[0]
@@ -57,7 +57,7 @@ bool WriteFileBytes(const std::wstring& path, std::string_view data, WriteMode m
         return WriteDirect(path, data);
     }
 
-    const std::wstring temp = path + L".tmp";
+    const auto temp = path + L".tmp";
     if (!WriteDirect(temp, data)) {
         ::DeleteFileW(temp.c_str());
         return false;
@@ -73,8 +73,8 @@ bool IsWritableDirectory(const std::wstring& folder) {
     if (!Paths::EnsureDirectory(folder)) {
         return false;
     }
-    const std::filesystem::path probe = std::filesystem::path(folder) / L".meetingbuddy_write_test";
-    HANDLE file = ::CreateFileW(
+    const auto probe = std::filesystem::path(folder) / L".meetingbuddy_write_test";
+    const auto file = ::CreateFileW(
         probe.c_str(),
         GENERIC_WRITE,
         0,

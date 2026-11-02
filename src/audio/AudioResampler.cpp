@@ -81,13 +81,13 @@ bool AudioResampler::Initialize(const void* inputFormatBytes) {
         return false;
     }
 
-    const ma_format inputSampleFormat = FormatFromWave(inputFormat);
+    const auto inputSampleFormat = FormatFromWave(inputFormat);
     if (inputSampleFormat == ma_format_unknown) {
         Log::Error(L"Mix format is not supported by the miniaudio resampler");
         return false;
     }
 
-    const ma_uint32 bytesPerFrame = ma_get_bytes_per_frame(inputSampleFormat, inputFormat->nChannels);
+    const auto bytesPerFrame = ma_get_bytes_per_frame(inputSampleFormat, inputFormat->nChannels);
     if (bytesPerFrame == 0 || inputFormat->nBlockAlign != bytesPerFrame) {
         Log::Error(L"Mix format block align does not match the miniaudio sample format");
         return false;
@@ -102,7 +102,7 @@ bool AudioResampler::Initialize(const void* inputFormatBytes) {
         inputFormat->nChannels);
     ma_channel_map_init_standard(ma_standard_channel_map_microsoft, outputMap, 2, 2);
 
-    ma_data_converter_config config = ma_data_converter_config_init(
+    auto config = ma_data_converter_config_init(
         inputSampleFormat,
         ma_format_f32,
         inputFormat->nChannels,
@@ -140,7 +140,7 @@ bool AudioResampler::Process(
         return false;
     }
 
-    ma_uint64 expected = m_state->converter.ExpectedOutputFrames(inputFrames, 0);
+    auto expected = m_state->converter.ExpectedOutputFrames(inputFrames, 0);
     if (expected == 0) {
         expected = static_cast<ma_uint64>(inputFrames) + 256;
     }

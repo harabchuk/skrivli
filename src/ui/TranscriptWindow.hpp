@@ -31,11 +31,11 @@ public:
 
     BOOL PreTranslateMessage(MSG* msg);
 
-    static TranscriptWindow* OpenOrActivate(const std::wstring& mdPath);
+    static auto OpenOrActivate(const std::wstring& mdPath) -> TranscriptWindow*;
     static void CloseAll();
 
     bool LoadFile(const std::wstring& mdPath);
-    const std::wstring& Path() const { return m_path; }
+    auto Path() const -> const std::wstring& { return m_path; }
     void OnFinalMessage(HWND /*hwnd*/) override { delete this; }
 
 private:
@@ -56,8 +56,8 @@ private:
     void LayoutChildren();
     void ApplyLightStyling();
     void UpdateWordCount();
-    std::wstring GetPlainText() const;
-    std::wstring GetSelectionOrAll() const;
+    auto GetPlainText() const -> std::wstring;
+    auto GetSelectionOrAll() const -> std::wstring;
     bool CopyPlainMarkdown(bool selectionOnly);
 
     WTL::CToolBarCtrl m_toolbar;

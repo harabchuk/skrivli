@@ -17,7 +17,7 @@ constexpr wchar_t kShowYourselfMessage[] = L"MeetingBuddy.ShowYourself";
 
 bool Application::HasTrayArgument() {
     int argc = 0;
-    LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
+    auto* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
     if (argv == nullptr) {
         return false;
     }
@@ -45,11 +45,11 @@ bool Application::ClaimSingleInstance() {
 }
 
 void Application::ActivateExistingInstance() const {
-    const HWND existing = ::FindWindowW(kMainWindowClass, nullptr);
+    const auto existing = ::FindWindowW(kMainWindowClass, nullptr);
     if (existing == nullptr) {
         return;
     }
-    const UINT msg = ::RegisterWindowMessageW(kShowYourselfMessage);
+    const auto msg = ::RegisterWindowMessageW(kShowYourselfMessage);
     if (msg != 0) {
         ::PostMessageW(existing, msg, 0, 0);
     }

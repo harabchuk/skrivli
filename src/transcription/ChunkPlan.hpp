@@ -28,7 +28,7 @@ struct ChunkPlan {
     }
 
     // Each entry is (frameOffset, frameCount) into interleaved stereo at 48 kHz.
-    static std::vector<std::pair<size_t, size_t>> Plan(size_t totalFrames48) {
+    static auto Plan(size_t totalFrames48) -> std::vector<std::pair<size_t, size_t>> {
         std::vector<std::pair<size_t, size_t>> chunks;
         if (totalFrames48 == 0) {
             return chunks;

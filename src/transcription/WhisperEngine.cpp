@@ -59,7 +59,7 @@ bool WhisperEngine::EnsureLoaded(const std::wstring& modelPath, std::wstring& er
         m_modelPath.clear();
     }
 
-    const std::string utf8 = Text::WideToUtf8(modelPath);
+    const auto utf8 = Text::WideToUtf8(modelPath);
     whisper_context_params cparams = whisper_context_default_params();
     m_ctx = whisper_init_from_file_with_params(utf8.c_str(), cparams);
     if (m_ctx == nullptr) {

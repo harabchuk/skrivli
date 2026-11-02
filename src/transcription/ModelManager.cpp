@@ -32,7 +32,7 @@ namespace {
 constexpr wchar_t kHost[] = L"huggingface.co";
 constexpr wchar_t kPathPrefix[] = L"/ggerganov/whisper.cpp/resolve/main/";
 
-std::string ToLowerHex(const BYTE* data, DWORD len) {
+auto ToLowerHex(const BYTE* data, DWORD len) -> std::string {
     static const char* kDigits = "0123456789abcdef";
     std::string out;
     out.resize(static_cast<size_t>(len) * 2);
@@ -83,7 +83,7 @@ HWND CreateDownloadDialog(HWND owner, DownloadProgress* state) {
         ::RegisterClassW(&wc);
     }
 
-    HWND dlg = ::CreateWindowExW(
+    auto dlg = ::CreateWindowExW(
         WS_EX_DLGMODALFRAME,
         className,
         L"Downloading model",
@@ -114,7 +114,7 @@ HWND CreateDownloadDialog(HWND owner, DownloadProgress* state) {
         _Module.GetModuleInstance(),
         nullptr);
 
-    HWND bar = ::CreateWindowExW(
+    auto bar = ::CreateWindowExW(
         0,
         PROGRESS_CLASSW,
         L"",
@@ -196,7 +196,7 @@ bool OpenRequest(
         return false;
     }
 
-    const std::wstring object = std::wstring(kPathPrefix) + fileName;
+    const auto object = std::wstring(kPathPrefix) + fileName;
     response.request.reset(::WinHttpOpenRequest(
         response.connect.get(),
         L"GET",
@@ -274,7 +274,7 @@ bool StreamToFile(
         }
     }
 
-    const HANDLE rawFile = ::CreateFileW(
+    const auto rawFile = ::CreateFileW(
         partial.c_str(),
         GENERIC_WRITE,
         FILE_SHARE_READ,
@@ -313,7 +313,7 @@ bool StreamToFile(
             return true;
         }
 
-        const DWORD toRead = (std::min)(available, static_cast<DWORD>(buffer.size()));
+        const auto toRead = (std::min)(available, static_cast<DWORD>(buffer.size()));
         DWORD read = 0;
         if (!::WinHttpReadData(response.request.get(), buffer.data(), toRead, &read) || read == 0) {
             error = L"WinHttpReadData failed.";
@@ -342,8 +342,8 @@ bool HttpDownloadToFile(
     const std::wstring& destPath,
     DownloadProgress* progress,
     std::wstring& error) {
-    const std::wstring partial = destPath + L".partial";
-    const uint64_t existing = FileIo::FileSize(partial);
+    const auto partial = destPath + L".partial";
+    const auto existing = FileIo::FileSize(partial);
 
     {
         HttpResponse response;
@@ -368,7 +368,7 @@ bool HttpDownloadToFile(
 
 }  // namespace
 
-const std::vector<ModelInfo>& ModelManager::OfferedModels() {
+auto ModelManager::OfferedModels() -> const std::vector<ModelInfo>& {
     // SHA-256 digests from Hugging Face LFS (ggerganov/whisper.cpp).
     static const std::vector<ModelInfo> kModels = {
         {L"ggml-tiny.bin", L"tiny", "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"},
@@ -387,7 +387,7 @@ const std::vector<ModelInfo>& ModelManager::OfferedModels() {
     return kModels;
 }
 
-const ModelInfo* ModelManager::Find(const std::wstring& fileName) {
+auto ModelManager::Find(const std::wstring& fileName) -> const ModelInfo* {
     for (const auto& model : OfferedModels()) {
         if (_wcsicmp(model.fileName.c_str(), fileName.c_str()) == 0) {
             return &model;
@@ -396,7 +396,7 @@ const ModelInfo* ModelManager::Find(const std::wstring& fileName) {
     return nullptr;
 }
 
-std::wstring ModelManager::ModelPath(const std::wstring& fileName) {
+auto ModelManager::ModelPath(const std::wstring& fileName) -> std::wstring {
     return (std::filesystem::path(Paths::ModelsDir()) / fileName).wstring();
 }
 
@@ -404,7 +404,7 @@ bool ModelManager::IsPresent(const std::wstring& fileName) {
     return std::filesystem::exists(ModelPath(fileName));
 }
 
-std::wstring ModelManager::VadModelPath() {
+auto ModelManager::VadModelPath() -> std::wstring {
     return (std::filesystem::path(Paths::ModelsDir()) / L"ggml-silero-v5.1.2.bin").wstring();
 }
 
@@ -412,7 +412,7 @@ bool ModelManager::VadModelPresent() {
     return std::filesystem::exists(VadModelPath());
 }
 
-std::wstring ModelManager::Sha256Hex(const std::wstring& path) {
+auto ModelManager::Sha256Hex(const std::wstring& path) -> std::wstring {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         return {};
@@ -440,7 +440,7 @@ std::wstring ModelManager::Sha256Hex(const std::wstring& path) {
     std::vector<char> buffer(1024 * 1024);
     while (file) {
         file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-        const std::streamsize got = file.gcount();
+        const auto got = file.gcount();
         if (got <= 0) {
             break;
         }
@@ -457,8 +457,8 @@ bool ModelManager::VerifySha256(const std::wstring& path, const char* expectedHe
     if (expectedHex == nullptr) {
         return false;
     }
-    const std::wstring actual = Sha256Hex(path);
-    const std::wstring expected = Text::Utf8ToWide(expectedHex);
+    const auto actual = Sha256Hex(path);
+    const auto expected = Text::Utf8ToWide(expectedHex);
     return _wcsicmp(actual.c_str(), expected.c_str()) == 0;
 }
 
@@ -474,8 +474,8 @@ bool ModelManager::BrowseAndInstall(HWND owner, std::wstring& outFileName) {
     const std::wstring& source = *picked;
 
     Paths::EnsureDirectory(Paths::ModelsDir());
-    const std::wstring leaf = std::filesystem::path(source).filename().wstring();
-    const std::wstring dest = ModelPath(leaf);
+    const auto leaf = std::filesystem::path(source).filename().wstring();
+    const auto dest = ModelPath(leaf);
     std::error_code ec;
     if (!Text::PathEquals(source, dest)) {
         std::filesystem::copy_file(source, dest, std::filesystem::copy_options::overwrite_existing, ec);
@@ -490,7 +490,7 @@ bool ModelManager::BrowseAndInstall(HWND owner, std::wstring& outFileName) {
 
 bool ModelManager::Download(HWND owner, const ModelInfo& info, std::wstring& error) {
     Paths::EnsureDirectory(Paths::ModelsDir());
-    const std::wstring dest = ModelPath(info.fileName);
+    const auto dest = ModelPath(info.fileName);
 
     std::atomic_bool cancel{false};
     DownloadProgress progress{};
@@ -527,7 +527,7 @@ bool ModelManager::Download(HWND owner, const ModelInfo& info, std::wstring& err
     return true;
 }
 
-std::wstring ModelManager::EnsureModel(HWND owner, const std::wstring& fileName) {
+auto ModelManager::EnsureModel(HWND owner, const std::wstring& fileName) -> std::wstring {
     Paths::EnsureDirectory(Paths::ModelsDir());
     std::wstring chosen = fileName.empty() ? ModelManager::kDefaultModel : fileName;
 

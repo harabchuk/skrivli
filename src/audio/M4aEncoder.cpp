@@ -47,7 +47,7 @@ bool ReadWavPcm16Stereo48k(const std::wstring& path, std::vector<int16_t>& pcm, 
         return false;
     }
 
-    const std::optional<WavHeader> header = WavHeader::Read(file);
+    const auto header = WavHeader::Read(file);
     if (!header) {
         ::CloseHandle(file);
         error = L"Not a RIFF/WAVE file.";
@@ -166,7 +166,7 @@ bool M4aEncoder::EncodeWavToM4a(const std::wstring& wavPath, std::wstring& outM4
     }
 
     std::filesystem::path wav(wavPath);
-    std::wstring m4aPath = wav.replace_extension(L".m4a").wstring();
+    auto m4aPath = wav.replace_extension(L".m4a").wstring();
     // If the source was .wav, replace_extension works. If somehow not, force it.
     if (_wcsicmp(std::filesystem::path(m4aPath).extension().c_str(), L".m4a") != 0) {
         m4aPath = wavPath + L".m4a";

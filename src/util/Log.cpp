@@ -13,12 +13,12 @@ namespace {
 constexpr std::uintmax_t kMaxLogBytes = 1 * 1024 * 1024;
 constexpr int kKeptRotatedFiles = 3;
 
-std::mutex& Mutex() {
+auto Mutex() -> std::mutex& {
     static std::mutex mutex;
     return mutex;
 }
 
-const wchar_t* LevelName(Log::Level level) {
+auto LevelName(Log::Level level) -> const wchar_t* {
     switch (level) {
     case Log::Level::Info:
         return L"INFO";
@@ -30,7 +30,7 @@ const wchar_t* LevelName(Log::Level level) {
     return L"INFO";
 }
 
-std::wstring Timestamp() {
+auto Timestamp() -> std::wstring {
     SYSTEMTIME st{};
     ::GetLocalTime(&st);
     wchar_t buffer[64]{};
@@ -81,7 +81,7 @@ void Write(Level level, const wchar_t* message) {
 
     std::lock_guard lock(Mutex());
     Paths::EnsureDirectory(Paths::LogsDir());
-    const std::filesystem::path logPath = std::filesystem::path(Paths::LogsDir()) / L"meetingbuddy.log";
+    const auto logPath = std::filesystem::path(Paths::LogsDir()) / L"meetingbuddy.log";
     RotateIfNeeded(logPath);
 
     FILE* file = nullptr;
@@ -89,7 +89,7 @@ void Write(Level level, const wchar_t* message) {
         return;
     }
 
-    const std::wstring line = Timestamp() + L" [" + LevelName(level) + L"] " + message + L"\n";
+    const auto line = Timestamp() + L" [" + LevelName(level) + L"] " + message + L"\n";
     std::fputws(line.c_str(), file);
     std::fclose(file);
 }

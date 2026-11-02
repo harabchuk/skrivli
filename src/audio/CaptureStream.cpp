@@ -125,7 +125,7 @@ void CaptureStream::ThreadMain() {
 }
 
 bool CaptureStream::ActivateClient(Microsoft::WRL::ComPtr<IAudioClient>& client) {
-    const HRESULT hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client);
+    const auto hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client);
     if (FAILED(hr) || !client) {
         m_fatalError.store(hr, std::memory_order_release);
         return false;
@@ -148,7 +148,7 @@ bool CaptureStream::InitializeClient(ActiveClient& active) {
         flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
 
-    HRESULT hr = active.audio->Initialize(
+    auto hr = active.audio->Initialize(
         AUDCLNT_SHAREMODE_SHARED,
         flags,
         AudioFormat::kBufferDuration,
@@ -227,7 +227,7 @@ void CaptureStream::DrainPackets(ActiveClient& active) {
 
     for (;;) {
         UINT32 packetFrames = 0;
-        HRESULT hr = active.capture->GetNextPacketSize(&packetFrames);
+        auto hr = active.capture->GetNextPacketSize(&packetFrames);
         if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
             m_deviceInvalidated.store(true, std::memory_order_release);
             m_stop.store(true, std::memory_order_release);
@@ -287,7 +287,7 @@ void CaptureStream::DrainPackets(ActiveClient& active) {
                     active.pendingDiscontinuity = true;
                 }
             } else {
-                const float* samples = reinterpret_cast<const float*>(data);
+                const auto* samples = reinterpret_cast<const float*>(data);
                 if (samples == nullptr) {
                     if (frames > active.bufferFrames) {
                         frames = active.bufferFrames;
@@ -315,7 +315,7 @@ void CaptureStream::CaptureLoop() {
         return;
     }
 
-    const HRESULT hr = active.audio->Start();
+    const auto hr = active.audio->Start();
     if (FAILED(hr)) {
         m_fatalError.store(hr, std::memory_order_release);
         return;
@@ -327,7 +327,7 @@ void CaptureStream::CaptureLoop() {
     }
 
     while (!m_stop.load(std::memory_order_acquire)) {
-        const DWORD wait = ::WaitForSingleObject(active.event, AudioFormat::kEventTimeoutMs);
+        const auto wait = ::WaitForSingleObject(active.event, AudioFormat::kEventTimeoutMs);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT) {
             break;
         }

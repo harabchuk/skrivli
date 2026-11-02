@@ -85,6 +85,9 @@ manifest (`IDR_MAINFRAME` currently has no resource behind it).
 - `#pragma once`; include `pch.hpp` first in every header or source that uses ATL/WTL.
 - 4-space indent, braces on the same line, `PascalCase` types and methods, `m_` members,
 `kConstant` for `static constexpr` constants, `camelCase` locals and parameters.
+- Use `auto` for locals whose type is clear from the initializer (not for bool/int), and trailing return types
+(`auto F() -> T`) when the return type is more than one word (`std::wstring`, `const T&`, `T*`); single-word types
+like `HRESULT`, `LRESULT`, `bool` keep the prefix form.
 - Qualify WTL types as `WTL::CButton` etc.; message maps use `BEGIN_MSG_MAP_EX` + `atlcrack.h`
 crackers (`MSG_WM_*`, `COMMAND_ID_HANDLER_EX`).
 - Put all control, menu, and resource IDs and `WM_APP + n` messages in `Ids.hpp` / `resource.h`.

@@ -68,7 +68,7 @@ constexpr glz::opts kWriteOpts{
 };
 
 bool FileExists(const std::wstring& path) {
-    const DWORD attr = ::GetFileAttributesW(path.c_str());
+    const auto attr = ::GetFileAttributesW(path.c_str());
     return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
@@ -143,7 +143,7 @@ bool LoadDocument(const std::wstring& path, SettingsData& out) {
     if (!bytes.has_value()) {
         return false;
     }
-    const std::string& text = *bytes;
+    const auto& text = *bytes;
     if (text.empty()) {
         Log::Error(L"Settings file is empty: " + path);
         return false;
@@ -160,7 +160,7 @@ bool LoadDocument(const std::wstring& path, SettingsData& out) {
 
 bool StoreDocument(const std::wstring& path, const SettingsData& data) {
     std::string body;
-    const SettingsFile file = ToFile(data);
+    const auto file = ToFile(data);
     if (const auto ec = glz::write<kWriteOpts>(file, body)) {
         Log::Error(L"Failed to serialize settings");
         return false;
@@ -177,7 +177,7 @@ bool StoreDocument(const std::wstring& path, const SettingsData& data) {
 }
 
 void ArchiveUnreadable(const std::wstring& path) {
-    const std::wstring archive = path + L".invalid";
+    const auto archive = path + L".invalid";
     if (::CopyFileW(path.c_str(), archive.c_str(), FALSE) == FALSE) {
         Log::Error(L"Failed to archive unreadable settings: " + path);
     }
@@ -190,14 +190,14 @@ using settings_file::FileExists;
 using settings_file::LoadDocument;
 using settings_file::StoreDocument;
 
-Settings& Settings::Instance() {
+auto Settings::Instance() -> Settings& {
     static Settings settings;
     return settings;
 }
 
 bool Settings::Load() {
     Paths::EnsureDirectory(Paths::SettingsDir());
-    const std::wstring path = Paths::SettingsFile();
+    const auto path = Paths::SettingsFile();
     if (FileExists(path)) {
         if (!LoadFromFile(path)) {
             ArchiveUnreadable(path);
@@ -231,7 +231,7 @@ bool Settings::SaveToFile(const std::wstring& path) const {
     return StoreDocument(path, m_data);
 }
 
-std::wstring Settings::RecordingsFolder() const {
+auto Settings::RecordingsFolder() const -> std::wstring {
     if (!m_data.folder.empty()) {
         return m_data.folder;
     }

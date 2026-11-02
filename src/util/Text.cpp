@@ -7,7 +7,7 @@
 
 namespace Text {
 
-std::string WideToUtf8(const std::wstring& wide) {
+auto WideToUtf8(const std::wstring& wide) -> std::string {
     if (wide.empty()) {
         return {};
     }
@@ -20,7 +20,7 @@ std::string WideToUtf8(const std::wstring& wide) {
     return out;
 }
 
-std::wstring Utf8ToWide(const std::string& utf8) {
+auto Utf8ToWide(const std::string& utf8) -> std::wstring {
     if (utf8.empty()) {
         return {};
     }
@@ -45,7 +45,7 @@ bool PathEquals(const std::wstring& a, const std::wstring& b) {
 }
 
 template <>
-std::wstring FormatHms<std::wstring>(uint64_t totalSeconds) {
+auto FormatHms<std::wstring>(uint64_t totalSeconds) -> std::wstring {
     const unsigned long long hours = totalSeconds / 3600;
     const unsigned long long minutes = (totalSeconds / 60) % 60;
     const unsigned long long seconds = totalSeconds % 60;
@@ -55,7 +55,7 @@ std::wstring FormatHms<std::wstring>(uint64_t totalSeconds) {
 }
 
 template <>
-std::string FormatHms<std::string>(uint64_t totalSeconds) {
+auto FormatHms<std::string>(uint64_t totalSeconds) -> std::string {
     const unsigned long long hours = totalSeconds / 3600;
     const unsigned long long minutes = (totalSeconds / 60) % 60;
     const unsigned long long seconds = totalSeconds % 60;

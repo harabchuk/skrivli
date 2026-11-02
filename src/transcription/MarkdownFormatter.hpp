@@ -21,6 +21,6 @@ struct TranscriptMeta {
 
 class MarkdownFormatter {
 public:
-    static std::string Format(const TranscriptMeta& meta, const std::vector<TranscriptSegment>& segments);
+    static auto Format(const TranscriptMeta& meta, const std::vector<TranscriptSegment>& segments) -> std::string;
     static bool WriteUtf8NoBom(const std::wstring& path, const std::string& utf8);
 };

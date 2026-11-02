@@ -83,7 +83,7 @@ bool DeviceManager::Initialize(HWND notifyHwnd) {
     Shutdown();
     m_notifyHwnd = notifyHwnd;
 
-    HRESULT hr = ::CoCreateInstance(
+    auto hr = ::CoCreateInstance(
         __uuidof(MMDeviceEnumerator),
         nullptr,
         CLSCTX_ALL,
@@ -112,23 +112,23 @@ void DeviceManager::Shutdown() {
     m_notifyHwnd = nullptr;
 }
 
-std::vector<AudioDeviceInfo> DeviceManager::EnumerateCapture() const {
+auto DeviceManager::EnumerateCapture() const -> std::vector<AudioDeviceInfo> {
     return Enumerate(eCapture);
 }
 
-std::vector<AudioDeviceInfo> DeviceManager::EnumerateRender() const {
+auto DeviceManager::EnumerateRender() const -> std::vector<AudioDeviceInfo> {
     return Enumerate(eRender);
 }
 
-Microsoft::WRL::ComPtr<IMMDevice> DeviceManager::ResolveCaptureDevice(const std::wstring& savedId) const {
+auto DeviceManager::ResolveCaptureDevice(const std::wstring& savedId) const -> Microsoft::WRL::ComPtr<IMMDevice> {
     return Resolve(eCapture, eCommunications, savedId);
 }
 
-Microsoft::WRL::ComPtr<IMMDevice> DeviceManager::ResolveRenderDevice(const std::wstring& savedId) const {
+auto DeviceManager::ResolveRenderDevice(const std::wstring& savedId) const -> Microsoft::WRL::ComPtr<IMMDevice> {
     return Resolve(eRender, eConsole, savedId);
 }
 
-std::wstring DeviceManager::DefaultId(EDataFlow flow, ERole role) const {
+auto DeviceManager::DefaultId(EDataFlow flow, ERole role) const -> std::wstring {
     auto device = GetDefault(flow, role);
     if (!device) {
         return {};
@@ -142,13 +142,13 @@ std::wstring DeviceManager::DefaultId(EDataFlow flow, ERole role) const {
     return result;
 }
 
-std::wstring DeviceManager::FriendlyName(IMMDevice* device) const {
+auto DeviceManager::FriendlyName(IMMDevice* device) const -> std::wstring {
     if (device == nullptr) {
         return {};
     }
 
     Microsoft::WRL::ComPtr<IPropertyStore> store;
-    HRESULT hr = device->OpenPropertyStore(STGM_READ, &store);
+    auto hr = device->OpenPropertyStore(STGM_READ, &store);
     if (FAILED(hr) || !store) {
         return L"(Unknown device)";
     }
@@ -164,16 +164,16 @@ std::wstring DeviceManager::FriendlyName(IMMDevice* device) const {
     return name;
 }
 
-std::vector<AudioDeviceInfo> DeviceManager::Enumerate(EDataFlow flow) const {
+auto DeviceManager::Enumerate(EDataFlow flow) const -> std::vector<AudioDeviceInfo> {
     std::vector<AudioDeviceInfo> devices;
     if (!m_enumerator) {
         return devices;
     }
 
-    const std::wstring defaultId = DefaultId(flow, flow == eCapture ? eCommunications : eConsole);
+    const auto defaultId = DefaultId(flow, flow == eCapture ? eCommunications : eConsole);
 
     Microsoft::WRL::ComPtr<IMMDeviceCollection> collection;
-    const HRESULT hr = m_enumerator->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection);
+    const auto hr = m_enumerator->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection);
     if (FAILED(hr) || !collection) {
         HResult::LogIfFailed(hr, L"EnumAudioEndpoints");
         return devices;
@@ -211,10 +211,10 @@ std::vector<AudioDeviceInfo> DeviceManager::Enumerate(EDataFlow flow) const {
     return devices;
 }
 
-Microsoft::WRL::ComPtr<IMMDevice> DeviceManager::Resolve(
+auto DeviceManager::Resolve(
     EDataFlow flow,
     ERole defaultRole,
-    const std::wstring& savedId) const {
+    const std::wstring& savedId) const -> Microsoft::WRL::ComPtr<IMMDevice> {
     if (!savedId.empty()) {
         auto device = GetById(savedId);
         if (device) {
@@ -228,24 +228,24 @@ Microsoft::WRL::ComPtr<IMMDevice> DeviceManager::Resolve(
     return GetDefault(flow, defaultRole);
 }
 
-Microsoft::WRL::ComPtr<IMMDevice> DeviceManager::GetDefault(EDataFlow flow, ERole role) const {
+auto DeviceManager::GetDefault(EDataFlow flow, ERole role) const -> Microsoft::WRL::ComPtr<IMMDevice> {
     Microsoft::WRL::ComPtr<IMMDevice> device;
     if (!m_enumerator) {
         return device;
     }
-    const HRESULT hr = m_enumerator->GetDefaultAudioEndpoint(flow, role, &device);
+    const auto hr = m_enumerator->GetDefaultAudioEndpoint(flow, role, &device);
     if (FAILED(hr)) {
         HResult::LogIfFailed(hr, L"GetDefaultAudioEndpoint");
     }
     return device;
 }
 
-Microsoft::WRL::ComPtr<IMMDevice> DeviceManager::GetById(const std::wstring& id) const {
+auto DeviceManager::GetById(const std::wstring& id) const -> Microsoft::WRL::ComPtr<IMMDevice> {
     Microsoft::WRL::ComPtr<IMMDevice> device;
     if (!m_enumerator || id.empty()) {
         return device;
     }
-    const HRESULT hr = m_enumerator->GetDevice(id.c_str(), &device);
+    const auto hr = m_enumerator->GetDevice(id.c_str(), &device);
     if (FAILED(hr)) {
         return {};
     }
