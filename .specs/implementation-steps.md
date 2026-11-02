@@ -52,7 +52,7 @@ There is no audio, tray, settings, logging, resources, or tests yet.
 - New control, menu, resource, and `WM_APP` ids go in `Ids.hpp` / `resources/resource.h`. No magic numbers.
 - Every new `.cpp` is added to `add_executable` in `CMakeLists.txt`. DSP and file code stay free of WTL so tests can link them without the UI.
 - `#include "pch.hpp"` first in any header or source that uses ATL/WTL.
-- App data paths, and nowhere else: settings `%APPDATA%\MeetingBuddy\settings.ini`; models `%LOCALAPPDATA%\MeetingBuddy\models\`; logs `%LOCALAPPDATA%\MeetingBuddy\logs\`; rescue `%LOCALAPPDATA%\MeetingBuddy\rescue\`. Default recordings folder: `%USERPROFILE%\Documents\MeetingBuddy`.
+- App data paths, and nowhere else: settings `%APPDATA%\MeetingBuddy\settings.json`; models `%LOCALAPPDATA%\MeetingBuddy\models\`; logs `%LOCALAPPDATA%\MeetingBuddy\logs\`; rescue `%LOCALAPPDATA%\MeetingBuddy\rescue\`. Default recordings folder: `%USERPROFILE%\Documents\MeetingBuddy`.
 - The only network access in the whole app is the user-initiated model download (M6). Do not add telemetry.
 
 ---
@@ -106,37 +106,40 @@ There is no audio, tray, settings, logging, resources, or tests yet.
 
 **Spec:** §3, §8.7.
 
-`src/storage/Settings` reads and writes `%APPDATA%\MeetingBuddy\settings.ini` with `GetPrivateProfileString` / `WritePrivateProfileString`. Load on startup, save on change. Missing file means defaults.
+`src/storage/Settings` reads and writes `%APPDATA%\MeetingBuddy\settings.json` with Glaze. Load on startup, save on change. Missing file means defaults. Unknown keys and `//` comments are ignored on read. Unreadable JSON is copied to `settings.json.invalid` and the in-memory settings fall back to defaults.
 
-Use these keys so later milestones do not invent a second schema:
+`general.window` is omitted until the user places the window. An empty `recording.folder` means `%USERPROFILE%\Documents\MeetingBuddy`. `transcription.threads` of 0 means `hardware_concurrency - 1`.
 
-```
-[General]
-CloseToTray=1
-StartWithWindows=0
-StartMinimized=0
-HotkeyEnabled=1
-Hotkey=Ctrl+Alt+R
-FirstRunTrayHintShown=0
-WindowX, WindowY, WindowW, WindowH   (absent until the user moves the window)
-
-[Recording]
-Folder=                          (empty → Documents\MeetingBuddy)
-MicDeviceId=
-SystemDeviceId=
-MicGain=1.0
-SystemGain=0.8
-SaveStems=0
-CompressToM4a=0
-KeepWav=1
-CommunicationsProcessing=0
-
-[Transcription]
-Model=ggml-base-q5_1.bin
-Language=auto
-AutoTranscribe=0
-Threads=0                        (0 → hardware_concurrency - 1)
-UseVad=0
+```json
+{
+  "general": {
+    "closeToTray": true,
+    "startWithWindows": false,
+    "startMinimized": false,
+    "hotkeyEnabled": true,
+    "hotkey": "Ctrl+Alt+R",
+    "firstRunTrayHintShown": false
+  },
+  "recording": {
+    "folder": "",
+    "micDeviceId": "",
+    "systemDeviceId": "",
+    "micGain": 1.0,
+    "micAgc": false,
+    "systemGain": 0.8,
+    "saveStems": false,
+    "compressToM4a": false,
+    "keepWav": true,
+    "communicationsProcessing": false
+  },
+  "transcription": {
+    "model": "ggml-base-q5_1.bin",
+    "language": "auto",
+    "autoTranscribe": false,
+    "threads": 0,
+    "useVad": false
+  }
+}
 ```
 
 The settings dialog is M8. M0 only needs load, save, and defaults.
@@ -675,7 +678,7 @@ When `WM_APP_RECORDING_FINISHED` arrives and `AutoTranscribe` is on, enqueue the
 
 ### M7.5 M7 check
 
-- The Recordings action and auto-transcribe (flip the ini key by hand until M8) produce the same Markdown and the same column states.
+- The Recordings action and auto-transcribe (flip the JSON key by hand until M8) produce the same Markdown and the same column states.
 - Copy all and a selection both paste as Markdown source, including the `#` heading and `**[timestamp]**` markers.
 - Find, Save as, and Open in editor work. A completion balloon opens the transcript.
 - A failed job (bad model path) sets Failed, shows the reason, and does not alter the WAV.
@@ -693,7 +696,7 @@ When `WM_APP_RECORDING_FINISHED` arrives and `AutoTranscribe` is on, enqueue the
 - **Recording:** folder, default devices, mic gain, system gain, save separate stems, compress to M4A, keep WAV after compression.
 - **Transcription:** model (from `ModelManager`, plus Download / Browse), language, auto-transcribe, thread count, use VAD.
 - **General:** close to tray, start with Windows, start minimized, hotkey enable and the chord (default Ctrl+Alt+R).
-- OK writes `settings.ini`. Cancel leaves the previous values. Applying a new recordings folder restarts the M5 watcher and refreshes the list.
+- OK writes `settings.json`. Cancel leaves the previous values. Applying a new recordings folder restarts the M5 watcher and refreshes the list.
 
 Wire the gains into the mixer at the start of the next take (a take already in progress keeps the gains it started with).
 

@@ -35,7 +35,7 @@ std::wstring SettingsDir() {
 }
 
 std::wstring SettingsFile() {
-    return Join(SettingsDir(), L"settings.ini");
+    return Join(SettingsDir(), L"settings.json");
 }
 
 std::wstring ModelsDir() {

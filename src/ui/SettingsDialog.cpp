@@ -416,7 +416,7 @@ void SettingsDialog::OnOk(UINT /*code*/, int /*id*/, HWND /*control*/) {
     const std::wstring previousFolder = Settings::Instance().RecordingsFolder();
     Settings::Instance().Data() = next;
     if (!Settings::Instance().Save()) {
-        ::MessageBoxW(m_hWnd, L"Failed to write settings.ini.", L"MeetingBuddy", MB_OK | MB_ICONERROR);
+        ::MessageBoxW(m_hWnd, L"Failed to write settings.json.", L"MeetingBuddy", MB_OK | MB_ICONERROR);
         return;
     }
 

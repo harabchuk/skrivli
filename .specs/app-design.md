@@ -56,7 +56,7 @@ Housekeeping before feature work:
 | Transcription | **whisper.cpp** (ggml, CPU), statically linked via `FetchContent` | Local, MIT, fast on CPU, quantized models |
 | Default model | `ggml-base-q5_1.bin` (~57 MB); offer `tiny`, `base`, `small` (q5) | Good speed/quality balance on laptops |
 | Markdown view | RichEdit 4.1 (`MSFTEDIT_CLASS`) showing Markdown source with light syntax styling | Native, selectable/copyable, no WebView dependency |
-| Settings | `%APPDATA%\MeetingBuddy\settings.ini` (`GetPrivateProfileString`) or small JSON | Simple, human-editable |
+| Settings | `%APPDATA%\MeetingBuddy\settings.json` (Glaze) | Simple, human-editable |
 | Tests | GoogleTest (or Catch2) via `FetchContent`, `ctest` | Unit-test DSP, file, and formatting logic |
 
 ---

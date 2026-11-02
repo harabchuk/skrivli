@@ -184,6 +184,8 @@ if(MEETINGBUDDY_BUILD_TESTS)
         tests/ResamplerTests.cpp
         tests/MarkdownFormatterTests.cpp
         tests/ChunkPlanTests.cpp
+        tests/SettingsTests.cpp
+        src/storage/Settings.cpp
         src/audio/Mixer.cpp
         src/audio/WavWriter.cpp
         src/storage/RecordingSidecar.cpp

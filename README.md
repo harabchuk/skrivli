@@ -53,7 +53,7 @@ Headphones are the reliable way to avoid speaker/mic echo. The communications-pr
 
 | What | Where |
 |---|---|
-| Settings | `%APPDATA%\MeetingBuddy\settings.ini` |
+| Settings | `%APPDATA%\MeetingBuddy\settings.json` |
 | Models | `%LOCALAPPDATA%\MeetingBuddy\models\` |
 | Logs | `%LOCALAPPDATA%\MeetingBuddy\logs\` |
 | Default recordings | `%USERPROFILE%\Documents\MeetingBuddy` |

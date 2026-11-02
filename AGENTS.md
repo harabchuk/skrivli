@@ -133,7 +133,7 @@ soft limiter above -1 dBFS.
 stop. On startup, repair leftover `.partial` files to `*.recovered.wav`.
 - Sidecars next to the audio: `<name>.md` (transcript), `<name>.json` (metadata + transcript status).
 Delete, rename, and list operations treat audio + `.md` + `.json` as one unit. Delete goes to the Recycle Bin.
-- App data: settings `%APPDATA%\MeetingBuddy\settings.ini`; models
+- App data: settings `%APPDATA%\MeetingBuddy\settings.json`; models
 `%LOCALAPPDATA%\MeetingBuddy\models\`; logs `%LOCALAPPDATA%\MeetingBuddy\logs\`.
 Default recordings folder: `%USERPROFILE%\Documents\MeetingBuddy`.
 
