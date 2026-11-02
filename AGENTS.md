@@ -43,12 +43,16 @@ the single-instance mutex will hand over to the old process.
 Other commands:
 
 ```powershell
+scripts\format.bat                             # clang-format -i on src\ (or pass file paths)
 cmake --preset default                         # configure (only if build/ is missing)
 cmake --build build --config Release           # build only
 ctest --test-dir build -C Release              # unit tests (scripts\test.bat)
 ```
 
-`.clang-format` keeps `pch.hpp` first, then other project headers, then `<windows.h>`, then `<atlbase.h>` and `<atlapp.h>` ahead of the other ATL headers, then the remaining system headers. `SortIncludes` still sorts within each category.
+**After every task that changes C/C++ under `src\`**, run `scripts\format.bat` (optionally with the
+touched paths). `.clang-format` keeps `pch.hpp` first, then other project headers, then
+`<windows.h>`, then `<atlbase.h>` and `<atlapp.h>` ahead of the other ATL headers, then the
+remaining system headers. `SortIncludes` still sorts within each category.
 
 If you add CMake options or FetchContent dependencies, delete `build/CMakeCache.txt` (or
 reconfigure) so `start.bat` picks them up.
@@ -277,6 +281,7 @@ recording, Open folder, Settings, Exit. Minimize and close hide to the tray (con
 
 ## Verification checklist for agents
 
+- Run `scripts\format.bat` after the task (whole `src\` or only the files you changed).
 - The build is warning-clean at `/W4`, and `scripts\start.bat` builds and launches successfully.
 - Unit tests pass for any touched DSP, file, or formatting code (`RingBuffer`, `Mixer`, `WavWriter`, `Resampler`,
 `MarkdownFormatter`, `RecordingLibrary`).
