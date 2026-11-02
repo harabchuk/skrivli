@@ -131,27 +131,6 @@ void Mixer::IngestPacket(SourceBuffer& source, int64_t frameIndex, const float* 
         return;
     }
 
-    if (source.hasData) {
-        if (frameIndex > source.endFrame) {
-            const int64_t gap = frameIndex - source.endFrame;
-            if (gap > kGapSilenceFrames) {
-                EnsureCapacity(source, source.endFrame, static_cast<uint32_t>(gap));
-                // zeros already from resize/fill
-            } else if (gap > 0) {
-                EnsureCapacity(source, source.endFrame, static_cast<uint32_t>(gap));
-            }
-        } else if (frameIndex + static_cast<int64_t>(frames) <= source.endFrame
-                   && frameIndex < source.endFrame) {
-            // Fully overlapped / late duplicate — drop.
-            if (frameIndex + static_cast<int64_t>(frames) <= source.endFrame) {
-                const int64_t overlap = source.endFrame - frameIndex;
-                if (overlap >= static_cast<int64_t>(frames)) {
-                    return;
-                }
-            }
-        }
-    }
-
     int64_t writeFrame = frameIndex;
     uint32_t writeFrames = frames;
     const float* writeData = data;
@@ -273,19 +252,6 @@ void Mixer::ApplyDriftCorrection() {
         source.endFrame -= 1;
     };
 
-    auto duplicateOneFrame = [](SourceBuffer& source, int64_t atFrame) {
-        if (!source.hasData || atFrame < source.startFrame || atFrame >= source.endFrame) {
-            return;
-        }
-        const size_t index = static_cast<size_t>(atFrame - source.startFrame) * AudioFormat::kChannels;
-        const float l = source.samples[index];
-        const float r = source.samples[index + 1];
-        source.samples.insert(
-            source.samples.begin() + static_cast<std::ptrdiff_t>(index + AudioFormat::kChannels),
-            {l, r});
-        source.endFrame += 1;
-    };
-
     if (delta > static_cast<double>(kDriftThresholdFrames)) {
         // Mic ahead of system — drop one mic frame (or duplicate sys if mic is empty).
         dropOneFrame(m_mic, m_nextBlockFrame);
@@ -295,9 +261,6 @@ void Mixer::ApplyDriftCorrection() {
         dropOneFrame(m_sys, m_nextBlockFrame);
         m_sys.fillAverage -= 1.0;
     }
-
-    // Keep the helper available for the opposite correction direction in tests/tuning.
-    (void)duplicateOneFrame;
 }
 
 float Mixer::SoftLimit(float sample) {

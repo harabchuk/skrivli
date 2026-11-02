@@ -3,12 +3,15 @@
 #include "audio/AudioResampler.hpp"
 #include "audio/RingBuffer.hpp"
 
+#include <atlbase.h>
+
 #include <atomic>
 #include <cstdint>
 #include <thread>
 #include <vector>
 #include <wrl/client.h>
 
+struct IAudioClient;
 struct IMMDevice;
 
 class CaptureStream {
@@ -40,8 +43,13 @@ public:
     bool SawDiscontinuity() const { return m_sawDiscontinuityFlag.load(std::memory_order_acquire); }
 
 private:
+    struct ActiveClient;
+
     void ThreadMain();
     void CaptureLoop();
+    bool ActivateClient(Microsoft::WRL::ComPtr<IAudioClient>& client);
+    bool InitializeClient(ActiveClient& active);
+    void DrainPackets(ActiveClient& active);
 
     Mode m_mode = Mode::Microphone;
     RingBuffer* m_ring = nullptr;
@@ -49,7 +57,7 @@ private:
     Microsoft::WRL::ComPtr<IMMDevice> m_device;
 
     std::thread m_thread;
-    HANDLE m_initEvent = nullptr;
+    ATL::CHandle m_initEvent;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_stop{false};
     std::atomic<HRESULT> m_fatalError{S_OK};

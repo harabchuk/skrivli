@@ -3,6 +3,8 @@
 #include "audio/AudioFormat.hpp"
 #include "util/Scoped.hpp"
 
+#include <atlbase.h>
+
 #include <audioclient.h>
 #include <avrt.h>
 #include <mmdeviceapi.h>
@@ -77,28 +79,25 @@ void SilentRenderKeepAlive::RenderLoop() {
         return;
     }
 
-    HANDLE eventHandle = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (eventHandle == nullptr) {
+    ATL::CHandle eventHandle(::CreateEventW(nullptr, FALSE, FALSE, nullptr));
+    if (eventHandle.m_h == nullptr) {
         return;
     }
 
     hr = audioClient->SetEventHandle(eventHandle);
     if (FAILED(hr)) {
-        ::CloseHandle(eventHandle);
         return;
     }
 
     Microsoft::WRL::ComPtr<IAudioRenderClient> renderClient;
     hr = audioClient->GetService(__uuidof(IAudioRenderClient), &renderClient);
     if (FAILED(hr) || !renderClient) {
-        ::CloseHandle(eventHandle);
         return;
     }
 
     UINT32 bufferFrames = 0;
     audioClient->GetBufferSize(&bufferFrames);
     if (bufferFrames == 0) {
-        ::CloseHandle(eventHandle);
         return;
     }
 
@@ -115,7 +114,6 @@ void SilentRenderKeepAlive::RenderLoop() {
 
     hr = audioClient->Start();
     if (FAILED(hr)) {
-        ::CloseHandle(eventHandle);
         return;
     }
 
@@ -150,5 +148,4 @@ void SilentRenderKeepAlive::RenderLoop() {
     }
 
     audioClient->Stop();
-    ::CloseHandle(eventHandle);
 }

@@ -20,7 +20,30 @@ constexpr DWORD kAutoConvertFlags =
 
 constexpr DWORD kRawEventFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
 
+void ApplyCommunicationsCategory(IAudioClient* client) {
+    Microsoft::WRL::ComPtr<IAudioClient2> audioClient2;
+    if (SUCCEEDED(client->QueryInterface(IID_PPV_ARGS(&audioClient2))) && audioClient2) {
+        AudioClientProperties props{};
+        props.cbSize = sizeof(props);
+        props.bIsOffload = FALSE;
+        props.eCategory = AudioCategory_Communications;
+        props.Options = AUDCLNT_STREAMOPTIONS_NONE;
+        audioClient2->SetClientProperties(&props);
+    }
+}
+
 }  // namespace
+
+struct CaptureStream::ActiveClient {
+    Microsoft::WRL::ComPtr<IAudioClient> audio;
+    Microsoft::WRL::ComPtr<IAudioCaptureClient> capture;
+    CComHeapPtr<WAVEFORMATEX> mixFormat;
+    ATL::CHandle event;
+    std::vector<float> silence;
+    UINT32 bufferFrames = 0;
+    bool useResampler = false;
+    bool pendingDiscontinuity = false;
+};
 
 CaptureStream::~CaptureStream() {
     Stop();
@@ -48,8 +71,8 @@ bool CaptureStream::Start(
     m_sawSilent.store(false, std::memory_order_release);
     m_sawDiscontinuityFlag.store(false, std::memory_order_release);
 
-    m_initEvent = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (m_initEvent == nullptr) {
+    m_initEvent.Attach(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (m_initEvent.m_h == nullptr) {
         m_fatalError.store(HRESULT_FROM_WIN32(::GetLastError()), std::memory_order_release);
         return false;
     }
@@ -59,8 +82,7 @@ bool CaptureStream::Start(
         m_thread = std::thread([this]() { ThreadMain(); });
     } catch (...) {
         m_running.store(false, std::memory_order_release);
-        ::CloseHandle(m_initEvent);
-        m_initEvent = nullptr;
+        m_initEvent.Close();
         m_fatalError.store(E_FAIL, std::memory_order_release);
         return false;
     }
@@ -84,10 +106,7 @@ void CaptureStream::Stop() {
     m_ring = nullptr;
     m_resampler.Reset();
     m_resampleScratch.clear();
-    if (m_initEvent != nullptr) {
-        ::CloseHandle(m_initEvent);
-        m_initEvent = nullptr;
-    }
+    m_initEvent.Close();
 }
 
 void CaptureStream::ThreadMain() {
@@ -98,36 +117,29 @@ void CaptureStream::ThreadMain() {
             CaptureLoop();
         }
 
-        if (m_initEvent != nullptr) {
+        if (m_initEvent.m_h != nullptr) {
             ::SetEvent(m_initEvent);
         }
     }
     m_running.store(false, std::memory_order_release);
 }
 
-void CaptureStream::CaptureLoop() {
-    if (!m_device || m_ring == nullptr) {
-        m_fatalError.store(E_UNEXPECTED, std::memory_order_release);
-        return;
-    }
-
-    Microsoft::WRL::ComPtr<IAudioClient> audioClient;
-    HRESULT hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &audioClient);
-    if (FAILED(hr) || !audioClient) {
+bool CaptureStream::ActivateClient(Microsoft::WRL::ComPtr<IAudioClient>& client) {
+    const HRESULT hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client);
+    if (FAILED(hr) || !client) {
         m_fatalError.store(hr, std::memory_order_release);
-        return;
+        return false;
     }
 
     if (m_mode == Mode::Microphone && m_communicationsProcessing) {
-        Microsoft::WRL::ComPtr<IAudioClient2> audioClient2;
-        if (SUCCEEDED(audioClient.As(&audioClient2)) && audioClient2) {
-            AudioClientProperties props{};
-            props.cbSize = sizeof(props);
-            props.bIsOffload = FALSE;
-            props.eCategory = AudioCategory_Communications;
-            props.Options = AUDCLNT_STREAMOPTIONS_NONE;
-            audioClient2->SetClientProperties(&props);
-        }
+        ApplyCommunicationsCategory(client.Get());
+    }
+    return true;
+}
+
+bool CaptureStream::InitializeClient(ActiveClient& active) {
+    if (!ActivateClient(active.audio)) {
+        return false;
     }
 
     auto floatFormat = AudioFormat::MakeFloatStereo48k();
@@ -136,10 +148,7 @@ void CaptureStream::CaptureLoop() {
         flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
 
-    bool useResampler = false;
-    WAVEFORMATEX* mixFormat = nullptr;
-
-    hr = audioClient->Initialize(
+    HRESULT hr = active.audio->Initialize(
         AUDCLNT_SHAREMODE_SHARED,
         flags,
         AudioFormat::kBufferDuration,
@@ -150,31 +159,16 @@ void CaptureStream::CaptureLoop() {
     if (FAILED(hr)) {
         Log::WriteHResult(Log::Level::Warn, L"AUTOCONVERTPCM Initialize failed; trying mix-format + miniaudio resampler", hr);
 
-        hr = audioClient->GetMixFormat(&mixFormat);
-        if (FAILED(hr) || mixFormat == nullptr) {
+        hr = active.audio->GetMixFormat(&active.mixFormat);
+        if (FAILED(hr) || active.mixFormat == nullptr) {
             m_fatalError.store(hr, std::memory_order_release);
-            return;
+            return false;
         }
 
         // Re-Activate a fresh client after a failed Initialize.
-        audioClient.Reset();
-        hr = m_device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &audioClient);
-        if (FAILED(hr) || !audioClient) {
-            ::CoTaskMemFree(mixFormat);
-            m_fatalError.store(hr, std::memory_order_release);
-            return;
-        }
-
-        if (m_mode == Mode::Microphone && m_communicationsProcessing) {
-            Microsoft::WRL::ComPtr<IAudioClient2> audioClient2;
-            if (SUCCEEDED(audioClient.As(&audioClient2)) && audioClient2) {
-                AudioClientProperties props{};
-                props.cbSize = sizeof(props);
-                props.bIsOffload = FALSE;
-                props.eCategory = AudioCategory_Communications;
-                props.Options = AUDCLNT_STREAMOPTIONS_NONE;
-                audioClient2->SetClientProperties(&props);
-            }
+        active.audio.Reset();
+        if (!ActivateClient(active.audio)) {
+            return false;
         }
 
         DWORD rawFlags = kRawEventFlags;
@@ -182,174 +176,166 @@ void CaptureStream::CaptureLoop() {
             rawFlags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
         }
 
-        hr = audioClient->Initialize(
+        hr = active.audio->Initialize(
             AUDCLNT_SHAREMODE_SHARED,
             rawFlags,
             AudioFormat::kBufferDuration,
             0,
-            mixFormat,
+            active.mixFormat,
             nullptr);
         if (FAILED(hr)) {
-            ::CoTaskMemFree(mixFormat);
             m_fatalError.store(hr, std::memory_order_release);
-            return;
+            return false;
         }
 
-        if (!m_resampler.Initialize(mixFormat)) {
-            ::CoTaskMemFree(mixFormat);
+        if (!m_resampler.Initialize(active.mixFormat)) {
             m_fatalError.store(E_FAIL, std::memory_order_release);
-            return;
+            return false;
         }
-        useResampler = true;
+        active.useResampler = true;
         m_usedResampler.store(true, std::memory_order_release);
     }
 
-    HANDLE eventHandle = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (eventHandle == nullptr) {
-        if (mixFormat != nullptr) {
-            ::CoTaskMemFree(mixFormat);
-        }
+    active.event.Attach(::CreateEventW(nullptr, FALSE, FALSE, nullptr));
+    if (active.event.m_h == nullptr) {
         m_fatalError.store(HRESULT_FROM_WIN32(::GetLastError()), std::memory_order_release);
-        return;
+        return false;
     }
 
-    hr = audioClient->SetEventHandle(eventHandle);
+    hr = active.audio->SetEventHandle(active.event);
     if (FAILED(hr)) {
-        ::CloseHandle(eventHandle);
-        if (mixFormat != nullptr) {
-            ::CoTaskMemFree(mixFormat);
-        }
         m_fatalError.store(hr, std::memory_order_release);
+        return false;
+    }
+
+    hr = active.audio->GetService(__uuidof(IAudioCaptureClient), &active.capture);
+    if (FAILED(hr) || !active.capture) {
+        m_fatalError.store(hr, std::memory_order_release);
+        return false;
+    }
+
+    active.audio->GetBufferSize(&active.bufferFrames);
+    if (active.bufferFrames == 0) {
+        active.bufferFrames = AudioFormat::kSampleRate / 5;
+    }
+    active.silence.assign(static_cast<size_t>(active.bufferFrames) * AudioFormat::kChannels, 0.0f);
+    return true;
+}
+
+void CaptureStream::DrainPackets(ActiveClient& active) {
+    const UINT32 mixBlockAlign = (active.mixFormat != nullptr) ? active.mixFormat->nBlockAlign : 0;
+
+    for (;;) {
+        UINT32 packetFrames = 0;
+        HRESULT hr = active.capture->GetNextPacketSize(&packetFrames);
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
+            m_deviceInvalidated.store(true, std::memory_order_release);
+            m_stop.store(true, std::memory_order_release);
+            break;
+        }
+        if (FAILED(hr) || packetFrames == 0) {
+            break;
+        }
+
+        BYTE* data = nullptr;
+        UINT32 frames = 0;
+        DWORD bufferFlags = 0;
+        UINT64 devicePosition = 0;
+        UINT64 qpcPosition = 0;
+        hr = active.capture->GetBuffer(&data, &frames, &bufferFlags, &devicePosition, &qpcPosition);
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
+            m_deviceInvalidated.store(true, std::memory_order_release);
+            m_stop.store(true, std::memory_order_release);
+            break;
+        }
+        if (FAILED(hr)) {
+            break;
+        }
+
+        const bool discontinuity =
+            ((bufferFlags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0) || active.pendingDiscontinuity;
+        active.pendingDiscontinuity = false;
+        if ((bufferFlags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0) {
+            m_sawDiscontinuityFlag.store(true, std::memory_order_release);
+        }
+
+        if (frames > 0) {
+            if ((bufferFlags & AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
+                m_sawSilent.store(true, std::memory_order_release);
+                if (frames > active.bufferFrames) {
+                    frames = active.bufferFrames;
+                }
+                if (!m_ring->Push(active.silence.data(), frames, qpcPosition, discontinuity)) {
+                    active.pendingDiscontinuity = true;
+                }
+            } else if (active.useResampler) {
+                if (data == nullptr || mixBlockAlign == 0) {
+                    active.capture->ReleaseBuffer(frames);
+                    continue;
+                }
+                uint32_t outFrames = 0;
+                if (!m_resampler.Process(
+                        data,
+                        frames * mixBlockAlign,
+                        frames,
+                        m_resampleScratch,
+                        outFrames)) {
+                    active.pendingDiscontinuity = true;
+                } else if (outFrames > 0
+                           && !m_ring->Push(
+                                  m_resampleScratch.data(),
+                                  outFrames,
+                                  qpcPosition,
+                                  discontinuity)) {
+                    active.pendingDiscontinuity = true;
+                }
+            } else {
+                const float* samples = reinterpret_cast<const float*>(data);
+                if (samples == nullptr) {
+                    if (frames > active.bufferFrames) {
+                        frames = active.bufferFrames;
+                    }
+                    samples = active.silence.data();
+                }
+                if (!m_ring->Push(samples, frames, qpcPosition, discontinuity)) {
+                    active.pendingDiscontinuity = true;
+                }
+            }
+        }
+
+        active.capture->ReleaseBuffer(frames);
+    }
+}
+
+void CaptureStream::CaptureLoop() {
+    if (!m_device || m_ring == nullptr) {
+        m_fatalError.store(E_UNEXPECTED, std::memory_order_release);
         return;
     }
 
-    Microsoft::WRL::ComPtr<IAudioCaptureClient> captureClient;
-    hr = audioClient->GetService(__uuidof(IAudioCaptureClient), &captureClient);
-    if (FAILED(hr) || !captureClient) {
-        ::CloseHandle(eventHandle);
-        if (mixFormat != nullptr) {
-            ::CoTaskMemFree(mixFormat);
-        }
-        m_fatalError.store(hr, std::memory_order_release);
+    ActiveClient active;
+    if (!InitializeClient(active)) {
         return;
     }
 
-    UINT32 bufferFrames = 0;
-    audioClient->GetBufferSize(&bufferFrames);
-    if (bufferFrames == 0) {
-        bufferFrames = AudioFormat::kSampleRate / 5;
-    }
-    std::vector<float> silence(static_cast<size_t>(bufferFrames) * AudioFormat::kChannels, 0.0f);
-
-    hr = audioClient->Start();
+    const HRESULT hr = active.audio->Start();
     if (FAILED(hr)) {
-        ::CloseHandle(eventHandle);
-        if (mixFormat != nullptr) {
-            ::CoTaskMemFree(mixFormat);
-        }
         m_fatalError.store(hr, std::memory_order_release);
         return;
     }
 
     // Init succeeded — unblock Start().
-    if (m_initEvent != nullptr) {
+    if (m_initEvent.m_h != nullptr) {
         ::SetEvent(m_initEvent);
     }
 
-    bool pendingDiscontinuity = false;
-    const UINT32 mixBlockAlign = (mixFormat != nullptr) ? mixFormat->nBlockAlign : 0;
-
     while (!m_stop.load(std::memory_order_acquire)) {
-        const DWORD wait = ::WaitForSingleObject(eventHandle, AudioFormat::kEventTimeoutMs);
+        const DWORD wait = ::WaitForSingleObject(active.event, AudioFormat::kEventTimeoutMs);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT) {
             break;
         }
-
-        for (;;) {
-            UINT32 packetFrames = 0;
-            hr = captureClient->GetNextPacketSize(&packetFrames);
-            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
-                m_deviceInvalidated.store(true, std::memory_order_release);
-                m_stop.store(true, std::memory_order_release);
-                break;
-            }
-            if (FAILED(hr) || packetFrames == 0) {
-                break;
-            }
-
-            BYTE* data = nullptr;
-            UINT32 frames = 0;
-            DWORD bufferFlags = 0;
-            UINT64 devicePosition = 0;
-            UINT64 qpcPosition = 0;
-            hr = captureClient->GetBuffer(&data, &frames, &bufferFlags, &devicePosition, &qpcPosition);
-            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
-                m_deviceInvalidated.store(true, std::memory_order_release);
-                m_stop.store(true, std::memory_order_release);
-                break;
-            }
-            if (FAILED(hr)) {
-                break;
-            }
-
-            const bool discontinuity =
-                ((bufferFlags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0) || pendingDiscontinuity;
-            pendingDiscontinuity = false;
-            if ((bufferFlags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0) {
-                m_sawDiscontinuityFlag.store(true, std::memory_order_release);
-            }
-
-            if (frames > 0) {
-                if ((bufferFlags & AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
-                    m_sawSilent.store(true, std::memory_order_release);
-                    if (frames > bufferFrames) {
-                        frames = bufferFrames;
-                    }
-                    if (!m_ring->Push(silence.data(), frames, qpcPosition, discontinuity)) {
-                        pendingDiscontinuity = true;
-                    }
-                } else if (useResampler) {
-                    if (data == nullptr || mixBlockAlign == 0) {
-                        captureClient->ReleaseBuffer(frames);
-                        continue;
-                    }
-                    uint32_t outFrames = 0;
-                    if (!m_resampler.Process(
-                            data,
-                            frames * mixBlockAlign,
-                            frames,
-                            m_resampleScratch,
-                            outFrames)) {
-                        pendingDiscontinuity = true;
-                    } else if (outFrames > 0
-                               && !m_ring->Push(
-                                      m_resampleScratch.data(),
-                                      outFrames,
-                                      qpcPosition,
-                                      discontinuity)) {
-                        pendingDiscontinuity = true;
-                    }
-                } else {
-                    const float* samples = reinterpret_cast<const float*>(data);
-                    if (samples == nullptr) {
-                        if (frames > bufferFrames) {
-                            frames = bufferFrames;
-                        }
-                        samples = silence.data();
-                    }
-                    if (!m_ring->Push(samples, frames, qpcPosition, discontinuity)) {
-                        pendingDiscontinuity = true;
-                    }
-                }
-            }
-
-            captureClient->ReleaseBuffer(frames);
-        }
+        DrainPackets(active);
     }
 
-    audioClient->Stop();
-    ::CloseHandle(eventHandle);
-    if (mixFormat != nullptr) {
-        ::CoTaskMemFree(mixFormat);
-    }
+    active.audio->Stop();
 }
