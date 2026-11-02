@@ -262,9 +262,6 @@ void CaptureStream::DrainPackets(ActiveClient& active) {
         if (frames > 0) {
             if ((bufferFlags & AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
                 m_sawSilent.store(true, std::memory_order_release);
-                if (frames > active.bufferFrames) {
-                    frames = active.bufferFrames;
-                }
                 if (!m_ring->Push(active.silence.data(), frames, qpcPosition, discontinuity)) {
                     active.pendingDiscontinuity = true;
                 }

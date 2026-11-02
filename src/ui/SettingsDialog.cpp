@@ -308,7 +308,6 @@ void SettingsDialog::OnOk(UINT /*code*/, int /*id*/, HWND /*control*/) {
         return;
     }
 
-    m_applied = next;
     m_folderChanged = !Text::PathEquals(previousFolder, Settings::Instance().RecordingsFolder());
     EndDialog(IDOK);
 }

@@ -82,12 +82,6 @@ void DirectoryWatcher::Stop() {
     }
 }
 
-bool DirectoryWatcher::Restart(const std::wstring& folder) {
-    const HWND hwnd = m_hwnd;
-    const UINT msg = m_notifyMsg;
-    return Start(folder, hwnd, msg);
-}
-
 void DirectoryWatcher::ThreadMain() {
     std::vector<BYTE> buffer(64 * 1024);
 

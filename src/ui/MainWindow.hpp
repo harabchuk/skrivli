@@ -111,7 +111,7 @@ private:
     void LayoutChildren();
     void DrawTabBaseline(CDCHandle dc);
     void ShowSelectedTab();
-    void HideToTray(bool fromClose);
+    void HideToTray();
     void ToggleFromTrayClick();
     void PersistWindowPlacement();
     bool IsPlacementOnAnyMonitor(const RECT& windowRect) const;
@@ -149,7 +149,6 @@ private:
     bool m_endSessionSaving = false;
     bool m_hotkeyRegistered = false;
     bool m_hotkeyWarned = false;
-    bool m_startHidden = false;
     bool m_compressingM4a = false;
     UINT m_taskbarCreatedMsg = 0;
     UINT m_showYourselfMsg = 0;

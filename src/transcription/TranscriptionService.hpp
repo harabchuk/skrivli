@@ -33,10 +33,7 @@ public:
     bool Enqueue(HWND ownerForModelUi, const std::wstring& audioPath);
     // Request cancel for a specific path (or the active job if path matches).
     void Cancel(const std::wstring& audioPath);
-    bool IsActivePath(const std::wstring& audioPath) const;
     bool IsQueuedOrActive(const std::wstring& audioPath) const;
-    int ActivePercent() const;
-    std::wstring ActivePath() const;
 
 private:
     TranscriptionService() = default;
@@ -77,6 +74,5 @@ private:
     std::atomic_bool m_running{false};
     std::atomic_bool m_cancel{false};
     std::wstring m_activePath;
-    std::atomic_int m_percent{0};
     WhisperEngine m_engine;
 };

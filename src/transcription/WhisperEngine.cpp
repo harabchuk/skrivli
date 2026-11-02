@@ -46,11 +46,6 @@ bool WhisperEngine::IsLoaded() const {
     return m_ctx != nullptr;
 }
 
-std::wstring WhisperEngine::LoadedModelPath() const {
-    std::lock_guard lock(m_mutex);
-    return m_modelPath;
-}
-
 bool WhisperEngine::EnsureLoaded(const std::wstring& modelPath, std::wstring& error) {
     std::lock_guard lock(m_mutex);
     if (m_ctx != nullptr && m_modelPath == modelPath) {

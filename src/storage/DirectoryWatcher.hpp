@@ -18,8 +18,6 @@ public:
 
     bool Start(const std::wstring& folder, HWND hwnd, UINT notifyMsg);
     void Stop();
-    bool Restart(const std::wstring& folder);
-
     const std::wstring& Folder() const { return m_folder; }
 
 private:

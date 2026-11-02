@@ -37,8 +37,6 @@ public:
         std::wstring& error);
 
     bool IsLoaded() const;
-    std::wstring LoadedModelPath() const;
-
 private:
     struct whisper_context* m_ctx = nullptr;
     std::wstring m_modelPath;

@@ -150,11 +150,6 @@ void TranscriptionService::Cancel(const std::wstring& audioPath) {
     }
 }
 
-bool TranscriptionService::IsActivePath(const std::wstring& audioPath) const {
-    std::lock_guard lock(m_mutex);
-    return Text::PathEquals(m_activePath, audioPath);
-}
-
 bool TranscriptionService::IsQueuedOrActive(const std::wstring& audioPath) const {
     std::lock_guard lock(m_mutex);
     if (Text::PathEquals(m_activePath, audioPath)) {
@@ -166,15 +161,6 @@ bool TranscriptionService::IsQueuedOrActive(const std::wstring& audioPath) const
         }
     }
     return false;
-}
-
-int TranscriptionService::ActivePercent() const {
-    return m_percent.load();
-}
-
-std::wstring TranscriptionService::ActivePath() const {
-    std::lock_guard lock(m_mutex);
-    return m_activePath;
 }
 
 void TranscriptionService::Notify(UINT msg, const std::wstring& audioPath, int percent, std::wstring message) {
@@ -233,7 +219,6 @@ void TranscriptionService::WorkerMain() {
             m_queue.pop_front();
             m_activePath = job.audioPath;
             m_cancel.store(false);
-            m_percent.store(0);
         }
 
         ProcessJob(std::move(job));
@@ -241,7 +226,6 @@ void TranscriptionService::WorkerMain() {
         {
             std::lock_guard lock(m_mutex);
             m_activePath.clear();
-            m_percent.store(0);
         }
     }
 }
@@ -293,7 +277,6 @@ bool TranscriptionService::TranscribeChunks(
             m_cancel,
             [&](int percent) {
                 const int mapped = basePercent + (percent * span) / 100;
-                m_percent.store(mapped);
                 Notify(WM_APP_TRANSCRIBE_PROGRESS, job.audioPath, mapped);
             },
             chunkSegments,

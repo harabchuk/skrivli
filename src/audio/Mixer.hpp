@@ -10,7 +10,6 @@
 
 class Mixer {
 public:
-    static constexpr int64_t kGapSilenceFrames = 240;      // 5 ms
     static constexpr int64_t kStaleFrames = 7200;          // 150 ms
     static constexpr int64_t kDriftThresholdFrames = 960;  // 20 ms
     static constexpr float kLimiterStart = 0.89125093813f; // -1 dBFS
@@ -54,7 +53,6 @@ public:
 
     float PeakMic() const { return m_peakMic.load(std::memory_order_acquire); }
     float PeakSys() const { return m_peakSys.load(std::memory_order_acquire); }
-    float PeakMix() const { return m_peakMix.load(std::memory_order_acquire); }
     float EffectiveMicGain() const { return m_effectiveMicGain.load(std::memory_order_acquire); }
 
     void SetGains(float micGain, float systemGain);
@@ -112,6 +110,5 @@ private:
 
     std::atomic<float> m_peakMic{0.0f};
     std::atomic<float> m_peakSys{0.0f};
-    std::atomic<float> m_peakMix{0.0f};
     std::atomic<float> m_effectiveMicGain{1.0f};
 };

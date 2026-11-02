@@ -28,8 +28,6 @@ public:
     END_MSG_MAP()
 
     bool FolderChanged() const { return m_folderChanged; }
-    const SettingsData& Applied() const { return m_applied; }
-
 private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
     void OnOk(UINT code, int id, HWND control);
@@ -54,7 +52,6 @@ private:
     void UpdateDependentEnabled();
 
     DeviceManager* m_devices = nullptr;
-    SettingsData m_applied{};
     bool m_folderChanged = false;
 
     WTL::CEdit m_folder;

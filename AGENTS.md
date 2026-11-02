@@ -58,13 +58,14 @@ reconfigure) so `start.bat` picks them up.
 src/
   main.cpp, Application.*, pch.hpp, Ids.hpp
   ui/            MainWindow, RecordView, RecordingsView, TranscriptWindow,
-                 SettingsDialog, TrayIcon, LevelMeter, RecordButton
+                 SettingsDialog, TrayIcon, LevelMeter, RecordButton,
+                 ShellDialogs, DeviceCombo
   audio/         DeviceManager, CaptureStream, SilentRenderKeepAlive, RingBuffer,
                  Mixer, WavWriter, M4aEncoder, RecordingSession, LevelMonitor
   transcription/ AudioFileReader, Resampler, WhisperEngine, ModelManager,
                  MarkdownFormatter, TranscriptionService
   storage/       Settings, RecordingLibrary
-  util/          COM/HRESULT helpers, Clipboard, Paths, Log
+  util/          COM/HRESULT helpers, Clipboard, Paths, Log, Text, FileIo, Scoped, PostOwned
 resources/       MeetingBuddy.rc, resource.h, icons, MeetingBuddy.manifest
 tests/           GoogleTest unit tests (no audio hardware required)
 .specs/          design documents
@@ -88,7 +89,7 @@ manifest (`IDR_MAINFRAME` currently has no resource behind it).
 crackers (`MSG_WM_*`, `COMMAND_ID_HANDLER_EX`).
 - Put all control, menu, and resource IDs and `WM_APP + n` messages in `Ids.hpp` / `resource.h`.
 Never use magic numbers.
-- COM: `CComPtr`/`CComQIPtr`, and check every `HRESULT` (log + propagate). No naked `Release()`.
+- COM: `Microsoft::WRL::ComPtr`, and check every `HRESULT` (log + propagate). No naked `Release()`.
 - No exceptions crossing COM, window-procedure, or thread boundaries.
 - Write comments only for constraints the code can't express.
 - Unit tests: mark distinct phases with `// Arrange`, `// Act`, and `// Assert` only when

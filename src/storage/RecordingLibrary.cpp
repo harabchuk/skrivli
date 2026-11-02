@@ -74,9 +74,8 @@ std::string FileTimeToStartLocal(const std::wstring& path) {
         file.Detach();
         return {};
     }
-    FILETIME create{};
     FILETIME write{};
-    if (!::GetFileTime(file, &create, nullptr, &write)) {
+    if (!::GetFileTime(file, nullptr, nullptr, &write)) {
         return {};
     }
     file.Close();

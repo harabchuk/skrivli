@@ -258,8 +258,6 @@ void RecordingSession::ResetForStart(
     bool saveStems) {
     m_stopWriter.store(false, std::memory_order_release);
     m_devicesChanged.store(false, std::memory_order_release);
-    m_lowDiskStop.store(false, std::memory_order_release);
-    m_writeFailed.store(false, std::memory_order_release);
     m_micRing.Reset();
     m_sysRing.Reset();
     {
@@ -325,12 +323,10 @@ bool RecordingSession::OpenSources(RecordingStartResult& result) {
     }
 
     if (!micPresent) {
-        result.micMissing = true;
         result.warning = L"No microphone — recording system audio only.";
         AddDeviceNote(L"Started without microphone");
     }
     if (!sysPresent) {
-        result.systemMissing = true;
         result.warning = result.warning.empty()
             ? L"No system audio device — recording microphone only."
             : result.warning;
@@ -551,7 +547,6 @@ bool RecordingSession::CheckDiskSpace(ULONGLONG& lastCheck) {
     lastCheck = nowTick;
     const std::wstring folder = m_writer.Folder();
     if (!folder.empty() && !WavWriter::FolderHasFreeSpace(folder)) {
-        m_lowDiskStop.store(true, std::memory_order_release);
         Post(WM_APP_LOW_DISK);
         m_stopWriter.store(true, std::memory_order_release);
         return false;
@@ -576,7 +571,6 @@ bool RecordingSession::WriteBlock(
             }
             return false;
         }
-        m_writeFailed.store(true, std::memory_order_release);
         std::wstring rescuedPath;
         if (m_writer.RescueTo(Paths::RescueDir(), rescuedPath)) {
             rescued = true;

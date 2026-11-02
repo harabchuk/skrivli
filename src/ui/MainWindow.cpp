@@ -379,7 +379,7 @@ void MainWindow::OnGetMinMaxInfo(LPMINMAXINFO minMaxInfo) {
 
 void MainWindow::OnSysCommand(UINT id, CPoint point) {
     if ((id & 0xFFF0) == SC_MINIMIZE) {
-        HideToTray(false);
+        HideToTray();
         return;
     }
     SetMsgHandled(FALSE);
@@ -467,7 +467,7 @@ void MainWindow::OnClose() {
     }
 
     if (Settings::Instance().Data().closeToTray) {
-        HideToTray(true);
+        HideToTray();
         return;
     }
 
@@ -491,7 +491,6 @@ void MainWindow::OnDestroy() {
 }
 
 void MainWindow::ApplyStartupVisibility(bool startHidden) {
-    m_startHidden = startHidden;
     if (startHidden) {
         ShowWindow(SW_HIDE);
     }
@@ -603,7 +602,7 @@ void MainWindow::ShowFromTray() {
     ::BringWindowToTop(m_hWnd);
 }
 
-void MainWindow::HideToTray(bool /*fromClose*/) {
+void MainWindow::HideToTray() {
     PersistWindowPlacement();
     ShowWindow(SW_HIDE);
 
@@ -625,7 +624,7 @@ void MainWindow::ToggleFromTrayClick() {
     m_lastTrayToggleTick = now;
 
     if (IsWindowVisible()) {
-        HideToTray(false);
+        HideToTray();
     } else {
         ShowFromTray();
     }

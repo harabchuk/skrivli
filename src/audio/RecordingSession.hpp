@@ -19,8 +19,6 @@
 struct RecordingStartResult {
     bool started = false;
     bool privacyDenied = false;
-    bool micMissing = false;
-    bool systemMissing = false;
     std::wstring warning; // non-fatal (e.g. one source missing)
     std::wstring error;
 };
@@ -160,8 +158,6 @@ private:
     std::atomic<State> m_state{State::Idle};
     std::atomic<bool> m_stopWriter{false};
     std::atomic<bool> m_devicesChanged{false};
-    std::atomic<bool> m_lowDiskStop{false};
-    std::atomic<bool> m_writeFailed{false};
     std::atomic<uint64_t> m_startQpc{0};
 
     RingBuffer m_micRing{48000};

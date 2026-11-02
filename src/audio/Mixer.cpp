@@ -58,7 +58,6 @@ void Mixer::Reset(uint64_t startQpc, uint64_t qpcFrequency, float micGain, float
     EnsureDownmix();
     m_peakMic.store(0.0f, std::memory_order_relaxed);
     m_peakSys.store(0.0f, std::memory_order_relaxed);
-    m_peakMix.store(0.0f, std::memory_order_relaxed);
     m_effectiveMicGain.store(CurrentMicGain(), std::memory_order_relaxed);
 }
 
@@ -323,7 +322,6 @@ bool Mixer::Process(
 
     float micPeak = 0.0f;
     float sysPeak = 0.0f;
-    float mixPeak = 0.0f;
     double micPower = 0.0;
 
     for (uint32_t i = 0; i < AudioFormat::kBlockFrames; ++i) {
@@ -373,13 +371,10 @@ bool Mixer::Process(
         const float outR = SoftLimit(outInterleavedStereo[i * 2 + 1]);
         outInterleavedStereo[i * 2] = outL;
         outInterleavedStereo[i * 2 + 1] = outR;
-        mixPeak = (std::max)(mixPeak, (std::max)(std::fabs(outL), std::fabs(outR)));
     }
 
     m_peakMic.store(micPeak, std::memory_order_release);
     m_peakSys.store(sysPeak, std::memory_order_release);
-    m_peakMix.store(mixPeak, std::memory_order_release);
-
     m_nextBlockFrame += AudioFormat::kBlockFrames;
     const int64_t keepFrom = m_nextBlockFrame - AudioFormat::kSampleRate; // retain ~1 s
     TrimSource(m_mic, keepFrom);
