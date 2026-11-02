@@ -70,7 +70,8 @@ bool TrayIcon::Add(HWND owner) {
     }
 
     data.uVersion = NOTIFYICON_VERSION_4;
-    if (!::Shell_NotifyIconW(NIM_SETVERSION, &data)) {
+    m_version4 = ::Shell_NotifyIconW(NIM_SETVERSION, &data) != FALSE;
+    if (!m_version4) {
         Log::Warn(L"Shell_NotifyIcon NIM_SETVERSION failed");
     }
 
@@ -87,6 +88,7 @@ void TrayIcon::Remove() {
     FillBase(data);
     ::Shell_NotifyIconW(NIM_DELETE, &data);
     m_added = false;
+    m_version4 = false;
 }
 
 bool TrayIcon::ReAdd() {
