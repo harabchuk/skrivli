@@ -6,6 +6,7 @@
 #include "util/Log.hpp"
 #include "util/Text.hpp"
 
+#include <atlbase.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
@@ -61,25 +62,24 @@ std::string FileNameToStartLocal(const std::wstring& fileName) {
 }
 
 std::string FileTimeToStartLocal(const std::wstring& path) {
-    HANDLE file = ::CreateFileW(
+    ATL::CHandle file(::CreateFileW(
         path.c_str(),
         GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
         nullptr,
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
+        nullptr));
+    if (file.m_h == INVALID_HANDLE_VALUE) {
+        file.Detach();
         return {};
     }
     FILETIME create{};
     FILETIME write{};
     if (!::GetFileTime(file, &create, nullptr, &write)) {
-        ::CloseHandle(file);
         return {};
     }
-    ::CloseHandle(file);
-    FILETIME localFile{};
+    file.Close();
     SYSTEMTIME utc{};
     SYSTEMTIME local{};
     if (!::FileTimeToSystemTime(&write, &utc)) {
@@ -88,7 +88,6 @@ std::string FileTimeToStartLocal(const std::wstring& path) {
     if (!::SystemTimeToTzSpecificLocalTime(nullptr, &utc, &local)) {
         local = utc;
     }
-    (void)localFile;
     return Sidecar::FormatLocalTimestamp(local);
 }
 
@@ -123,20 +122,20 @@ std::wstring RecordingLibrary::MdPathForAudio(const std::wstring& audioPath) {
 }
 
 double RecordingLibrary::ReadWavDurationSeconds(const std::wstring& wavPath) {
-    HANDLE file = ::CreateFileW(
+    ATL::CHandle file(::CreateFileW(
         wavPath.c_str(),
         GENERIC_READ,
         FILE_SHARE_READ,
         nullptr,
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
+        nullptr));
+    if (file.m_h == INVALID_HANDLE_VALUE) {
+        file.Detach();
         return 0.0;
     }
 
     const std::optional<WavHeader> header = WavHeader::Read(file);
-    ::CloseHandle(file);
     return header ? header->DurationSeconds() : 0.0;
 }
 

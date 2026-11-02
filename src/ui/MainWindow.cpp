@@ -78,14 +78,8 @@ void MainWindow::RecoverPartialRecordings() {
     auto rescued = WavWriter::RecoverPartialsInFolder(Paths::RescueDir());
     recovered.insert(recovered.end(), rescued.begin(), rescued.end());
     for (const auto& path : recovered) {
-        RecordingSidecar side{};
-        side.startLocal = Sidecar::FormatLocalTimestampNow();
-        side.endLocal = side.startLocal;
-        side.durationSeconds = RecordingLibrary::ReadWavDurationSeconds(path);
-        side.sampleRate = 48000;
-        side.channels = 2;
+        RecordingSidecar side = RecordingSidecar::ForAudio(path);
         side.deviceNotes.push_back("Recovered from partial file");
-        side.transcriptStatus = TranscriptStatus::None;
         RecordingLibrary::WriteSidecarForAudio(path, side);
     }
     if (!recovered.empty()) {
@@ -101,21 +95,16 @@ void MainWindow::WriteSidecarForPath(const std::wstring& audioPath) {
         return;
     }
 
-    RecordingSidecar side{};
+    RecordingSidecar side = RecordingSidecar::ForAudio(audioPath);
     side.startLocal = Sidecar::FormatLocalTimestamp(m_session.StartLocalTime());
-    side.endLocal = Sidecar::FormatLocalTimestampNow();
-    side.durationSeconds = RecordingLibrary::ReadWavDurationSeconds(audioPath);
     if (side.durationSeconds <= 0.0) {
         side.durationSeconds = m_session.ElapsedSeconds();
     }
-    side.sampleRate = 48000;
-    side.channels = 2;
     side.micDevice = Text::WideToUtf8(m_session.MicDeviceName());
     side.systemDevice = Text::WideToUtf8(m_session.SystemDeviceName());
     for (const auto& note : m_session.TakeDeviceNotes()) {
         side.deviceNotes.push_back(Text::WideToUtf8(note));
     }
-    side.transcriptStatus = TranscriptStatus::None;
     if (!RecordingLibrary::WriteSidecarForAudio(audioPath, side)) {
         Log::Warn(L"Failed to write sidecar for " + audioPath);
     }

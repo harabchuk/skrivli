@@ -1,5 +1,7 @@
 #include "storage/RecordingSidecar.hpp"
 
+#include "audio/AudioFormat.hpp"
+#include "storage/RecordingLibrary.hpp"
 #include "util/FileIo.hpp"
 #include "util/Log.hpp"
 #include "util/Text.hpp"
@@ -29,6 +31,16 @@ struct glz::meta<TranscriptStatus> {
         TranscriptStatus::Failed,
         TranscriptStatus::Cancelled};
 };
+
+RecordingSidecar RecordingSidecar::ForAudio(const std::wstring& audioPath) {
+    RecordingSidecar side{};
+    side.startLocal = Sidecar::FormatLocalTimestampNow();
+    side.endLocal = side.startLocal;
+    side.durationSeconds = RecordingLibrary::ReadWavDurationSeconds(audioPath);
+    side.sampleRate = static_cast<int>(AudioFormat::kSampleRate);
+    side.channels = static_cast<int>(AudioFormat::kChannels);
+    return side;
+}
 
 namespace Sidecar {
 

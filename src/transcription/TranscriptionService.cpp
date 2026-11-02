@@ -199,11 +199,7 @@ void TranscriptionService::UpdateSidecarStatus(
     RecordingSidecar side{};
     const std::wstring jsonPath = RecordingLibrary::JsonPathForAudio(audioPath);
     if (!Sidecar::Load(jsonPath, side)) {
-        side.startLocal = Sidecar::FormatLocalTimestampNow();
-        side.endLocal = side.startLocal;
-        side.durationSeconds = RecordingLibrary::ReadWavDurationSeconds(audioPath);
-        side.sampleRate = 48000;
-        side.channels = 2;
+        side = RecordingSidecar::ForAudio(audioPath);
     }
     side.transcriptStatus = status;
     side.transcriptError = error;

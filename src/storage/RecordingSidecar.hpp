@@ -31,6 +31,9 @@ struct RecordingSidecar {
     std::string transcriptError{};
     std::string model{};
     std::string language{};
+
+    // start/end = now, duration read from the WAV header, internal sample rate and channels.
+    static RecordingSidecar ForAudio(const std::wstring& audioPath);
 };
 
 namespace Sidecar {
