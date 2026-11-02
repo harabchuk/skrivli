@@ -178,8 +178,8 @@ WASAPI loopback delivers **no packets** while nothing is playing, which would ma
 
 ### 6.5 Writing files
 - Filename: `<folder>\MeetingBuddy_2026-11-01_13-18-00.wav` (local time; collisions get a `-2` suffix).
-- While recording, write to `*.wav.partial`. `WavWriter` uses the miniaudio WAV encoder (float in, PCM 16-bit out) and rewrites the RIFF size fields every 2 s plus on close. On stop, flush, close, and rename to `.wav`.
-- On startup, `RecordingLibrary` finds leftover `.partial` files (from a crash), fixes their headers, and renames them to `*.recovered.wav`.
+- While recording, write to `*.wav.partial`. `WavWriter` uses the miniaudio WAV encoder (float in, PCM 16-bit out; MiniAudio owns the WAV header). Size fields are rewritten every 2 s so partials stay playable; `ma_encoder_uninit` patches them again on close. On stop, flush, close, and rename to `.wav`.
+- On startup, `RecordingLibrary` finds leftover `.partial` files (from a crash), patches RIFF/`data` sizes from file length, and renames them to `*.recovered.wav`.
 - Check free disk space before start and every 30 s (`GetDiskFreeSpaceExW`); stop gracefully below 200 MB and notify.
 - Optional post-step: "Compress to M4A (AAC 128 kbps)" via `IMFSinkWriter` on a worker, then delete the WAV if the user opts in.
 - Metadata sidecar `<name>.json`: start/end time, duration, devices used, sample rate, transcript status, model used.

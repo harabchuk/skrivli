@@ -38,7 +38,7 @@ public:
     const std::wstring& Folder() const { return m_folder; }
     uint64_t FramesWritten() const { return m_framesWritten; }
 
-    // Repair RIFF sizes from file length. Used by recovery and tests.
+    // Patch RIFF/`data` sizes from file length (MiniAudio already wrote the header).
     static bool RepairPartialHeader(const std::wstring& partialPath);
     // Scan folder for `*.wav.partial`, repair, rename to `*.recovered.wav`.
     static std::vector<std::wstring> RecoverPartialsInFolder(const std::wstring& folder);

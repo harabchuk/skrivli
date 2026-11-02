@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <vector>
 #include <windows.h>
@@ -15,26 +14,8 @@ namespace {
 
 constexpr uint64_t kPatchIntervalBytes = 48000ull * 2ull * 2ull * 2ull; // ~2 s of PCM16 stereo
 constexpr uint32_t kHeaderBytes = 44;
-
-#pragma pack(push, 1)
-struct WavHeader {
-    char riff[4] = {'R', 'I', 'F', 'F'};
-    uint32_t riffSize = 36;
-    char wave[4] = {'W', 'A', 'V', 'E'};
-    char fmt[4] = {'f', 'm', 't', ' '};
-    uint32_t fmtSize = 16;
-    uint16_t audioFormat = 1; // PCM
-    uint16_t channels = WavWriter::kChannels;
-    uint32_t sampleRate = WavWriter::kSampleRate;
-    uint32_t byteRate = WavWriter::kSampleRate * WavWriter::kChannels * (WavWriter::kBitsPerSample / 8);
-    uint16_t blockAlign = WavWriter::kChannels * (WavWriter::kBitsPerSample / 8);
-    uint16_t bitsPerSample = WavWriter::kBitsPerSample;
-    char data[4] = {'d', 'a', 't', 'a'};
-    uint32_t dataSize = 0;
-};
-#pragma pack(pop)
-
-static_assert(sizeof(WavHeader) == kHeaderBytes);
+constexpr uint32_t kRiffSizeOffset = 4;
+constexpr uint32_t kDataSizeOffset = 40;
 
 bool WriteAll(HANDLE file, const void* data, DWORD bytes) {
     const BYTE* cursor = static_cast<const BYTE*>(data);
@@ -48,6 +29,48 @@ bool WriteAll(HANDLE file, const void* data, DWORD bytes) {
         remaining -= written;
     }
     return true;
+}
+
+bool SeekHandle(HANDLE file, int64_t offset, DWORD method) {
+    LARGE_INTEGER distance{};
+    distance.QuadPart = offset;
+    return ::SetFilePointerEx(file, distance, nullptr, method) != FALSE;
+}
+
+// MiniAudio writes the PCM WAV header; we only rewrite the two size fields so
+// `.partial` files stay playable mid-recording and after a crash.
+bool WriteRiffSizes(HANDLE file, uint64_t dataBytes) {
+    if (dataBytes > 0xFFFFFFFFull) {
+        return false;
+    }
+    const uint32_t dataSize = static_cast<uint32_t>(dataBytes);
+    const uint32_t riffSize = static_cast<uint32_t>(36 + dataBytes);
+    if (!SeekHandle(file, kRiffSizeOffset, FILE_BEGIN)) {
+        return false;
+    }
+    if (!WriteAll(file, &riffSize, sizeof(riffSize))) {
+        return false;
+    }
+    if (!SeekHandle(file, kDataSizeOffset, FILE_BEGIN)) {
+        return false;
+    }
+    if (!WriteAll(file, &dataSize, sizeof(dataSize))) {
+        return false;
+    }
+    return SeekHandle(file, static_cast<int64_t>(kHeaderBytes + dataBytes), FILE_BEGIN);
+}
+
+bool IsRiffWavePrefix(HANDLE file) {
+    char prefix[12]{};
+    DWORD read = 0;
+    if (!SeekHandle(file, 0, FILE_BEGIN)) {
+        return false;
+    }
+    if (!::ReadFile(file, prefix, sizeof(prefix), &read, nullptr) || read != sizeof(prefix)) {
+        return false;
+    }
+    return prefix[0] == 'R' && prefix[1] == 'I' && prefix[2] == 'F' && prefix[3] == 'F'
+        && prefix[8] == 'W' && prefix[9] == 'A' && prefix[10] == 'V' && prefix[11] == 'E';
 }
 
 }  // namespace
@@ -286,32 +309,8 @@ bool WavWriter::SeekAndWriteSizes() {
     if (m_file == nullptr) {
         return false;
     }
-
     const uint64_t dataBytes = m_framesWritten * kChannels * (kBitsPerSample / 8);
-    if (dataBytes > 0xFFFFFFFFull) {
-        return false;
-    }
-
-    const uint32_t dataSize = static_cast<uint32_t>(dataBytes);
-    const uint32_t riffSize = static_cast<uint32_t>(36 + dataBytes);
-
-    if (!SeekFile(4, static_cast<int>(ma_seek_origin_start))) {
-        return false;
-    }
-    if (!WriteAll(static_cast<HANDLE>(m_file), &riffSize, sizeof(riffSize))) {
-        return false;
-    }
-    // Canonical PCM header: "data" size sits at byte 40.
-    if (!SeekFile(40, static_cast<int>(ma_seek_origin_start))) {
-        return false;
-    }
-    if (!WriteAll(static_cast<HANDLE>(m_file), &dataSize, sizeof(dataSize))) {
-        return false;
-    }
-
-    LARGE_INTEGER end{};
-    end.QuadPart = static_cast<LONGLONG>(kHeaderBytes + dataBytes);
-    return ::SetFilePointerEx(static_cast<HANDLE>(m_file), end, nullptr, FILE_BEGIN) != FALSE;
+    return WriteRiffSizes(static_cast<HANDLE>(m_file), dataBytes);
 }
 
 bool WavWriter::WriteFloatFrames(const float* interleavedStereo, uint32_t frameCount) {
@@ -362,12 +361,7 @@ bool WavWriter::Finalize(std::wstring& outFinalPath) {
         return false;
     }
 
-    if (!SeekAndWriteSizes()) {
-        Log::Error(L"Failed to patch WAV header on finalize");
-        Abandon();
-        return false;
-    }
-
+    // ma_encoder_uninit → dr_wav seeks back and writes the final RIFF sizes.
     CloseEncoder();
     ::FlushFileBuffers(static_cast<HANDLE>(m_file));
     ::CloseHandle(static_cast<HANDLE>(m_file));
@@ -397,13 +391,12 @@ bool WavWriter::RescueTo(const std::wstring& rescueDir, std::wstring& outFinalPa
         return false;
     }
 
-    if (!SeekAndWriteSizes()) {
-        Log::Error(L"Failed to patch WAV header before rescue");
-    }
+    // ma_encoder_uninit patches sizes while the handle is still open.
     CloseEncoder();
     ::FlushFileBuffers(static_cast<HANDLE>(m_file));
     ::CloseHandle(static_cast<HANDLE>(m_file));
     m_file = nullptr;
+
 
     const std::filesystem::path src(m_partialPath);
     const std::wstring leaf = src.filename().wstring();
@@ -489,40 +482,19 @@ bool WavWriter::RepairPartialHeader(const std::wstring& partialPath) {
     }
 
     LARGE_INTEGER size{};
-    if (!::GetFileSizeEx(file, &size) || size.QuadPart < static_cast<LONGLONG>(sizeof(WavHeader))) {
+    if (!::GetFileSizeEx(file, &size) || size.QuadPart < static_cast<LONGLONG>(kHeaderBytes)) {
+        ::CloseHandle(file);
+        return false;
+    }
+    if (!IsRiffWavePrefix(file)) {
         ::CloseHandle(file);
         return false;
     }
 
-    const uint64_t dataBytes = static_cast<uint64_t>(size.QuadPart) - sizeof(WavHeader);
-    WavHeader header{};
-    DWORD read = 0;
-    if (!::ReadFile(file, &header, sizeof(header), &read, nullptr) || read != sizeof(header)) {
-        ::CloseHandle(file);
-        return false;
-    }
-
-    if (std::strncmp(header.riff, "RIFF", 4) != 0 || std::strncmp(header.wave, "WAVE", 4) != 0) {
-        ::CloseHandle(file);
-        return false;
-    }
-
-    header.dataSize = static_cast<uint32_t>(std::min<uint64_t>(dataBytes, 0xFFFFFFFFull));
-    header.riffSize = static_cast<uint32_t>(36 + header.dataSize);
-    header.channels = kChannels;
-    header.sampleRate = kSampleRate;
-    header.bitsPerSample = kBitsPerSample;
-    header.byteRate = kSampleRate * kChannels * (kBitsPerSample / 8);
-    header.blockAlign = kChannels * (kBitsPerSample / 8);
-    header.audioFormat = 1;
-    header.fmtSize = 16;
-
-    if (::SetFilePointer(file, 0, nullptr, FILE_BEGIN) == INVALID_SET_FILE_POINTER
-        && ::GetLastError() != NO_ERROR) {
-        ::CloseHandle(file);
-        return false;
-    }
-    const bool ok = WriteAll(file, &header, sizeof(header));
+    const uint64_t dataBytes = std::min<uint64_t>(
+        static_cast<uint64_t>(size.QuadPart) - kHeaderBytes,
+        0xFFFFFFFFull);
+    const bool ok = WriteRiffSizes(file, dataBytes);
     ::CloseHandle(file);
     return ok;
 }
