@@ -56,6 +56,14 @@ private:
     std::wstring& m_name;
 };
 
+constexpr int kSelectionActionIds[] = {
+    IDC_REC_PLAY,
+    IDC_REC_TRANSCRIBE,
+    IDC_REC_OPENFOLDER,
+    IDC_REC_RENAME,
+    IDC_REC_DELETE,
+};
+
 }  // namespace
 
 BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
@@ -230,13 +238,23 @@ void RecordingsView::FitColumns() {
 void RecordingsView::UpdateActionEnabled() {
     const bool hasSel = SelectedIndex() >= 0;
     const RecordingEntry* entry = SelectedEntry();
-    ::EnableWindow(GetDlgItem(IDC_REC_PLAY), hasSel ? TRUE : FALSE);
-    ::EnableWindow(GetDlgItem(IDC_REC_OPENFOLDER), hasSel ? TRUE : FALSE);
-    ::EnableWindow(GetDlgItem(IDC_REC_RENAME), hasSel ? TRUE : FALSE);
-    ::EnableWindow(GetDlgItem(IDC_REC_DELETE), hasSel ? TRUE : FALSE);
-    ::EnableWindow(GetDlgItem(IDC_REC_TRANSCRIBE), hasSel ? TRUE : FALSE);
     const bool canView = entry != nullptr && entry->hasMarkdown;
+    EnableActions(hasSel, canView);
+}
+
+void RecordingsView::EnableActions(bool hasSel, bool canView) {
+    for (const int id : kSelectionActionIds) {
+        ::EnableWindow(GetDlgItem(id), hasSel ? TRUE : FALSE);
+    }
     ::EnableWindow(GetDlgItem(IDC_REC_VIEW), canView ? TRUE : FALSE);
+}
+
+void RecordingsView::EnableMenuActions(CMenuHandle popup, bool hasSel, bool canView) {
+    const UINT selFlag = MF_BYCOMMAND | (hasSel ? MF_ENABLED : MF_GRAYED);
+    for (const int id : kSelectionActionIds) {
+        popup.EnableMenuItem(id, selFlag);
+    }
+    popup.EnableMenuItem(IDC_REC_VIEW, MF_BYCOMMAND | (canView ? MF_ENABLED : MF_GRAYED));
 }
 
 int RecordingsView::SelectedIndex() const {
@@ -474,14 +492,7 @@ LRESULT RecordingsView::OnRightClick(LPNMHDR /*header*/) {
     }
 
     const RecordingEntry* entry = SelectedEntry();
-    popup.EnableMenuItem(IDC_REC_PLAY, MF_BYCOMMAND | (entry ? MF_ENABLED : MF_GRAYED));
-    popup.EnableMenuItem(IDC_REC_TRANSCRIBE, MF_BYCOMMAND | (entry ? MF_ENABLED : MF_GRAYED));
-    popup.EnableMenuItem(
-        IDC_REC_VIEW,
-        MF_BYCOMMAND | ((entry && entry->hasMarkdown) ? MF_ENABLED : MF_GRAYED));
-    popup.EnableMenuItem(IDC_REC_OPENFOLDER, MF_BYCOMMAND | (entry ? MF_ENABLED : MF_GRAYED));
-    popup.EnableMenuItem(IDC_REC_RENAME, MF_BYCOMMAND | (entry ? MF_ENABLED : MF_GRAYED));
-    popup.EnableMenuItem(IDC_REC_DELETE, MF_BYCOMMAND | (entry ? MF_ENABLED : MF_GRAYED));
+    EnableMenuActions(popup, entry != nullptr, entry != nullptr && entry->hasMarkdown);
 
     POINT cursor{};
     ::GetCursorPos(&cursor);

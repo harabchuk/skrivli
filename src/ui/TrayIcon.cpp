@@ -2,31 +2,26 @@
 
 #include "util/Log.hpp"
 
+namespace {
+
+// Not named LoadIcon: winuser.h defines that as a macro.
+HICON LoadTrayIcon(int id) {
+    return static_cast<HICON>(::LoadImageW(
+        _Module.GetResourceInstance(),
+        MAKEINTRESOURCEW(id),
+        IMAGE_ICON,
+        0,
+        0,
+        LR_DEFAULTSIZE | LR_SHARED));
+}
+
+}  // namespace
+
 TrayIcon::~TrayIcon() {
     Remove();
     // Icons are loaded with LR_SHARED; do not DestroyIcon them.
     m_idleIcon = nullptr;
     m_recordingIcon = nullptr;
-}
-
-HICON TrayIcon::LoadIdleIcon() const {
-    return static_cast<HICON>(::LoadImageW(
-        _Module.GetResourceInstance(),
-        MAKEINTRESOURCEW(IDI_TRAY_IDLE),
-        IMAGE_ICON,
-        0,
-        0,
-        LR_DEFAULTSIZE | LR_SHARED));
-}
-
-HICON TrayIcon::LoadRecordingIcon() const {
-    return static_cast<HICON>(::LoadImageW(
-        _Module.GetResourceInstance(),
-        MAKEINTRESOURCEW(IDI_TRAY_RECORDING),
-        IMAGE_ICON,
-        0,
-        0,
-        LR_DEFAULTSIZE | LR_SHARED));
 }
 
 void TrayIcon::FillBase(NOTIFYICONDATAW& data) const {
@@ -48,10 +43,10 @@ bool TrayIcon::Add(HWND owner) {
 
     m_owner = owner;
     if (m_idleIcon == nullptr) {
-        m_idleIcon = LoadIdleIcon();
+        m_idleIcon = LoadTrayIcon(IDI_TRAY_IDLE);
     }
     if (m_recordingIcon == nullptr) {
-        m_recordingIcon = LoadRecordingIcon();
+        m_recordingIcon = LoadTrayIcon(IDI_TRAY_RECORDING);
     }
     if (m_idleIcon == nullptr) {
         Log::Error(L"Failed to load tray idle icon");
@@ -114,7 +109,17 @@ void TrayIcon::ShowBalloon(const wchar_t* title, const wchar_t* text) {
     if (text != nullptr) {
         wcsncpy_s(data.szInfo, text, _TRUNCATE);
     }
+    Modify(data);
+}
+
+void TrayIcon::Modify(NOTIFYICONDATAW& data) {
     ::Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+void TrayIcon::Modify() {
+    NOTIFYICONDATAW data{};
+    FillBase(data);
+    Modify(data);
 }
 
 void TrayIcon::SetRecording(bool recording) {
@@ -125,10 +130,7 @@ void TrayIcon::SetRecording(bool recording) {
     if (!m_added) {
         return;
     }
-
-    NOTIFYICONDATAW data{};
-    FillBase(data);
-    ::Shell_NotifyIconW(NIM_MODIFY, &data);
+    Modify();
 }
 
 void TrayIcon::SetTip(const wchar_t* tip) {
@@ -140,8 +142,5 @@ void TrayIcon::SetTip(const wchar_t* tip) {
     if (!m_added) {
         return;
     }
-
-    NOTIFYICONDATAW data{};
-    FillBase(data);
-    ::Shell_NotifyIconW(NIM_MODIFY, &data);
+    Modify();
 }

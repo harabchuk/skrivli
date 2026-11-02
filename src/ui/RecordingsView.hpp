@@ -76,6 +76,8 @@ private:
     void PopulateList();
     void FitColumns();
     void UpdateActionEnabled();
+    void EnableActions(bool hasSel, bool canView);
+    static void EnableMenuActions(WTL::CMenuHandle popup, bool hasSel, bool canView);
     int SelectedIndex() const;
     const RecordingEntry* SelectedEntry() const;
     void ApplySort();

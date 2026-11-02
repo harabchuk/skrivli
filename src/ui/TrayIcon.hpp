@@ -21,8 +21,8 @@ public:
 
 private:
     void FillBase(NOTIFYICONDATAW& data) const;
-    HICON LoadIdleIcon() const;
-    HICON LoadRecordingIcon() const;
+    void Modify();
+    static void Modify(NOTIFYICONDATAW& data);
 
     HWND m_owner = nullptr;
     bool m_added = false;
