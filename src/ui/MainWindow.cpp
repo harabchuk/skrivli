@@ -6,6 +6,7 @@
 #include "storage/RecordingLibrary.hpp"
 #include "storage/RecordingSidecar.hpp"
 #include "ui/SettingsDialog.hpp"
+#include "ui/Theme.hpp"
 #include "ui/TranscriptWindow.hpp"
 #include "util/Autostart.hpp"
 #include "util/Hotkey.hpp"
@@ -270,18 +271,84 @@ void MainWindow::LayoutChildren() {
     }
 
     if (m_tabs.IsWindow()) {
+        // The stock control left-aligns its items, so size it to the strip and center that window.
         m_tabs.SetWindowPos(nullptr, client.left, client.top, client.Width(), client.Height(), SWP_NOZORDER | SWP_NOACTIVATE);
 
-        CRect tabClient = client;
-        m_tabs.AdjustRect(FALSE, &tabClient);
+        CRect span{};
+        const int count = m_tabs.GetItemCount();
+        for (int i = 0; i < count; ++i) {
+            CRect item{};
+            if (!m_tabs.GetItemRect(i, &item)) {
+                continue;
+            }
+            if (span.IsRectEmpty()) {
+                span = item;
+            } else {
+                span.UnionRect(&span, &item);
+            }
+        }
 
-        const CRect pageRect(tabClient.left, tabClient.top, tabClient.right, tabClient.bottom);
+        int tabX = client.left;
+        int tabWidth = client.Width();
+        int tabHeight = client.Height();
+        if (!span.IsRectEmpty()) {
+            const int edge = span.left > 2 ? static_cast<int>(span.left) : 2;
+            tabWidth = span.Width() + edge * 2;
+            // One pixel under the buttons is the baseline the selected tab covers.
+            tabHeight = static_cast<int>(span.bottom) + 1;
+            if (tabWidth < client.Width()) {
+                tabX = client.left + (client.Width() - tabWidth) / 2;
+            } else {
+                tabX = client.left;
+                tabWidth = client.Width();
+            }
+            if (tabHeight > client.Height()) {
+                tabHeight = client.Height();
+            }
+        }
+
+        m_tabs.SetWindowPos(nullptr, tabX, client.top, tabWidth, tabHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+
+        const CRect pageRect(client.left, client.top + tabHeight, client.right, client.bottom);
+        CRect strip(client.left, client.top, client.right, pageRect.top);
+        InvalidateRect(&strip, TRUE);
         if (m_recordView.IsWindow()) {
             m_recordView.SetWindowPos(HWND_TOP, pageRect.left, pageRect.top, pageRect.Width(), pageRect.Height(), SWP_NOACTIVATE);
         }
         if (m_recordingsView.IsWindow()) {
             m_recordingsView.SetWindowPos(HWND_TOP, pageRect.left, pageRect.top, pageRect.Width(), pageRect.Height(), SWP_NOACTIVATE);
         }
+    }
+}
+
+void MainWindow::OnPaint(CDCHandle /*dc*/) {
+    CPaintDC paint(m_hWnd);
+    DrawTabBaseline(paint.m_hDC);
+}
+
+void MainWindow::DrawTabBaseline(CDCHandle dc) {
+    if (!m_tabs.IsWindow()) {
+        return;
+    }
+
+    CRect tabs;
+    m_tabs.GetWindowRect(&tabs);
+    ScreenToClient(&tabs);
+    if (tabs.IsRectEmpty()) {
+        return;
+    }
+
+    CRect client;
+    GetClientRect(&client);
+    const int y = tabs.bottom - 1;
+    if (y < client.top || y >= client.bottom) {
+        return;
+    }
+    if (tabs.left > client.left) {
+        dc.FillSolidRect(client.left, y, tabs.left - client.left, 1, ui::kDivider);
+    }
+    if (tabs.right < client.right) {
+        dc.FillSolidRect(tabs.right, y, client.right - tabs.right, 1, ui::kDivider);
     }
 }
 
@@ -568,6 +635,22 @@ void MainWindow::HideToTray(bool /*fromClose*/) {
     }
 }
 
+void MainWindow::ToggleFromTrayClick() {
+    // Collapse press+release (and any echoed legacy) notifications from one click.
+    constexpr DWORD kMinToggleIntervalMs = 250;
+    const DWORD now = ::GetTickCount();
+    if (now - m_lastTrayToggleTick < kMinToggleIntervalMs) {
+        return;
+    }
+    m_lastTrayToggleTick = now;
+
+    if (IsWindowVisible()) {
+        HideToTray(false);
+    } else {
+        ShowFromTray();
+    }
+}
+
 void MainWindow::PersistWindowPlacement() {
     if (!IsWindow() || !IsWindowVisible() || IsIconic() || IsZoomed()) {
         return;
@@ -637,11 +720,16 @@ LRESULT MainWindow::OnTrayIcon(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, B
     switch (LOWORD(lParam)) {
     case NIN_SELECT:
     case NIN_KEYSELECT:
+        // NOTIFYICON_VERSION_4 can deliver NIN_SELECT for both button-down and
+        // button-up of a single click. Collapse those into one toggle.
+        ToggleFromTrayClick();
+        break;
     case WM_LBUTTONUP:
-        if (IsWindowVisible()) {
-            HideToTray(false);
-        } else {
-            ShowFromTray();
+        // Legacy callback path only (NIM_SETVERSION failed). With version 4,
+        // NIN_SELECT already handled the click — handling this too would
+        // show then immediately hide.
+        if (!m_tray.UsesVersion4()) {
+            ToggleFromTrayClick();
         }
         break;
     case NIN_BALLOONUSERCLICK:
@@ -653,8 +741,12 @@ LRESULT MainWindow::OnTrayIcon(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, B
         }
         break;
     case WM_CONTEXTMENU:
-    case WM_RBUTTONUP:
         ShowTrayContextMenu();
+        break;
+    case WM_RBUTTONUP:
+        if (!m_tray.UsesVersion4()) {
+            ShowTrayContextMenu();
+        }
         break;
     default:
         break;
@@ -861,9 +953,7 @@ void MainWindow::OnTrayStartStop(UINT /*code*/, int /*id*/, HWND /*control*/) {
 
 LRESULT MainWindow::OnTabSelChange(LPNMHDR /*header*/) {
     ShowSelectedTab();
-    if (m_tabs.IsWindow()) {
-        m_tabs.Invalidate(FALSE);
-    }
+    LayoutChildren();
     return 0;
 }
 

@@ -17,6 +17,7 @@ public:
 
     BEGIN_MSG_MAP_EX(MainWindow)
         MSG_WM_CREATE(OnCreate)
+        MSG_WM_PAINT(OnPaint)
         MSG_WM_SIZE(OnSize)
         MSG_WM_CLOSE(OnClose)
         MSG_WM_DESTROY(OnDestroy)
@@ -68,6 +69,7 @@ private:
     static constexpr int kDefaultClientHeight = 520;
 
     LRESULT OnCreate(LPCREATESTRUCT createStruct);
+    void OnPaint(CDCHandle dc);
     void OnSize(UINT type, CSize size);
     void OnClose();
     void OnDestroy();
@@ -107,8 +109,10 @@ private:
     void CreateTabs();
     void ApplyDpiFonts(UINT dpi);
     void LayoutChildren();
+    void DrawTabBaseline(CDCHandle dc);
     void ShowSelectedTab();
     void HideToTray(bool fromClose);
+    void ToggleFromTrayClick();
     void PersistWindowPlacement();
     bool IsPlacementOnAnyMonitor(const RECT& windowRect) const;
     void ShowTrayContextMenu();
@@ -146,6 +150,7 @@ private:
     bool m_compressingM4a = false;
     UINT m_taskbarCreatedMsg = 0;
     UINT m_showYourselfMsg = 0;
+    DWORD m_lastTrayToggleTick = 0;
     std::wstring m_balloonTranscriptPath;
     std::wstring m_pendingCompressWav;
 };

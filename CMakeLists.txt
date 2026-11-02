@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(MeetingBuddy LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(MEETINGBUDDY_BUILD_TESTS "Build unit tests" ON)
@@ -15,6 +15,15 @@ FetchContent_Declare(
     URL_HASH SHA256=1A62EA728D088C7C5C7CFC76DB445E5C9F04923F92CADCF27B5D7678D85826A2
 )
 FetchContent_MakeAvailable(wtl)
+
+# Glaze JSON (header-only). Requires C++23 and MSVC /Zc:preprocessor.
+FetchContent_Declare(
+    glaze
+    GIT_REPOSITORY https://github.com/stephenberry/glaze.git
+    GIT_TAG        v9.1.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(glaze)
 
 # whisper.cpp v1.9.5 — CPU only, static, portable AVX2 (no native host tuning).
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -106,6 +115,7 @@ target_compile_definitions(MeetingBuddy PRIVATE
 
 target_link_libraries(MeetingBuddy PRIVATE
     whisper
+    glaze::glaze
     ole32
     uuid
     shell32
@@ -127,7 +137,7 @@ target_link_libraries(MeetingBuddy PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(MeetingBuddy PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(MeetingBuddy PRIVATE /W4 /permissive- /utf-8 /Zc:preprocessor)
     # Use main() with a WIN32 subsystem executable.
     # Manifest is embedded from resources/MeetingBuddy.rc — disable the linker default.
     target_link_options(MeetingBuddy PRIVATE /ENTRY:mainCRTStartup /MANIFEST:NO)
@@ -176,6 +186,7 @@ if(MEETINGBUDDY_BUILD_TESTS)
 
     target_link_libraries(MeetingBuddyTests PRIVATE
         GTest::gtest_main
+        glaze::glaze
         ole32
         uuid
         shell32
@@ -184,7 +195,7 @@ if(MEETINGBUDDY_BUILD_TESTS)
     )
 
     if(MSVC)
-        target_compile_options(MeetingBuddyTests PRIVATE /W4 /permissive- /utf-8)
+        target_compile_options(MeetingBuddyTests PRIVATE /W4 /permissive- /utf-8 /Zc:preprocessor)
     endif()
 
     include(GoogleTest)

@@ -13,12 +13,12 @@ Read the relevant section of the spec before implementing a feature. If you chan
 
 | Area | Technology |
 |---|---|
-| Language | C++20 (MSVC, `/W4 /permissive- /utf-8`), Unicode only (`UNICODE`, `_UNICODE`) |
+| Language | C++23 (MSVC, `/W4 /permissive- /utf-8 /Zc:preprocessor`), Unicode only (`UNICODE`, `_UNICODE`) |
 | UI | WTL 10 on ATL/Win32, Common Controls v6, RichEdit 4.1 (`MSFTEDIT_CLASS`) |
 | Audio | WASAPI shared mode, event-driven; mic = `eCapture`, system = loopback on `eRender` |
 | Media | Media Foundation (resampler DSP fallback, M4A encode/decode) |
 | Transcription | whisper.cpp (ggml, CPU, static) — default model `ggml-base-q5_1.bin` |
-| Build | CMake ≥ 3.24, `FetchContent` for WTL, whisper.cpp, GoogleTest |
+| Build | CMake ≥ 3.24, `FetchContent` for WTL, Glaze, whisper.cpp, GoogleTest |
 | Generator | Visual Studio 18 2026 x64 (`CMakePresets.json` preset `default`), output in `build/` |
 | Target OS | Windows 10 1903+ x64 |
 

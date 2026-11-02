@@ -21,11 +21,9 @@ inline COLORREF SecondaryTextColor() {
     return ::GetSysColor(COLOR_GRAYTEXT);
 }
 
-// Section headers ("Input", "Output") and the selected tab label.
+// Section headers ("Input", "Output").
 constexpr COLORREF kAccent = RGB(0x00, 0x5F, 0xB8);
-// Hairline separators (section rules, tab strip underline).
+// Hairline separators under section headers.
 constexpr COLORREF kDivider = RGB(0xD0, 0xD0, 0xD0);
-// Hovered, unselected tab label.
-constexpr COLORREF kHotText = RGB(0x33, 0x33, 0x33);
 
 }  // namespace ui
