@@ -118,7 +118,10 @@ private:
     void ShowTrayContextMenu();
     void SetStatusIdle();
     void SetStatusRecording();
-    void UpdateTrayRecordingTip();
+    void UpdateRecordingUi();
+    // Kills the elapsed timer and returns the UI to idle. When `error` is set it reports the error
+    // instead of OnRecordingFinished(path).
+    void EnterIdleUi(const std::wstring& path, bool refreshList, const std::wstring* error = nullptr);
     void RecoverPartialRecordings();
     void WriteSidecarForPath(const std::wstring& audioPath);
     void RefreshRecordingsList();

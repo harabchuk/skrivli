@@ -188,11 +188,7 @@ void MainWindow::ApplyDpiFonts(UINT dpi) {
         return;
     }
 
-    const HFONT previous = m_uiFont.Detach();
     m_uiFont.Attach(newFont.Detach());
-    if (previous != nullptr) {
-        ::DeleteObject(previous);
-    }
 
     const HFONT font = m_uiFont;
     if (m_tabs.IsWindow()) {
@@ -222,7 +218,7 @@ void MainWindow::SetStatusRecording() {
     m_status.SetPaneText(IDC_STATUS_PANE_STATE, L"Recording");
 }
 
-void MainWindow::UpdateTrayRecordingTip() {
+void MainWindow::UpdateRecordingUi() {
     const uint64_t start = m_session.StartQpc();
     if (start == 0) {
         return;
@@ -231,13 +227,25 @@ void MainWindow::UpdateTrayRecordingTip() {
     LARGE_INTEGER freq{};
     ::QueryPerformanceCounter(&now);
     ::QueryPerformanceFrequency(&freq);
-    const std::wstring tip =
-        L"Recording " + FormatElapsed(static_cast<uint64_t>(now.QuadPart) - start, static_cast<uint64_t>(freq.QuadPart));
-    m_tray.SetTip(tip.c_str());
-
     const std::wstring elapsed =
         FormatElapsed(static_cast<uint64_t>(now.QuadPart) - start, static_cast<uint64_t>(freq.QuadPart));
+    const std::wstring tip = L"Recording " + elapsed;
+    m_tray.SetTip(tip.c_str());
     m_status.SetPaneText(IDC_STATUS_PANE_TIME, elapsed.c_str());
+}
+
+void MainWindow::EnterIdleUi(const std::wstring& path, bool refreshList, const std::wstring* error) {
+    KillTimer(IDT_RECORD_ELAPSED);
+    if (error != nullptr) {
+        m_recordView.OnRecordingError(*error);
+    } else {
+        m_recordView.OnRecordingFinished(path);
+    }
+    SetStatusIdle();
+    m_tray.SetRecording(false);
+    if (refreshList) {
+        RefreshRecordingsList();
+    }
 }
 
 void MainWindow::LayoutChildren() {
@@ -401,7 +409,7 @@ void MainWindow::OnExitSizeMove() {
 
 void MainWindow::OnTimer(UINT_PTR id) {
     if (id == IDT_RECORD_ELAPSED && m_session.IsActive()) {
-        UpdateTrayRecordingTip();
+        UpdateRecordingUi();
     }
 }
 
@@ -567,10 +575,7 @@ void MainWindow::FinishRecordingUi(const std::wstring& audioPath) {
     if (Settings::Instance().Data().autoTranscribe && !audioPath.empty()) {
         EnqueueTranscription(audioPath);
     }
-    m_recordView.OnRecordingFinished(audioPath);
-    SetStatusIdle();
-    m_tray.SetRecording(false);
-    RefreshRecordingsList();
+    EnterIdleUi(audioPath, true);
 }
 
 void MainWindow::SetTranscribeStatusText(const std::wstring& text) {
@@ -734,22 +739,19 @@ LRESULT MainWindow::OnRecordingStarted(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /
     m_recordView.OnRecordingStarted();
     SetStatusRecording();
     m_tray.SetRecording(true);
-    UpdateTrayRecordingTip();
+    UpdateRecordingUi();
     SetTimer(IDT_RECORD_ELAPSED, 250);
     return 0;
 }
 
 LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
-    KillTimer(IDT_RECORD_ELAPSED);
-    std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+    const auto path = TakeOwned<std::wstring>(lParam);
     if (path && !path->empty()) {
         WriteSidecarForPath(*path);
         Log::Info(L"Recording saved: " + *path);
         if (Settings::Instance().Data().compressToM4a) {
-            m_recordView.OnRecordingFinished(*path);
-            SetStatusIdle();
-            m_tray.SetRecording(false);
+            EnterIdleUi(*path, false);
             StartM4aCompression(*path);
             return 0;
         }
@@ -761,7 +763,7 @@ LRESULT MainWindow::OnRecordingFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM 
 LRESULT MainWindow::OnM4aFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
     m_compressingM4a = false;
-    std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+    const auto path = TakeOwned<std::wstring>(lParam);
     m_pendingCompressWav.clear();
     SetTranscribeStatusText(L"");
     if (path && !path->empty()) {
@@ -777,7 +779,7 @@ LRESULT MainWindow::OnM4aFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam
 LRESULT MainWindow::OnM4aFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
     m_compressingM4a = false;
-    std::unique_ptr<std::wstring> message(reinterpret_cast<std::wstring*>(lParam));
+    const auto message = TakeOwned<std::wstring>(lParam);
     SetTranscribeStatusText(L"Compress failed");
     const std::wstring wav = m_pendingCompressWav;
     m_pendingCompressWav.clear();
@@ -791,14 +793,12 @@ LRESULT MainWindow::OnM4aFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, 
 
 LRESULT MainWindow::OnRecordingError(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
-    std::unique_ptr<std::wstring> message(reinterpret_cast<std::wstring*>(lParam));
+    const auto message = TakeOwned<std::wstring>(lParam);
     if (m_session.IsActive()) {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
-    KillTimer(IDT_RECORD_ELAPSED);
-    m_recordView.OnRecordingError(message ? *message : std::wstring{});
-    SetStatusIdle();
-    m_tray.SetRecording(false);
+    const std::wstring text = message ? *message : std::wstring{};
+    EnterIdleUi({}, false, &text);
     return 0;
 }
 
@@ -810,7 +810,7 @@ LRESULT MainWindow::OnDevicesChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*l
 
 LRESULT MainWindow::OnDeviceSwitched(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
-    std::unique_ptr<std::wstring> message(reinterpret_cast<std::wstring*>(lParam));
+    const auto message = TakeOwned<std::wstring>(lParam);
     if (message && !message->empty()) {
         m_tray.ShowBalloon(L"MeetingBuddy", message->c_str());
         m_recordView.SetWarning(*message);
@@ -825,10 +825,7 @@ LRESULT MainWindow::OnLowDisk(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/
     if (m_session.IsActive()) {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
-    KillTimer(IDT_RECORD_ELAPSED);
-    m_recordView.OnRecordingFinished({});
-    SetStatusIdle();
-    m_tray.SetRecording(false);
+    EnterIdleUi({}, false);
     m_tray.ShowBalloon(L"MeetingBuddy", L"Recording stopped: low disk space");
     RefreshRecordingsList();
     return 0;
@@ -836,10 +833,11 @@ LRESULT MainWindow::OnLowDisk(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/
 
 LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
-    std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+    const auto path = TakeOwned<std::wstring>(lParam);
     if (m_session.IsActive()) {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
+    // The modal message box below pumps messages, so the elapsed timer must already be dead.
     KillTimer(IDT_RECORD_ELAPSED);
     if (path && !path->empty()) {
         WriteSidecarForPath(*path);
@@ -848,10 +846,7 @@ LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM l
         ui::ShowMessage(m_hWnd, text.c_str(), MB_OK | MB_ICONWARNING);
         Log::Warn(text);
     }
-    m_recordView.OnRecordingFinished(path ? *path : std::wstring{});
-    SetStatusIdle();
-    m_tray.SetRecording(false);
-    RefreshRecordingsList();
+    EnterIdleUi(path ? *path : std::wstring{}, true);
     return 0;
 }
 
@@ -934,7 +929,7 @@ LRESULT MainWindow::OnTabSelChange(LPNMHDR /*header*/) {
 
 LRESULT MainWindow::OnTranscribeQueued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
-    std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
+    const auto notify = TakeOwned<TranscribeNotify>(lParam);
     SetTranscribeStatusText(L"Queued");
     RefreshRecordingsList();
     (void)notify;
@@ -943,7 +938,7 @@ LRESULT MainWindow::OnTranscribeQueued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM l
 
 LRESULT MainWindow::OnTranscribeProgress(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
-    std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
+    const auto notify = TakeOwned<TranscribeNotify>(lParam);
     if (notify) {
         wchar_t buf[64]{};
         std::swprintf(buf, 64, L"Transcribing %d%%", notify->percent);
@@ -957,7 +952,7 @@ LRESULT MainWindow::OnTranscribeProgress(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
 
 LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
-    std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
+    const auto notify = TakeOwned<TranscribeNotify>(lParam);
     SetTranscribeStatusText(L"Ready");
     RefreshRecordingsList();
     if (notify && !notify->audioPath.empty()) {
@@ -973,7 +968,7 @@ LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
 
 LRESULT MainWindow::OnTranscribeFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
-    std::unique_ptr<TranscribeNotify> notify(reinterpret_cast<TranscribeNotify*>(lParam));
+    const auto notify = TakeOwned<TranscribeNotify>(lParam);
     if (notify && !notify->message.empty()) {
         SetTranscribeStatusText(notify->message);
     } else {
