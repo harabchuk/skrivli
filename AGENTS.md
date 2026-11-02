@@ -21,6 +21,7 @@ Read the relevant section of the spec before implementing a feature. If you chan
 | Build | CMake ≥ 3.24, `FetchContent` for WTL, Glaze, whisper.cpp, miniaudio, GoogleTest, WIL |
 | Win32 / COM | WIL v1.0.260126.7 with `WIL_SUPPRESS_EXCEPTIONS` (header-only; throwing helpers off) |
 | Generator | Visual Studio 18 2026 x64 (`CMakePresets.json` preset `default`), output in `build/` |
+| Lint | clang-format (`scripts\lint.bat`). clang-tidy is configured but commented out in that script |
 | Target OS | Windows 10 1903+ x64 |
 
 Prerequisite: Visual Studio with the **Desktop C++** and **C++ ATL** components (WTL needs ATL).
@@ -46,7 +47,14 @@ Other commands:
 cmake --preset default                         # configure (only if build/ is missing)
 cmake --build build --config Release           # build only
 ctest --test-dir build -C Release              # unit tests (scripts\test.bat)
+scripts\lint.bat                               # clang-format (clang-tidy is commented out)
 ```
+
+**At the end of every session that changes C++ sources, run** `scripts\lint.bat`.
+
+It rewrites `src\` and `resources\resource.h` with clang-format (`.clang-format` at the repo root). clang-format is taken from `PATH`, or from Visual Studio's `VC\Tools\Llvm` ("C++ Clang tools for Windows"). The clang-tidy pass in `scripts\lint.bat` is commented out for now.
+
+`.clang-format` keeps `pch.hpp` first, then other project headers, then `<windows.h>`, then `<atlbase.h>` and `<atlapp.h>` ahead of the other ATL headers, then the remaining system headers. `SortIncludes` still sorts within each category.
 
 If you add CMake options or FetchContent dependencies, delete `build/CMakeCache.txt` (or
 reconfigure) so `start.bat` picks them up.
@@ -275,6 +283,7 @@ recording, Open folder, Settings, Exit. Minimize and close hide to the tray (con
 
 ## Verification checklist for agents
 
+- At the end of each session that changes C++ sources, run `scripts\lint.bat` and keep the clang-format edits.
 - The build is warning-clean at `/W4`, and `scripts\start.bat` builds and launches successfully.
 - Unit tests pass for any touched DSP, file, or formatting code (`RingBuffer`, `Mixer`, `WavWriter`, `Resampler`,
 `MarkdownFormatter`, `RecordingLibrary`).

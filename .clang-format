@@ -1,0 +1,30 @@
+BasedOnStyle: Microsoft
+IndentWidth: 4
+ColumnLimit: 100
+UseTab: Never
+BreakBeforeBraces: Attach
+PointerAlignment: Left
+ReferenceAlignment: Left
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+# pch.hpp, then other project headers (they pull in windows.h), then windows.h,
+# then ATL in the order WTL requires, then the rest of the system headers.
+# SDK headers such as bcrypt.h and audioclient.h must not precede windows.h.
+IncludeCategories:
+  - Regex: '^"pch\.hpp"'
+    Priority: 0
+  - Regex: '^"'
+    Priority: 1
+  - Regex: '^<windows\.h>'
+    Priority: 2
+  - Regex: '^<atlbase\.h>'
+    Priority: 3
+  - Regex: '^<atlapp\.h>'
+    Priority: 4
+  - Regex: '^<atl'
+    Priority: 5
+  - Regex: '^<'
+    Priority: 6
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+NamespaceIndentation: None

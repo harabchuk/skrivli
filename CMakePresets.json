@@ -19,7 +19,8 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-ninja",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     }
   ],
