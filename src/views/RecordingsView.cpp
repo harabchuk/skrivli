@@ -763,9 +763,14 @@ LRESULT RecordingsView::OnLibraryChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
     return 0;
 }
 
-LRESULT RecordingsView::OnPlayback(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
-                                   BOOL& handled) {
+LRESULT RecordingsView::OnPlayback(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& handled) {
     handled = TRUE;
+    // EOF posts lParam != 0 from the audio callback; release the device on the UI thread.
+    // Plain state posts (lParam 0) only refresh the buttons — calling Stop() there would race a
+    // new Play() that already queued a stop notification from its internal Stop().
+    if (lParam != 0) {
+        m_player.StopFromEof();
+    }
     UpdatePlaybackButtons();
     return 0;
 }

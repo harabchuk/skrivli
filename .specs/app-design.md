@@ -266,7 +266,7 @@ Saved next to the audio as `<name>.txt`:
 ### 8.3 Tab 2 — Recordings
 - Split pane laid out in `OnSize`.
 - **Left:** `CListViewCtrl` in report view with full-row select, columns **Name | Date | Duration | Size | Transcript**. The Transcript column shows `—`, `Queued`, `42 %`, `Ready`, or `Failed`.
-- **Right:** empty state ("Select a recording") until a row is selected. Then **Play** / **Stop** (in-app MFPlay via `AudioPlayer`), and below either a read-only multiline edit with the transcript text, or a **Create transcript** button (status text while a job is active; error + button again on failure).
+- **Right:** empty state ("Select a recording") until a row is selected. Then **Play** / **Stop** (in-app miniaudio via `AudioPlayer`: `ma_decoder` + `ma_device`; WAV/FLAC/MP3), and below either a read-only multiline edit with the transcript text, or a **Create transcript** button (status text while a job is active; error + button again on failure).
 - Context menu: **Play**, **Transcribe**, **Open folder**, **Rename**, **Delete** (to the Recycle Bin via `IFileOperation`, deleting audio + `.txt` + `.json` together, and a leftover `.md` if present), **Refresh**.
 - Double-click plays the selected recording. Selecting another row stops playback.
 - Data comes from `RecordingLibrary`, which scans the folder for `*.wav`/`*.m4a` and pairs them with `.txt`/`.json` (or legacy `.md`). `ReadDirectoryChangesW` on a background thread (debounced) keeps the list in sync with external changes.

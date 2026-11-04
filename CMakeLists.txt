@@ -47,15 +47,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(whisper)
 
-# miniaudio 0.11.22 — WAV encode/decode, resampling, channel conversion, and mixing.
-# Device I/O stays on WASAPI in this app. Keep these options in sync with src/infrastructure/audio/MiniAudio.hpp.
+# miniaudio 0.11.22 — WAV encode/decode, resampling, channel conversion, mixing, and playback.
+# Capture still uses WASAPI directly; playback uses ma_device. Keep these options in sync with
+# src/infrastructure/audio/MiniAudio.hpp.
 set(MINIAUDIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(MINIAUDIO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(MINIAUDIO_NO_EXTRA_NODES ON CACHE BOOL "" FORCE)
 set(MINIAUDIO_NO_LIBVORBIS ON CACHE BOOL "" FORCE)
 set(MINIAUDIO_NO_LIBOPUS ON CACHE BOOL "" FORCE)
-set(MINIAUDIO_NO_DEVICEIO ON CACHE BOOL "" FORCE)
-set(MINIAUDIO_NO_THREADING ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_DEVICEIO OFF CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_THREADING OFF CACHE BOOL "" FORCE)
 set(MINIAUDIO_NO_GENERATION ON CACHE BOOL "" FORCE)
 set(MINIAUDIO_NO_RESOURCE_MANAGER ON CACHE BOOL "" FORCE)
 set(MINIAUDIO_NO_NODE_GRAPH ON CACHE BOOL "" FORCE)
@@ -182,7 +183,6 @@ target_link_libraries(MeetingBuddy PRIVATE
     winmm
     mfplat
     mf
-    mfplay
     mfreadwrite
     mfuuid
     wmcodecdspuuid

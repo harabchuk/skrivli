@@ -1,16 +1,16 @@
 #pragma once
 
-#include "infrastructure/common/Scoped.hpp"
+#include "infrastructure/audio/MiniAudio.hpp"
 
 #include <windows.h>
 
-#include <memory>
-#include <mfplay.h>
+#include <atomic>
 #include <string>
-#include <wil/com.h>
 
-// Simple MFPlay wrapper. Create on the UI thread; events post WM_APP_PLAYBACK
-// with wParam 1 while playing and 0 when stopped.
+// Plays a recording with miniaudio (ma_decoder + ma_device). Create on the UI
+// thread; play-state changes post notifyMsg with wParam 1/0 (lParam 0). End of
+// file posts wParam 0 with lParam != 0 so the owner can call StopFromEof() and
+// release the device (do not uninit from the data callback).
 class AudioPlayer {
   public:
     AudioPlayer() = default;
@@ -24,6 +24,8 @@ class AudioPlayer {
 
     bool Play(const std::wstring& path);
     void Stop();
+    // UI-thread handler for an EOF notify (WM_APP_PLAYBACK with lParam != 0).
+    void StopFromEof();
     bool IsPlaying() const {
         return m_playing;
     }
@@ -32,16 +34,18 @@ class AudioPlayer {
     }
 
   private:
-    class Callback;
-
-    void OnPlayerEvent(MFP_EVENT_HEADER* header);
+    static void DataCallback(ma_device* device, void* output, const void* input,
+                             ma_uint32 frameCount);
     void SetPlaying(bool playing);
+    void UninitDeviceAndDecoder();
 
-    std::unique_ptr<ScopedMfStartup> m_mf;
-    wil::com_ptr_nothrow<IMFPMediaPlayer> m_player;
-    wil::com_ptr_nothrow<IMFPMediaPlayerCallback> m_callback;
     HWND m_notifyHwnd = nullptr;
     UINT m_notifyMsg = 0;
     std::wstring m_path;
     bool m_playing = false;
+    bool m_decoderInit = false;
+    bool m_deviceInit = false;
+    std::atomic<bool> m_eofPosted{false};
+    ma_decoder m_decoder{};
+    ma_device m_device{};
 };

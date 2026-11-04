@@ -16,7 +16,7 @@ Read the relevant section of the spec before implementing a feature. If you chan
 | Language | C++23 (MSVC, `/W4 /permissive- /utf-8 /Zc:preprocessor`), Unicode only (`UNICODE`, `_UNICODE`) |
 | UI | WTL 10 on ATL/Win32, Common Controls v6 |
 | Audio | WASAPI shared mode, event-driven; mic = `eCapture`, system = loopback on `eRender` |
-| Media | miniaudio 0.11 (WAV encode/decode, resample, mix); Media Foundation for M4A encode/decode |
+| Media | miniaudio 0.11 (WAV encode/decode, resample, mix, playback); Media Foundation for M4A encode/decode |
 | Transcription | whisper.cpp (ggml, CPU, static) — default model `ggml-base-q5_1.bin` |
 | Build | CMake ≥ 3.24, `FetchContent` for WTL, Glaze, whisper.cpp, miniaudio, GoogleTest, WIL |
 | Win32 / COM | WIL v1.0.260126.7 with `WIL_SUPPRESS_EXCEPTIONS` (header-only; throwing helpers off) |

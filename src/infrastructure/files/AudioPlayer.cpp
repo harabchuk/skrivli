@@ -1,53 +1,6 @@
 #include "infrastructure/files/AudioPlayer.hpp"
 
 #include "infrastructure/common/Log.hpp"
-#include "infrastructure/common/Scoped.hpp"
-
-class AudioPlayer::Callback : public IMFPMediaPlayerCallback {
-  public:
-    explicit Callback(AudioPlayer* owner) : m_owner(owner) {}
-
-    // IMFPMediaPlayerCallback
-    void STDMETHODCALLTYPE OnMediaPlayerEvent(MFP_EVENT_HEADER* header) override {
-        if (m_owner != nullptr && header != nullptr) {
-            m_owner->OnPlayerEvent(header);
-        }
-    }
-
-    // IUnknown
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override {
-        if (object == nullptr) {
-            return E_POINTER;
-        }
-        if (riid == IID_IUnknown || riid == __uuidof(IMFPMediaPlayerCallback)) {
-            *object = static_cast<IMFPMediaPlayerCallback*>(this);
-            AddRef();
-            return S_OK;
-        }
-        *object = nullptr;
-        return E_NOINTERFACE;
-    }
-
-    ULONG STDMETHODCALLTYPE AddRef() override {
-        return static_cast<ULONG>(::InterlockedIncrement(&m_ref));
-    }
-
-    ULONG STDMETHODCALLTYPE Release() override {
-        const auto ref = static_cast<ULONG>(::InterlockedDecrement(&m_ref));
-        if (ref == 0) {
-            delete this;
-        }
-        return ref;
-    }
-
-    void Detach() {
-        m_owner = nullptr;
-    }
-
-  private:
-    AudioPlayer* m_owner = nullptr;
-    long m_ref = 1;
-};
 
 AudioPlayer::~AudioPlayer() {
     Shutdown();
@@ -57,68 +10,73 @@ bool AudioPlayer::Initialize(HWND notifyHwnd, UINT notifyMsg) {
     Shutdown();
     m_notifyHwnd = notifyHwnd;
     m_notifyMsg = notifyMsg;
-
-    if (!m_mf) {
-        m_mf = std::make_unique<ScopedMfStartup>(MFSTARTUP_LITE);
-    }
-    if (!m_mf->IsStarted()) {
-        Log::Error(L"MFStartup failed for AudioPlayer");
-        m_mf.reset();
-        return false;
-    }
-
-    auto* callback = new Callback(this);
-    m_callback.attach(callback);
-
-    const HRESULT hr =
-        ::MFPCreateMediaPlayer(nullptr, FALSE, 0, m_callback.get(), nullptr, m_player.put());
-    if (FAILED(hr) || !m_player) {
-        Log::Error(L"MFPCreateMediaPlayer failed");
-        Shutdown();
-        return false;
-    }
-    return true;
+    return notifyHwnd != nullptr && notifyMsg != 0;
 }
 
 void AudioPlayer::Shutdown() {
-    if (m_callback) {
-        static_cast<Callback*>(m_callback.get())->Detach();
-    }
-    if (m_player) {
-        m_player->Shutdown();
-        m_player.reset();
-    }
-    m_callback.reset();
-    m_path.clear();
-    m_playing = false;
-    m_mf.reset();
+    Stop();
     m_notifyHwnd = nullptr;
     m_notifyMsg = 0;
 }
 
 bool AudioPlayer::Play(const std::wstring& path) {
-    if (!m_player || path.empty()) {
+    if (path.empty() || m_notifyHwnd == nullptr || m_notifyMsg == 0) {
         return false;
     }
 
     Stop();
     m_path = path;
+    m_eofPosted.store(false, std::memory_order_relaxed);
 
-    // TRUE = create asynchronously; MEDIAITEM_CREATED arrives on the callback.
-    const HRESULT hr = m_player->CreateMediaItemFromURL(path.c_str(), TRUE, 0, nullptr);
-    if (FAILED(hr)) {
-        Log::Warn(L"CreateMediaItemFromURL failed for " + path);
+    ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32, 2, 0);
+    decoderConfig.ditherMode = ma_dither_mode_none;
+    decoderConfig.resampling.linear.lpfOrder = 8;
+
+    if (ma_decoder_init_file_w(path.c_str(), &decoderConfig, &m_decoder) != MA_SUCCESS) {
+        Log::Warn(L"ma_decoder_init_file_w failed for " + path);
         m_path.clear();
         return false;
     }
+    m_decoderInit = true;
+
+    ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
+    deviceConfig.playback.format = m_decoder.outputFormat;
+    deviceConfig.playback.channels = m_decoder.outputChannels;
+    deviceConfig.sampleRate = m_decoder.outputSampleRate;
+    deviceConfig.dataCallback = DataCallback;
+    deviceConfig.pUserData = this;
+
+    if (ma_device_init(nullptr, &deviceConfig, &m_device) != MA_SUCCESS) {
+        Log::Error(L"ma_device_init failed for playback");
+        UninitDeviceAndDecoder();
+        m_path.clear();
+        return false;
+    }
+    m_deviceInit = true;
+
+    if (ma_device_start(&m_device) != MA_SUCCESS) {
+        Log::Error(L"ma_device_start failed for playback");
+        UninitDeviceAndDecoder();
+        m_path.clear();
+        return false;
+    }
+
+    SetPlaying(true);
     return true;
 }
 
 void AudioPlayer::Stop() {
-    if (m_player) {
-        m_player->Stop();
-    }
+    UninitDeviceAndDecoder();
+    m_path.clear();
     SetPlaying(false);
+}
+
+void AudioPlayer::StopFromEof() {
+    // Called on the UI thread in response to an EOF notify (lParam != 0). Do not
+    // post again — the message that got us here already carries wParam 0.
+    UninitDeviceAndDecoder();
+    m_path.clear();
+    m_playing = false;
 }
 
 void AudioPlayer::SetPlaying(bool playing) {
@@ -127,44 +85,51 @@ void AudioPlayer::SetPlaying(bool playing) {
     }
     m_playing = playing;
     if (m_notifyHwnd != nullptr && ::IsWindow(m_notifyHwnd) && m_notifyMsg != 0) {
+        // lParam 0 = UI state only. EOF uses lParam 1 so the view can release the device
+        // without racing a subsequent Play() that already posted a stop state message.
         ::PostMessageW(m_notifyHwnd, m_notifyMsg, playing ? 1u : 0u, 0);
     }
 }
 
-void AudioPlayer::OnPlayerEvent(MFP_EVENT_HEADER* header) {
-    if (header == nullptr) {
-        return;
+void AudioPlayer::UninitDeviceAndDecoder() {
+    if (m_deviceInit) {
+        ma_device_uninit(&m_device);
+        m_device = {};
+        m_deviceInit = false;
     }
-    if (FAILED(header->hrEvent)) {
-        Log::Warn(L"AudioPlayer event error");
-        SetPlaying(false);
+    if (m_decoderInit) {
+        ma_decoder_uninit(&m_decoder);
+        m_decoder = {};
+        m_decoderInit = false;
+    }
+    m_eofPosted.store(false, std::memory_order_relaxed);
+}
+
+void AudioPlayer::DataCallback(ma_device* device, void* output, const void* input,
+                               ma_uint32 frameCount) {
+    (void)input;
+    auto* self = static_cast<AudioPlayer*>(device->pUserData);
+    if (self == nullptr || output == nullptr || frameCount == 0 || !self->m_decoderInit) {
         return;
     }
 
-    switch (header->eEventType) {
-    case MFP_EVENT_TYPE_MEDIAITEM_CREATED: {
-        const auto* created = MFP_GET_MEDIAITEM_CREATED_EVENT(header);
-        if (created != nullptr && created->pMediaItem != nullptr && m_player) {
-            m_player->SetMediaItem(created->pMediaItem);
-        }
-        break;
+    ma_uint64 framesRead = 0;
+    ma_decoder_read_pcm_frames(&self->m_decoder, output, frameCount, &framesRead);
+    if (framesRead >= frameCount) {
+        return;
     }
-    case MFP_EVENT_TYPE_MEDIAITEM_SET:
-        if (m_player) {
-            m_player->Play();
+
+    const ma_format format = device->playback.format;
+    const ma_uint32 channels = device->playback.channels;
+    void* silence = ma_offset_pcm_frames_ptr(output, framesRead, format, channels);
+    ma_silence_pcm_frames(silence, frameCount - static_cast<ma_uint32>(framesRead), format,
+                          channels);
+
+    bool expected = false;
+    if (self->m_eofPosted.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        if (self->m_notifyHwnd != nullptr && ::IsWindow(self->m_notifyHwnd) &&
+            self->m_notifyMsg != 0) {
+            ::PostMessageW(self->m_notifyHwnd, self->m_notifyMsg, 0, 1);
         }
-        break;
-    case MFP_EVENT_TYPE_PLAY:
-        SetPlaying(true);
-        break;
-    case MFP_EVENT_TYPE_PAUSE:
-    case MFP_EVENT_TYPE_STOP:
-        SetPlaying(false);
-        break;
-    case MFP_EVENT_TYPE_PLAYBACK_ENDED:
-        Stop();
-        break;
-    default:
-        break;
     }
 }

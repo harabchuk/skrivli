@@ -12,6 +12,6 @@ Update this file when a file here is added, removed, renamed, or its responsibil
 | `Mixer.hpp`, `Mixer.cpp` | Aligns mic and system by QPC, fills gaps, applies gain and optional mic AGC, and emits 10 ms blocks. | DSP | Audio | Recording, Loopback mix, Level meters |
 | `AudioResampler.hpp`, `AudioResampler.cpp` | Converts one device mix-format packet to 48 kHz stereo float. | DSP | Audio | Recording, Loopback mix |
 | `MaConverter.hpp`, `MaConverter.cpp` | RAII `ma_data_converter` that appends float frames to a buffer. | miniaudio wrapper | Audio | Recording, Transcription |
-| `MiniAudio.hpp` | Includes `miniaudio.h` with the same `MA_NO_*` switches as the CMake static library. | SDK header | Audio | Recording, Transcription |
+| `MiniAudio.hpp` | Includes `miniaudio.h` with the same `MA_NO_*` switches as the CMake static library. | SDK header | Audio | Recording, Transcription, Playback |
 | `Resampler.hpp`, `Resampler.cpp` | Stereo 48 kHz float to mono 16 kHz for whisper. | DSP | Audio | Transcription |
 | `WavHeader.hpp`, `WavHeader.cpp` | Reads the 44-byte PCM WAV header and reports duration. | Parser | Audio | Recordings library, Crash recovery |
