@@ -4,4 +4,5 @@ pub(crate) mod audio;
 pub(crate) mod chunk_plan;
 pub(crate) mod gain;
 pub(crate) mod ids;
+pub(crate) mod recording;
 pub(crate) mod window_frame;

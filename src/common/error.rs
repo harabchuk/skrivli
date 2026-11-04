@@ -50,6 +50,10 @@ impl AppError {
             "microphone" => "The microphone is not available.",
             "microphone privacy" => "Microphone access is turned off in Windows privacy settings.",
             "wav limit" => "Recording stopped because the file reached its size limit.",
+            "library" | "library rename" | "library delete" | "library watch" => {
+                "Could not update the recordings library."
+            }
+            "playback" => "Could not play the recording.",
             _ => "Something went wrong.",
         }
     }

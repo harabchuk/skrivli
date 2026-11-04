@@ -4,8 +4,10 @@ use std::sync::mpsc::Receiver;
 
 use crate::domain::ids::{JobId, RecordingId};
 use crate::infrastructure::audio::devices::DeviceCatalog;
+use crate::infrastructure::files::player::PlayerSnapshot;
 use crate::infrastructure::storage::settings::StoredEndpoint;
 use crate::infrastructure::windows::tray::TrayCommand;
+use crate::services::library::LibrarySnapshot;
 use crate::services::recording::RecordSnapshot;
 
 use super::state::{AppTab, Presentation};
@@ -28,7 +30,6 @@ pub(crate) enum AppCommand {
     CancelTranscription {
         job_id: JobId,
     },
-    #[allow(dead_code)]
     RefreshLibrary,
     Show,
     Hide,
@@ -59,6 +60,7 @@ pub(crate) enum Effect {
     StartRecording,
     StopRecording,
     BrowseRecordings,
+    RefreshLibrary,
 }
 
 pub(crate) fn command_from_tray(command: TrayCommand) -> AppCommand {
@@ -94,12 +96,11 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
             }
         }
         AppCommand::SelectMicrophone(_) | AppCommand::SelectSystem(_) => Effect::None,
-        AppCommand::Transcribe { .. }
-        | AppCommand::CancelTranscription { .. }
-        | AppCommand::RefreshLibrary => {
+        AppCommand::Transcribe { .. } | AppCommand::CancelTranscription { .. } => {
             state.set_notice(Some(NOT_AVAILABLE));
             Effect::Unavailable
         }
+        AppCommand::RefreshLibrary => Effect::RefreshLibrary,
         AppCommand::Show => {
             state.set_visible(true);
             state.set_pending_show(false);
@@ -147,26 +148,34 @@ pub(crate) enum BridgeMessage {
     ShellPulse,
     Recording(RecordSnapshot),
     Devices(DeviceCatalog),
+    Library(LibrarySnapshot),
+    Player(PlayerSnapshot),
 }
 
 pub(crate) struct BridgeBatch {
     pub(crate) effects: Vec<Effect>,
     pub(crate) recording: Option<RecordSnapshot>,
     pub(crate) devices: Option<DeviceCatalog>,
+    pub(crate) library: Option<LibrarySnapshot>,
+    pub(crate) player: Option<PlayerSnapshot>,
 }
 
-/// Coalesce pulses and keep only the latest recording and device snapshots.
+/// Coalesce pulses and keep only the latest recording, device, library, and player snapshots.
 pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentation) -> BridgeBatch {
     let mut pulses = 0_u64;
     let mut effects = Vec::new();
     let mut recording = None;
     let mut devices = None;
+    let mut library = None;
+    let mut player = None;
     while let Ok(message) = rx.try_recv() {
         match message {
             BridgeMessage::ShellPulse => pulses = pulses.saturating_add(1),
             BridgeMessage::Command(command) => effects.push(apply_command(state, command)),
             BridgeMessage::Recording(snapshot) => recording = Some(snapshot),
             BridgeMessage::Devices(catalog) => devices = Some(catalog),
+            BridgeMessage::Library(snapshot) => library = Some(snapshot),
+            BridgeMessage::Player(snapshot) => player = Some(snapshot),
         }
     }
     if pulses > 0 {
@@ -176,6 +185,8 @@ pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentatio
         effects,
         recording,
         devices,
+        library,
+        player,
     }
 }
 
@@ -220,6 +231,8 @@ mod tests {
         assert_eq!(ignored, Effect::None);
         assert_eq!(browse, Effect::None);
         assert_eq!(transcribe, Effect::Unavailable);
+        let refresh = apply_command(&mut state, AppCommand::RefreshLibrary);
+        assert_eq!(refresh, Effect::RefreshLibrary);
         assert_eq!(
             state.status_line(),
             format!("Recording {NOT_AVAILABLE} Idle")

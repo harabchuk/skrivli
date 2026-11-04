@@ -6527,6 +6527,7 @@ dependencies = [
 name = "skrivli"
 version = "0.1.0"
 dependencies = [
+ "cpal",
  "flexaudio",
  "gpui-kit",
  "rubato 5.0.1",

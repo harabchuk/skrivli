@@ -1,0 +1,361 @@
+//! Recording identity, container format, and library metadata.
+//!
+//! No paths, GPUI, Windows, or file I/O live here. Infrastructure attaches
+//! filesystem locations when it scans a folder.
+
+use crate::domain::ids::RecordingId;
+
+/// On-disk audio container the library can list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecordingContainer {
+    Wav,
+    M4a,
+}
+
+impl RecordingContainer {
+    pub(crate) fn extension(self) -> &'static str {
+        match self {
+            Self::Wav => "wav",
+            Self::M4a => "m4a",
+        }
+    }
+
+    pub(crate) fn from_extension(ext: &str) -> Option<Self> {
+        match ext {
+            "wav" => Some(Self::Wav),
+            "m4a" => Some(Self::M4a),
+            _ => None,
+        }
+    }
+}
+
+/// Durably recorded PCM description from a sidecar (not live capture format).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RecordingFormat {
+    sample_rate: u32,
+    channels: u16,
+    pcm16: bool,
+}
+
+impl RecordingFormat {
+    pub(crate) fn new(sample_rate: u32, channels: u16, pcm16: bool) -> Option<Self> {
+        if sample_rate == 0 || channels == 0 || channels > 8 {
+            return None;
+        }
+        Some(Self {
+            sample_rate,
+            channels,
+            pcm16,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn skrivli_default() -> Self {
+        Self {
+            sample_rate: 48_000,
+            channels: 2,
+            pcm16: true,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn sample_rate(self) -> u32 {
+        self.sample_rate
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn channels(self) -> u16 {
+        self.channels
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn pcm16(self) -> bool {
+        self.pcm16
+    }
+}
+
+/// Transcript availability shown in the library list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TranscriptStatus {
+    None,
+    Queued,
+    Progress(u8),
+    Ready,
+    Failed,
+}
+
+impl TranscriptStatus {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::None => "—",
+            Self::Queued => "Queued",
+            Self::Progress(_) => "%",
+            Self::Ready => "Ready",
+            Self::Failed => "Failed",
+        }
+    }
+
+    pub(crate) fn display(self) -> String {
+        match self {
+            Self::Progress(percent) => format!("{percent}%"),
+            other => other.label().to_string(),
+        }
+    }
+}
+
+/// Whether the JSON sidecar loaded cleanly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SidecarState {
+    Present,
+    Missing,
+    Malformed,
+}
+
+/// Pure library row: identity plus display metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RecordingInfo {
+    id: RecordingId,
+    name: String,
+    container: RecordingContainer,
+    started_at_unix_ms: Option<u64>,
+    duration_ms: Option<u64>,
+    size_bytes: u64,
+    format: Option<RecordingFormat>,
+    transcript: TranscriptStatus,
+    sidecar: SidecarState,
+    recovered: bool,
+    problems: Vec<String>,
+}
+
+impl RecordingInfo {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        id: RecordingId,
+        name: impl Into<String>,
+        container: RecordingContainer,
+        started_at_unix_ms: Option<u64>,
+        duration_ms: Option<u64>,
+        size_bytes: u64,
+        format: Option<RecordingFormat>,
+        transcript: TranscriptStatus,
+        sidecar: SidecarState,
+        recovered: bool,
+        problems: Vec<String>,
+    ) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            container,
+            started_at_unix_ms,
+            duration_ms,
+            size_bytes,
+            format,
+            transcript,
+            sidecar,
+            recovered,
+            problems,
+        }
+    }
+
+    pub(crate) fn id(&self) -> RecordingId {
+        self.id
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn container(&self) -> RecordingContainer {
+        self.container
+    }
+
+    pub(crate) fn started_at_unix_ms(&self) -> Option<u64> {
+        self.started_at_unix_ms
+    }
+
+    pub(crate) fn duration_ms(&self) -> Option<u64> {
+        self.duration_ms
+    }
+
+    pub(crate) fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn format(&self) -> Option<RecordingFormat> {
+        self.format
+    }
+
+    pub(crate) fn transcript(&self) -> TranscriptStatus {
+        self.transcript
+    }
+
+    pub(crate) fn sidecar(&self) -> SidecarState {
+        self.sidecar
+    }
+
+    pub(crate) fn recovered(&self) -> bool {
+        self.recovered
+    }
+
+    pub(crate) fn problems(&self) -> &[String] {
+        &self.problems
+    }
+
+    /// Sort key: newest first. Prefer sidecar start time, then size as a weak tie-break.
+    pub(crate) fn sort_key(&self) -> (u64, u64) {
+        (self.started_at_unix_ms.unwrap_or(0), self.size_bytes)
+    }
+}
+
+/// Format a byte size for the library Size column.
+pub(crate) fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Format duration milliseconds as `HH:MM:SS` (or `MM:SS` under one hour).
+pub(crate) fn format_duration_ms(duration_ms: u64) -> String {
+    let total = duration_ms / 1_000;
+    let hours = total / 3600;
+    let minutes = (total % 3600) / 60;
+    let seconds = total % 60;
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
+}
+
+/// Stable synthetic id when a sidecar is missing or unreadable.
+///
+/// Based on the display stem only so an in-app rename can recompute the same
+/// id after the basename changes only if the stem is passed through; external
+/// renames of unpaired files may drop selection (see decisions.md).
+pub(crate) fn synthetic_recording_id(stem: &str) -> RecordingId {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in stem.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    if hash == 0 {
+        hash = 1;
+    }
+    RecordingId::from_raw(hash)
+}
+
+/// Keep selection when a catalog is replaced. Prefers the previous id when still
+/// present; otherwise `None`.
+pub(crate) fn preserve_selection(
+    previous: Option<RecordingId>,
+    catalog: &[RecordingInfo],
+) -> Option<RecordingId> {
+    let previous = previous?;
+    catalog
+        .iter()
+        .find(|row| row.id() == previous)
+        .map(|row| row.id())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        format_duration_ms, format_size, preserve_selection, synthetic_recording_id,
+        RecordingContainer, RecordingFormat, RecordingInfo, SidecarState, TranscriptStatus,
+    };
+    use crate::domain::ids::RecordingId;
+
+    fn row(id: u64, name: &str, started: Option<u64>) -> RecordingInfo {
+        RecordingInfo::new(
+            RecordingId::from_raw(id),
+            name,
+            RecordingContainer::Wav,
+            started,
+            Some(1_000),
+            100,
+            Some(RecordingFormat::skrivli_default()),
+            TranscriptStatus::None,
+            SidecarState::Present,
+            false,
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn container_extension_round_trip() {
+        // Arrange / Act / Assert
+        assert_eq!(RecordingContainer::Wav.extension(), "wav");
+        assert_eq!(
+            RecordingContainer::from_extension("m4a"),
+            Some(RecordingContainer::M4a)
+        );
+        assert_eq!(RecordingContainer::from_extension("partial"), None);
+    }
+
+    #[test]
+    fn transcript_progress_formats_percent() {
+        // Arrange
+        let status = TranscriptStatus::Progress(42);
+
+        // Act
+        let text = status.display();
+
+        // Assert
+        assert_eq!(text, "42%");
+        assert_eq!(TranscriptStatus::None.display(), "—");
+    }
+
+    #[test]
+    fn synthetic_id_is_stable_for_same_stem() {
+        // Arrange
+        let stem = "Skrivli_2026-11-04_13-01-02";
+
+        // Act
+        let a = synthetic_recording_id(stem);
+        let b = synthetic_recording_id(stem);
+
+        // Assert
+        assert_eq!(a, b);
+        assert_ne!(a.raw(), 0);
+    }
+
+    #[test]
+    fn preserve_selection_keeps_id_across_catalog_refresh() {
+        // Arrange
+        let previous = Some(RecordingId::from_raw(7));
+        let catalog = vec![row(3, "older", Some(1)), row(7, "kept", Some(2))];
+
+        // Act
+        let selected = preserve_selection(previous, &catalog);
+
+        // Assert
+        assert_eq!(selected, Some(RecordingId::from_raw(7)));
+        assert_eq!(preserve_selection(previous, &[]), None);
+    }
+
+    #[test]
+    fn format_helpers_are_stable() {
+        // Arrange / Act / Assert
+        assert_eq!(format_duration_ms(65_000), "01:05");
+        assert_eq!(format_duration_ms(3_661_000), "01:01:01");
+        assert_eq!(format_size(500), "500 B");
+        assert_eq!(format_size(2_048), "2.0 KB");
+    }
+
+    #[test]
+    fn recording_format_rejects_zero_rate() {
+        // Arrange / Act / Assert
+        assert!(RecordingFormat::new(0, 2, true).is_none());
+        assert_eq!(RecordingFormat::skrivli_default().sample_rate(), 48_000);
+    }
+}

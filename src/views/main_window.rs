@@ -8,6 +8,7 @@ use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::table::{TableEvent, TableSelection, TableState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -23,21 +24,28 @@ use crate::domain::audio::{
     format_elapsed, resolve_endpoint, EndpointChoice, EndpointFlow, EndpointId,
 };
 use crate::domain::gain::{db_fs, format_gain};
+use crate::domain::ids::RecordingId;
 use crate::domain::window_frame::LogicalRect;
 use crate::infrastructure::audio::devices::DeviceCatalog;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
+use crate::infrastructure::files::player::{PlayerHost, PlayerPhase, PlayerSnapshot};
+use crate::infrastructure::storage::library::LibraryCatalog;
 use crate::infrastructure::storage::settings::{Settings, StoredEndpoint, StoredWindowBounds};
 use crate::infrastructure::windows::dialogs::pick_recordings_folder;
 use crate::infrastructure::windows::recordings_folder::open_recordings_folder;
 use crate::infrastructure::windows::shell_window;
 use crate::services::level_monitor::MonitorTargets;
+use crate::services::library::{LibraryHost, LibrarySnapshot};
 use crate::services::recording::{
     RecordPhase as ServicePhase, RecordSnapshot, RecordingHost, StartRequest, NOTICE_FALLBACK,
     NOTICE_MIC, NOTICE_MIC_MISSING, NOTICE_SYSTEM_FALLBACK, NOTICE_SYSTEM_MISSING,
 };
 
 use super::recording::record_tab;
-use super::recordings::recordings_placeholder;
+use super::recordings::{
+    open_delete_dialog, open_rename_dialog, play_button_label, recordings_tab, rows_from_catalog,
+    RecordingsDelegate,
+};
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
 };
@@ -53,6 +61,13 @@ pub(crate) struct MainWindow {
     commands: Receiver<BridgeMessage>,
     shutdown: ShutdownController,
     recording: RecordingHost,
+    library: LibraryHost,
+    player: PlayerHost,
+    library_catalog: LibraryCatalog,
+    library_selected: Option<RecordingId>,
+    player_snapshot: PlayerSnapshot,
+    recordings_table: Entity<TableState<RecordingsDelegate>>,
+    _table_sub: Subscription,
     levels: Arc<LevelSnapshot>,
     gain_control: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
@@ -86,6 +101,8 @@ impl MainWindow {
         commands: Receiver<BridgeMessage>,
         shutdown: ShutdownController,
         recording: RecordingHost,
+        library: LibraryHost,
+        player: PlayerHost,
         levels: Arc<LevelSnapshot>,
         gain_control: Arc<GainControl>,
         targets: Arc<MonitorTargets>,
@@ -95,6 +112,21 @@ impl MainWindow {
         let focus = cx.focus_handle().tab_stop(true);
         window.focus(&focus, cx);
         let menu_bar = AppMenuBar::new(cx);
+        let recordings_table = cx.new(|cx| {
+            TableState::new(RecordingsDelegate::new(), window, cx)
+                .row_selectable(true)
+                .sortable(true)
+        });
+        let table_sub = cx.subscribe_in(
+            &recordings_table,
+            window,
+            |this, table, event: &TableEvent, _window, cx| {
+                if let TableEvent::SelectRow(row) = event {
+                    let id = table.read(cx).delegate().row_id(*row);
+                    this.select_library_row(id, cx);
+                }
+            },
+        );
         let labels = vec![SharedString::from("Default communications")];
         let choices = vec![StoredEndpoint::Default];
         let microphone = cx.new(|cx| {
@@ -189,6 +221,17 @@ impl MainWindow {
             commands,
             shutdown,
             recording,
+            library,
+            player,
+            library_catalog: LibraryCatalog::empty(),
+            library_selected: None,
+            player_snapshot: PlayerSnapshot {
+                phase: PlayerPhase::Idle,
+                recording_id: None,
+                notice: None,
+            },
+            recordings_table,
+            _table_sub: table_sub,
             levels,
             gain_control,
             targets,
@@ -280,6 +323,14 @@ impl MainWindow {
             self.apply_devices(catalog, window, cx);
             changed = true;
         }
+        if let Some(snapshot) = batch.library {
+            self.apply_library(snapshot, window, cx);
+            changed = true;
+        }
+        if let Some(snapshot) = batch.player {
+            self.apply_player(snapshot);
+            changed = true;
+        }
         for effect in batch.effects {
             self.perform(effect, window, cx);
             changed = true;
@@ -338,6 +389,7 @@ impl MainWindow {
             Effect::StartRecording => self.begin_recording(),
             Effect::StopRecording => self.recording.stop(),
             Effect::BrowseRecordings => self.browse_folder(),
+            Effect::RefreshLibrary => self.library.refresh(),
             Effect::ConfirmExit => {
                 let entity = cx.entity();
                 open_exit_while_recording(window, cx, move |window, cx| {
@@ -477,15 +529,112 @@ impl MainWindow {
             ServicePhase::Stopping => RecordPhase::Stopping,
             ServicePhase::Error => RecordPhase::Error,
         };
+        let became_idle = matches!(phase, RecordPhase::Idle | RecordPhase::Error)
+            && self.presentation.record_phase() != phase;
         if matches!(phase, RecordPhase::Idle | RecordPhase::Error) {
             self.started = None;
         }
         self.presentation.set_record_phase(phase);
         self.presentation.set_notice(snapshot.notice);
+        if became_idle && snapshot.id.is_some() {
+            self.library.refresh();
+        }
         if self.exit_after_stop && matches!(phase, RecordPhase::Idle | RecordPhase::Error) {
             self.exit_after_stop = false;
             self.quit_now(window);
         }
+    }
+
+    fn apply_library(
+        &mut self,
+        snapshot: LibrarySnapshot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.library_selected != snapshot.selected {
+            self.player.stop();
+        }
+        self.library_catalog = snapshot.catalog;
+        self.library_selected = snapshot.selected;
+        if let Some(notice) = snapshot.notice {
+            self.presentation.set_notice(Some(notice));
+        }
+        let rows = rows_from_catalog(&self.library_catalog);
+        let selected = self.library_selected;
+        self.recordings_table.update(cx, |table, cx| {
+            table.delegate_mut().set_rows(rows);
+            if let Some(id) = selected {
+                if let Some(index) = table.delegate().index_of(id) {
+                    table.set_selection(TableSelection::Row(index), cx);
+                }
+            }
+            cx.notify();
+        });
+        let _ = window;
+    }
+
+    fn apply_player(&mut self, snapshot: PlayerSnapshot) {
+        self.player_snapshot = snapshot;
+        if let Some(notice) = self.player_snapshot.notice {
+            self.presentation.set_notice(Some(notice));
+        }
+    }
+
+    fn select_library_row(&mut self, id: Option<RecordingId>, cx: &mut Context<Self>) {
+        if self.library_selected != id {
+            self.player.stop();
+        }
+        self.library_selected = id;
+        self.library.select(id);
+        cx.notify();
+    }
+
+    fn play_selected(&mut self) {
+        let Some(id) = self.library_selected else {
+            return;
+        };
+        let Some(entry) = self.library_catalog.find(id) else {
+            return;
+        };
+        if entry.info.container() != crate::domain::recording::RecordingContainer::Wav {
+            self.presentation
+                .set_notice(Some("Only WAV playback is available."));
+            return;
+        }
+        self.player.play(id, entry.audio_path.clone());
+    }
+
+    fn rename_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.library_selected else {
+            return;
+        };
+        let Some(entry) = self.library_catalog.find(id) else {
+            return;
+        };
+        let current = SharedString::from(entry.info.name().to_string());
+        let entity = cx.entity();
+        open_rename_dialog(window, cx, current, move |name, _window, cx| {
+            entity.update(cx, |view, _cx| {
+                view.library.rename(id, name);
+            });
+        });
+    }
+
+    fn delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.library_selected else {
+            return;
+        };
+        let Some(entry) = self.library_catalog.find(id) else {
+            return;
+        };
+        let name = SharedString::from(entry.info.name().to_string());
+        let entity = cx.entity();
+        open_delete_dialog(window, cx, name, move |_window, cx| {
+            entity.update(cx, |view, _cx| {
+                view.player.stop();
+                view.library.delete(id);
+            });
+        });
     }
 
     fn apply_devices(
@@ -683,8 +832,10 @@ impl MainWindow {
     fn browse_folder(&mut self) {
         match pick_recordings_folder() {
             Ok(Some(path)) => {
-                if self.settings.set_recordings_directory(path).is_ok() {
+                if self.settings.set_recordings_directory(path.clone()).is_ok() {
                     self.writer.save(self.settings.clone());
+                    self.library.set_directory(path);
+                    self.player.stop();
                     self.presentation.set_notice(None);
                 }
             }
@@ -870,7 +1021,63 @@ impl Render for MainWindow {
                 cx,
             )
             .into_any_element(),
-            AppTab::Recordings => recordings_placeholder().into_any_element(),
+            AppTab::Recordings => {
+                let selected_row = self.library_selected.and_then(|id| {
+                    self.recordings_table
+                        .read(cx)
+                        .delegate()
+                        .rows()
+                        .iter()
+                        .find(|row| row.id == id)
+                        .cloned()
+                });
+                let playing = self.player_snapshot.phase == PlayerPhase::Playing;
+                let error = self.library_catalog.error.map(SharedString::from);
+                let refresh_entity = entity.clone();
+                let folder_entity = entity.clone();
+                let play_entity = entity.clone();
+                let stop_entity = entity.clone();
+                let rename_entity = entity.clone();
+                let delete_entity = entity.clone();
+                recordings_tab(
+                    &self.recordings_table,
+                    &self.library_catalog,
+                    selected_row.as_ref(),
+                    playing,
+                    play_button_label(self.player_snapshot.phase),
+                    error,
+                    move |_event, window, cx| {
+                        refresh_entity.update(cx, |view, cx| {
+                            view.handle(AppCommand::RefreshLibrary, window, cx);
+                        });
+                    },
+                    move |_event, window, cx| {
+                        folder_entity.update(cx, |view, cx| {
+                            view.handle(AppCommand::OpenRecordingsFolder, window, cx);
+                        });
+                    },
+                    move |_event, _window, cx| {
+                        play_entity.update(cx, |view, cx| {
+                            view.play_selected();
+                            cx.notify();
+                        });
+                    },
+                    move |_event, _window, cx| {
+                        stop_entity.update(cx, |view, cx| {
+                            view.player.stop();
+                            cx.notify();
+                        });
+                    },
+                    move |_event, window, cx| {
+                        rename_entity.update(cx, |view, cx| view.rename_selected(window, cx));
+                    },
+                    move |_event, window, cx| {
+                        delete_entity.update(cx, |view, cx| view.delete_selected(window, cx));
+                    },
+                    cx,
+                )
+                .into_any_element()
+            }
         };
         let status = SharedString::from(self.presentation.status_line());
         v_flex()

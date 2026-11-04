@@ -20,6 +20,7 @@ use crate::infrastructure::audio::devices::spawn_device_watch;
 use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::audio::system::{QpcCounter, SystemClock, WindowsDisk};
+use crate::infrastructure::files::player::PlayerHost;
 use crate::infrastructure::files::wav::recover_partials;
 use crate::infrastructure::storage::settings::{Settings, ThemePreference};
 use crate::infrastructure::windows::single_instance::{
@@ -29,8 +30,9 @@ use crate::infrastructure::windows::single_instance::{
 use crate::infrastructure::windows::tray::{self, TrayCommand};
 use crate::services::lease::EndpointLease;
 use crate::services::level_monitor::{spawn_level_monitor, MonitorTargets};
+use crate::services::library::LibraryHost;
 use crate::services::recording::{
-    spawn_recording_host, RecordingEngine, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED,
+    spawn_recording_host, RecordingEngine, RecordingHost, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED,
 };
 use crate::views::main_window::MainWindow;
 
@@ -113,7 +115,7 @@ pub(crate) fn run() -> i32 {
     ));
     let lease = Arc::new(EndpointLease::new());
     let targets = Arc::new(MonitorTargets::new());
-    let recording = spawn_workers(
+    let workers = spawn_workers(
         tx,
         &shutdown,
         Arc::clone(&recording_flag),
@@ -122,6 +124,7 @@ pub(crate) fn run() -> i32 {
         Arc::clone(&lease),
         Arc::clone(&targets),
         paths.rescue_dir(),
+        settings.recordings_directory().to_path_buf(),
     );
 
     tracing::info!(
@@ -138,7 +141,7 @@ pub(crate) fn run() -> i32 {
         rx,
         writer,
         shutdown.clone(),
-        recording,
+        workers,
         recovery_notice,
         levels,
         gain,
@@ -148,6 +151,12 @@ pub(crate) fn run() -> i32 {
     drop(instance);
     drop(logs);
     0
+}
+
+struct ShellWorkers {
+    recording: RecordingHost,
+    library: LibraryHost,
+    player: PlayerHost,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -160,7 +169,8 @@ fn spawn_workers(
     lease: Arc<EndpointLease>,
     targets: Arc<MonitorTargets>,
     rescue_dir: std::path::PathBuf,
-) -> crate::services::recording::RecordingHost {
+    recordings_dir: std::path::PathBuf,
+) -> ShellWorkers {
     let (host, session) = spawn_recording_host(
         RecordingEngine {
             mic: Box::new(FlexMicCapture),
@@ -226,6 +236,27 @@ fn spawn_workers(
         activation.acknowledge();
     }));
 
+    let library_tx = tx.clone();
+    let library_stop = shutdown.flag();
+    let (library, library_thread) = LibraryHost::spawn(
+        recordings_dir,
+        Box::new(move |snapshot| {
+            let _ = library_tx.send(BridgeMessage::Library(snapshot));
+        }),
+        Arc::clone(&library_stop),
+    );
+    let stop_library = library.clone();
+    shutdown.on_stop(move || stop_library.shutdown());
+    shutdown.track(library_thread);
+
+    let player_tx = tx.clone();
+    let (player, player_thread) = PlayerHost::spawn(Box::new(move |snapshot| {
+        let _ = player_tx.send(BridgeMessage::Player(snapshot));
+    }));
+    let stop_player = player.clone();
+    shutdown.on_stop(move || stop_player.shutdown());
+    shutdown.track(player_thread);
+
     let hwnd_slot = Arc::new(AtomicIsize::new(0));
     let nudge_slot = Arc::clone(&hwnd_slot);
     shutdown.on_stop(move || tray::nudge(&nudge_slot));
@@ -246,7 +277,11 @@ fn spawn_workers(
         }
         tray_worker.acknowledge();
     }));
-    host
+    ShellWorkers {
+        recording: host,
+        library,
+        player,
+    }
 }
 
 fn listen_for_activation(stop: &std::sync::atomic::AtomicBool, tx: &mpsc::Sender<BridgeMessage>) {
@@ -279,7 +314,7 @@ fn open_shell(
     commands: mpsc::Receiver<BridgeMessage>,
     writer: SettingsWriter,
     shutdown: ShutdownController,
-    recording: crate::services::recording::RecordingHost,
+    workers: ShellWorkers,
     recovery_notice: Option<&'static str>,
     levels: Arc<LevelSnapshot>,
     gain: Arc<GainControl>,
@@ -302,7 +337,9 @@ fn open_shell(
             presentation.set_notice(recovery_notice);
             let window_shutdown = shutdown.clone();
             let window_writer = writer;
-            let window_recording = recording;
+            let window_recording = workers.recording;
+            let window_library = workers.library;
+            let window_player = workers.player;
             let window_levels = levels;
             let window_gain = gain;
             let window_targets = targets;
@@ -316,6 +353,8 @@ fn open_shell(
                         commands,
                         window_shutdown,
                         window_recording,
+                        window_library,
+                        window_player,
                         window_levels,
                         window_gain,
                         window_targets,

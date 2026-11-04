@@ -565,7 +565,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | **M2 — Microphone capture** | Device enumeration, single mic flexaudio capture, WAV `.partial`, folder picker, start/stop | Produces playable WAV and cleanly finalizes |
 | **M3 — Loopback + mixer** | Loopback capture, timestamp alignment, ring buffers, mixer, gains, level meters and idle monitoring | Synthetic tests pass; real two-source sync verified |
 | **M4 — Robustness** | Endpoint changes, disk checks, privacy flow, partial-file recovery, shutdown behavior | Device loss and interrupted recording preserve usable data |
-| **M5 — Recording library** | Library scan/watch, sidecars, list, playback, rename/delete/open folder | Files remain correctly paired and selected |
+| **M5 — Recording library** | Library scan/watch, sidecars, list, playback, rename/delete/open folder | Files remain correctly paired and selected (implemented; hardware browse/playback spot-check still recommended) |
 | **M6 — Transcription** | Pinned whisper.cpp binding, decoder/resampler, model manager, FIFO worker, text formatter | Offline transcription yields correct `.txt` and supports cancel |
 | **M7 — Transcript UI** | GPUI Kit text selection/copy, transcript statuses, progress and notification | Entire recording-to-transcript flow works from UI |
 | **M8 — Settings and polish** | Settings UI, hotkey/autostart, DPI and keyboard accessibility, optional M4A | User preferences persist and critical interactions are accessible |

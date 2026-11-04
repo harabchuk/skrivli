@@ -244,23 +244,23 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M5.1 — Catalog and sidecars
 
-- [ ] `domain/recording.rs`: stable recording identity, format and metadata. `infrastructure/storage/sidecar.rs`: versioned `<basename>.json` containing start/end, duration, devices, gap/errors, transcription status and links.
-- [ ] `infrastructure/storage/library.rs`: scan configured directory for supported WAV/M4A, join `.json`/`.txt`, sort newest first, preserve entries with malformed/missing sidecars, skip in-progress partials except recovery presentation.
-- [ ] `infrastructure/storage/watcher.rs`: Windows directory events, debounce and full refresh fallback. Preserve selection by stable ID across rescans and renames.
-- [ ] Test collisions, malformed metadata, external move/delete and accidental unpaired files.
+- [x] `domain/recording.rs`: stable recording identity, format and metadata. `infrastructure/storage/sidecar.rs`: versioned `<basename>.json` containing start/end, duration, devices, gap/errors, transcription status and links.
+- [x] `infrastructure/storage/library.rs`: scan configured directory for supported WAV/M4A, join `.json`/`.txt`, sort newest first, preserve entries with malformed/missing sidecars, skip in-progress partials except recovery presentation.
+- [x] `infrastructure/storage/watcher.rs`: Windows directory events, debounce and full refresh fallback. Preserve selection by stable ID across rescans and renames.
+- [x] Test collisions, malformed metadata, external move/delete and accidental unpaired files.
 
 ### M5.2 — Recordings UI and player
 
-- [ ] Implement GPUI Kit list/table with Name, Date, Duration, Size and Transcript status; selectable rows, sorting, keyboard focus, responsive split/detail layout and empty/error states.
-- [ ] `infrastructure/files/reader.rs` and `player.rs`: background streaming decoder/player with Play/Stop and state events; changing selection stops playback. No file I/O during UI render.
-- [ ] Wire Open Folder, Refresh, Rename and Delete. Ensure rename groups audio/sidecar/transcript coherently and handles partial failures; delete via Recycle Bin after confirmation, not unconditional permanent deletion.
-- [ ] Keep app status and selection stable on external file events; do not block UI while scanning large directories.
+- [x] Implement GPUI Kit list/table with Name, Date, Duration, Size and Transcript status; selectable rows, sorting, keyboard focus, responsive split/detail layout and empty/error states.
+- [x] `infrastructure/files/reader.rs` and `player.rs`: background streaming decoder/player with Play/Stop and state events; changing selection stops playback. No file I/O during UI render.
+- [x] Wire Open Folder, Refresh, Rename and Delete. Ensure rename groups audio/sidecar/transcript coherently and handles partial failures; delete via Recycle Bin after confirmation, not unconditional permanent deletion.
+- [x] Keep app status and selection stable on external file events; do not block UI while scanning large directories.
 
 **Validate:** dozens/hundreds of files, malformed sidecar, external edits, playback interruption, successful and partially failing rename/delete actions.
 
 ### M5 acceptance
 
-- [ ] Saved recordings appear with correct metadata; playback and file operations are coherent and do not orphan associated files silently.
+- [x] Saved recordings appear with correct metadata; playback and file operations are coherent and do not orphan associated files silently.
 
 ---
 

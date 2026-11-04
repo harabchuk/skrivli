@@ -84,3 +84,17 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 ## D-10 — M4 durability: reopen, rescue, exit, session end
 
 **Outcome (M4):** Mid-session capture errors clear the failed source, keep the other side, fill silence via the mixer, annotate sidecar `gap` / `capture` / `loopback` / `source_change`, and attempt reopen of the Windows default endpoint (`""` device id) on the recording host thread—never inside `IMMNotificationClient`. Device-catalog updates while recording call `RecordingHost::devices_changed` so a missing source can reopen after hot-plug. Free space and writability are rechecked about every 30 s (`SPACE_CHECK_INTERVAL`); below 200 MB the session finalizes with `NOTICE_LOW_DISK`. Write/folder failures release the partial, attempt a bounded rescue copy into `%LOCALAPPDATA%\Skrivli\rescue\` only when bytes are readable, and otherwise report `NOTICE_PARTIAL_KEPT` / `NOTICE_SAVE` without claiming recovery. Cleanup policy: never auto-delete unknown `*.wav.partial` files; `abandon` only after a failed start; startup recovery may rename safe partials to `*.recovered.wav`. Corrupt sidecars are left in place. Explicit Exit while recording opens a confirm dialog (`ConfirmExit`); close-to-tray still only hides. The tray window is a hidden top-level (not `HWND_MESSAGE`) so `WM_QUERYENDSESSION` / `WM_ENDSESSION` emit `SessionEnding` → stop/finalize without confirmation. Worker panic and a simple stall watchdog surface `NOTICE_WORKER` / `NOTICE_STALL`. Hardware unplug and live logoff were not exercised in this session; `cargo test` covers injected faults without devices.
+
+## D-11 — M5 library identity, sidecars, watch, and playback
+
+**Outcome (M5):**
+
+- **Sidecar home:** write+load live in `infrastructure/storage/sidecar.rs` (schema **v3**, still accepts v2). `infrastructure/files/sidecar.rs` re-exports write for the recording service. Transcription fields default empty until M6; a present `.txt` surfaces as Ready.
+- **Identity:** `RecordingId` from sidecar `id` when valid; unpaired/malformed entries use a synthetic FNV-1a of the display stem. Selection is preserved by id across rescans and in-app renames that keep the sidecar. External rename of unpaired files may drop selection (no durable id without sidecar).
+- **Catalog:** `LibraryHost` scans on a worker; `*.wav.partial` skipped; `*.recovered.wav` listed; `.m4a` listed if present (playback deferred — WAV only). Colliding sidecar ids keep both rows.
+- **Watch:** `FindFirstChangeNotificationW` with ~350 ms debounce plus a 30 s poll fallback. Missing folders poll until they appear.
+- **Delete:** `SHFileOperationW` with `FOF_ALLOWUNDO` (Recycle Bin) for audio + `.json` + `.txt` after confirm.
+- **Playback:** streaming PCM16 WAV via `cpal` 0.16 on a dedicated player thread; selection change stops playback. Device sample-rate negotiation beyond canonical 48 kHz stereo is best-effort (request WAV rate/channels on the default output device).
+- **UI:** GPUI Kit `DataTable` + detail pane; Rename uses Kit dialog + `Input`; Delete uses confirm alert. Narrow stacked fallback not implemented (fixed split).
+
+**Not exercised on hardware this session:** large-folder browse (hundreds of files), live Explorer edits while the app is open, and audible WASAPI playback of a real recording.
