@@ -70,6 +70,7 @@ pub(crate) fn command_from_menu_id(id: i32) -> Option<TrayCommand> {
 struct TrayState {
     on_command: Box<dyn Fn(TrayCommand) + Send>,
     stop: Arc<AtomicBool>,
+    recording: Arc<AtomicBool>,
     taskbar_created: u32,
     last_toggle: Instant,
 }
@@ -82,6 +83,7 @@ thread_local! {
 pub(crate) fn run(
     stop: Arc<AtomicBool>,
     hwnd_slot: Arc<AtomicIsize>,
+    recording: Arc<AtomicBool>,
     on_command: Box<dyn Fn(TrayCommand) + Send>,
 ) -> Result<(), AppError> {
     let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
@@ -89,6 +91,7 @@ pub(crate) fn run(
         *slot.borrow_mut() = Some(TrayState {
             on_command,
             stop,
+            recording,
             taskbar_created,
             last_toggle: Instant::now() - Duration::from_secs(1),
         });
@@ -307,10 +310,15 @@ fn emit(command: TrayCommand) {
 }
 
 fn popup(hwnd: HWND) -> Option<TrayCommand> {
+    let recording = TRAY.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|state| state.recording.load(Ordering::Acquire))
+    });
     let menu = unsafe { CreatePopupMenu() }.ok()?;
     append(menu, ID_SHOW, "Show Skrivli", false);
-    append(menu, ID_START, "Start recording", true);
-    append(menu, ID_STOP, "Stop recording", true);
+    append(menu, ID_START, "Start recording", recording);
+    append(menu, ID_STOP, "Stop recording", !recording);
     append(menu, ID_FOLDER, "Open recordings folder", false);
     append(menu, ID_SETTINGS, "Settings", false);
     append(menu, ID_EXIT, "Exit", false);

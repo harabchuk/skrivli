@@ -15,6 +15,16 @@ pub(crate) struct Presentation {
     tray_explanation_seen: bool,
     notice: Option<&'static str>,
     pending_show: bool,
+    record_phase: RecordPhase,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecordPhase {
+    Idle,
+    Starting,
+    Recording,
+    Stopping,
+    Error,
 }
 
 impl Presentation {
@@ -27,6 +37,7 @@ impl Presentation {
             tray_explanation_seen,
             notice: None,
             pending_show: false,
+            record_phase: RecordPhase::Idle,
         }
     }
 
@@ -74,6 +85,25 @@ impl Presentation {
         self.notice = notice;
     }
 
+    pub(crate) fn notice(&self) -> Option<&'static str> {
+        self.notice
+    }
+
+    pub(crate) fn record_phase(&self) -> RecordPhase {
+        self.record_phase
+    }
+
+    pub(crate) fn set_record_phase(&mut self, phase: RecordPhase) {
+        self.record_phase = phase;
+    }
+
+    pub(crate) fn inputs_locked(&self) -> bool {
+        matches!(
+            self.record_phase,
+            RecordPhase::Starting | RecordPhase::Recording | RecordPhase::Stopping
+        )
+    }
+
     pub(crate) fn pending_show(&self) -> bool {
         self.pending_show
     }
@@ -88,9 +118,15 @@ impl Presentation {
         } else {
             format!("Shell ready ({})", self.shell_pulses)
         };
-        match self.notice {
+        let body = match self.notice {
             Some(notice) => format!("{notice} {shell}"),
             None => shell,
+        };
+        match self.record_phase {
+            RecordPhase::Starting => format!("Starting {body}"),
+            RecordPhase::Recording => format!("Recording {body}"),
+            RecordPhase::Stopping => format!("Saving {body}"),
+            RecordPhase::Idle | RecordPhase::Error => body,
         }
     }
 }

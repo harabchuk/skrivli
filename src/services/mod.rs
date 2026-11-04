@@ -1,1 +1,3 @@
-//! Use-case services. None are implemented in the foundation milestone.
+//! Use-case services.
+
+pub(crate) mod recording;

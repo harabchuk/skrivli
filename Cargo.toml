@@ -14,18 +14,28 @@ serde_json = "1"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+windows-core = "0.58"
 
 [build-dependencies]
 winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
+    "Win32_Devices_FunctionDiscovery",
     "Win32_Foundation",
+    "implement",
     "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia",
     "Win32_Security",
     "Win32_Storage_FileSystem",
+    "Win32_System_Com",
     "Win32_System_LibraryLoader",
+    "Win32_System_Performance",
+    "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
 ] }

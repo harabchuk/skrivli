@@ -2,7 +2,7 @@
 //! The loop owns the window, the tray thread, the activation listener, and the
 //! fake shell-event producer. `ShutdownController::join` runs after `run` returns.
 
-use std::sync::atomic::AtomicIsize;
+use std::sync::atomic::{AtomicBool, AtomicIsize};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -16,12 +16,17 @@ use crate::common::error::AppError;
 use crate::common::logging;
 use crate::common::paths::AppPaths;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
+use crate::infrastructure::audio::capture::WasapiCapture;
+use crate::infrastructure::audio::devices::spawn_device_watch;
+use crate::infrastructure::audio::system::{SystemClock, WindowsDisk};
+use crate::infrastructure::files::wav::recover_partials;
 use crate::infrastructure::storage::settings::{Settings, ThemePreference};
 use crate::infrastructure::windows::single_instance::{
     signal_primary_instance, InstanceGuardError, SingleInstance, ACTIVATE_EVENT_NAME,
     SINGLE_INSTANCE_MUTEX,
 };
 use crate::infrastructure::windows::tray::{self, TrayCommand};
+use crate::services::recording::{spawn_recording_host, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED};
 use crate::views::main_window::MainWindow;
 
 use super::actions::{command_from_tray, AppCommand, BridgeMessage};
@@ -94,21 +99,63 @@ pub(crate) fn run() -> i32 {
     let shutdown = ShutdownController::new();
     let (tx, rx) = mpsc::channel();
     let writer = SettingsWriter::spawn(settings_path, &shutdown);
-    spawn_workers(tx, &shutdown);
+    let recording_flag = Arc::new(AtomicBool::new(false));
+    let recovery_notice = recovery_notice(settings.recordings_directory());
+    let recording = spawn_workers(tx, &shutdown, Arc::clone(&recording_flag));
 
     tracing::info!(
         close_to_tray = settings.close_to_tray(),
         start_hidden = settings.start_hidden(),
+        explicit_system_endpoint = matches!(
+            settings.system_audio(),
+            crate::infrastructure::storage::settings::StoredEndpoint::Explicit(_)
+        ),
         "opening shell"
     );
-    open_shell(settings, rx, writer, shutdown.clone());
+    open_shell(
+        settings,
+        rx,
+        writer,
+        shutdown.clone(),
+        recording,
+        recovery_notice,
+    );
     shutdown.join();
     drop(instance);
     drop(logs);
     0
 }
 
-fn spawn_workers(tx: mpsc::Sender<BridgeMessage>, shutdown: &ShutdownController) {
+fn spawn_workers(
+    tx: mpsc::Sender<BridgeMessage>,
+    shutdown: &ShutdownController,
+    recording_flag: Arc<AtomicBool>,
+) -> crate::services::recording::RecordingHost {
+    let (host, session) = spawn_recording_host(
+        Box::new(WasapiCapture),
+        Box::new(SystemClock),
+        Box::new(WindowsDisk),
+        {
+            let tx = tx.clone();
+            Box::new(move |snapshot| {
+                let _ = tx.send(BridgeMessage::Recording(snapshot));
+            })
+        },
+        Arc::clone(&recording_flag),
+    );
+    let stop_host = host.clone();
+    shutdown.on_stop(move || stop_host.shutdown());
+    shutdown.track(session);
+
+    let device_tx = tx.clone();
+    let device_stop = shutdown.flag();
+    shutdown.track(spawn_device_watch(
+        Box::new(move |catalog| {
+            let _ = device_tx.send(BridgeMessage::Devices(catalog));
+        }),
+        device_stop,
+    ));
+
     let producer = shutdown.clone();
     let producer_tx = tx.clone();
     let producer_stop = shutdown.flag();
@@ -137,6 +184,7 @@ fn spawn_workers(tx: mpsc::Sender<BridgeMessage>, shutdown: &ShutdownController)
         if let Err(error) = tray::run(
             tray_stop,
             hwnd_slot,
+            recording_flag,
             Box::new(move |command: TrayCommand| {
                 let _ = sender.send(BridgeMessage::Command(command_from_tray(command)));
             }),
@@ -145,6 +193,7 @@ fn spawn_workers(tx: mpsc::Sender<BridgeMessage>, shutdown: &ShutdownController)
         }
         tray_worker.acknowledge();
     }));
+    host
 }
 
 fn listen_for_activation(stop: &std::sync::atomic::AtomicBool, tx: &mpsc::Sender<BridgeMessage>) {
@@ -176,6 +225,8 @@ fn open_shell(
     commands: mpsc::Receiver<BridgeMessage>,
     writer: SettingsWriter,
     shutdown: ShutdownController,
+    recording: crate::services::recording::RecordingHost,
+    recovery_notice: Option<&'static str>,
 ) {
     let theme = settings.theme();
     gpui_kit::application()
@@ -186,13 +237,15 @@ fn open_shell(
             register(cx);
             install(cx);
             let options = shell_window_options(&settings, cx);
-            let presentation = Presentation::new(
+            let mut presentation = Presentation::new(
                 settings.close_to_tray(),
                 settings.tray_explanation_seen(),
                 !settings.start_hidden(),
             );
+            presentation.set_notice(recovery_notice);
             let window_shutdown = shutdown.clone();
             let window_writer = writer;
+            let window_recording = recording;
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 window.set_window_title("Skrivli");
                 cx.new(|cx| {
@@ -202,6 +255,7 @@ fn open_shell(
                         window_writer,
                         commands,
                         window_shutdown,
+                        window_recording,
                         window,
                         cx,
                     )
@@ -278,6 +332,17 @@ fn logical_area(bounds: Bounds<Pixels>) -> Option<LogicalRect> {
         bounds.size.width.to_i32().max(1),
         bounds.size.height.to_i32().max(1),
     )
+}
+
+fn recovery_notice(directory: &std::path::Path) -> Option<&'static str> {
+    let report = recover_partials(directory);
+    if report.unrecoverable > 0 {
+        Some(NOTICE_RECOVER_FAILED)
+    } else if report.recovered > 0 {
+        Some(NOTICE_RECOVERED)
+    } else {
+        None
+    }
 }
 
 fn apply_theme(preference: ThemePreference, cx: &mut App) {

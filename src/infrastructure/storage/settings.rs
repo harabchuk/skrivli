@@ -9,7 +9,7 @@ use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_IGNORE_MERGE
 
 use crate::common::error::AppError;
 
-pub(crate) const SCHEMA_VERSION: u32 = 1;
+pub(crate) const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,6 +58,24 @@ impl StoredWindowBounds {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "mode", content = "id", rename_all = "snake_case")]
+pub(crate) enum StoredEndpoint {
+    #[default]
+    Default,
+    Explicit(String),
+}
+
+impl StoredEndpoint {
+    pub(crate) fn explicit(id: impl Into<String>) -> Self {
+        let id = id.into();
+        if id.trim().is_empty() {
+            Self::Default
+        } else {
+            Self::Explicit(id)
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Settings {
     schema_version: u32,
@@ -69,6 +87,10 @@ pub(crate) struct Settings {
     window_bounds: Option<StoredWindowBounds>,
     #[serde(default)]
     tray_explanation_seen: bool,
+    #[serde(default)]
+    microphone: StoredEndpoint,
+    #[serde(default)]
+    system_audio: StoredEndpoint,
 }
 
 impl Settings {
@@ -87,6 +109,8 @@ impl Settings {
             theme: ThemePreference::System,
             window_bounds: None,
             tray_explanation_seen: false,
+            microphone: StoredEndpoint::Default,
+            system_audio: StoredEndpoint::Default,
         })
     }
 
@@ -126,6 +150,34 @@ impl Settings {
         self.window_bounds = bounds;
     }
 
+    pub(crate) fn microphone(&self) -> &StoredEndpoint {
+        &self.microphone
+    }
+
+    pub(crate) fn system_audio(&self) -> &StoredEndpoint {
+        &self.system_audio
+    }
+
+    pub(crate) fn set_microphone(&mut self, microphone: StoredEndpoint) {
+        self.microphone = microphone;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_system_audio(&mut self, system_audio: StoredEndpoint) {
+        self.system_audio = system_audio;
+    }
+
+    pub(crate) fn set_recordings_directory(&mut self, directory: PathBuf) -> Result<(), AppError> {
+        if directory.as_os_str().is_empty() {
+            return Err(AppError::message(
+                "recordings folder",
+                "recordings directory is empty",
+            ));
+        }
+        self.recordings_directory = directory;
+        Ok(())
+    }
+
     /// Missing, malformed, partial, or newer-than-supported files yield `defaults`.
     pub(crate) fn load(path: &Path, defaults: Self) -> Self {
         let bytes = match std::fs::read(path) {
@@ -139,13 +191,12 @@ impl Settings {
         let Some(version) = value.get("schema_version").and_then(|v| v.as_u64()) else {
             return defaults;
         };
-        // Only v1 exists. Older versions would migrate here; a newer file is
-        // left untouched and the process continues on defaults.
+        // v1 files gain endpoint defaults. A newer file is left untouched.
         if version == 0 || version > u64::from(SCHEMA_VERSION) {
             return defaults;
         }
         match serde_json::from_value::<Settings>(value) {
-            Ok(settings) if settings_valid(&settings) => settings,
+            Ok(settings) => normalize(settings).unwrap_or(defaults),
             _ => defaults,
         }
     }
@@ -176,12 +227,30 @@ impl Settings {
     }
 }
 
-fn settings_valid(settings: &Settings) -> bool {
-    settings.schema_version == SCHEMA_VERSION
-        && !settings.recordings_directory.as_os_str().is_empty()
-        && settings
-            .window_bounds
-            .is_none_or(|bounds| bounds.width > 0 && bounds.height > 0)
+fn normalize(mut settings: Settings) -> Option<Settings> {
+    if settings.schema_version == 0 || settings.schema_version > SCHEMA_VERSION {
+        return None;
+    }
+    if settings.recordings_directory.as_os_str().is_empty() {
+        return None;
+    }
+    if settings
+        .window_bounds
+        .is_some_and(|bounds| bounds.width <= 0 || bounds.height <= 0)
+    {
+        return None;
+    }
+    settings.microphone = clean_endpoint(settings.microphone);
+    settings.system_audio = clean_endpoint(settings.system_audio);
+    settings.schema_version = SCHEMA_VERSION;
+    Some(settings)
+}
+
+fn clean_endpoint(endpoint: StoredEndpoint) -> StoredEndpoint {
+    match endpoint {
+        StoredEndpoint::Explicit(id) => StoredEndpoint::explicit(id),
+        StoredEndpoint::Default => StoredEndpoint::Default,
+    }
 }
 
 fn temp_sibling(path: &Path) -> PathBuf {
@@ -229,7 +298,7 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::{Settings, StoredWindowBounds, ThemePreference};
+    use super::{Settings, StoredEndpoint, StoredWindowBounds, ThemePreference, SCHEMA_VERSION};
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -367,7 +436,15 @@ mod tests {
         let loaded = Settings::load(&path, defaults);
 
         // Assert
-        assert_eq!(loaded.schema_version, 1);
+        assert_eq!(loaded.schema_version, SCHEMA_VERSION);
+        assert_eq!(loaded.microphone(), &StoredEndpoint::Default);
+        assert_eq!(loaded.system_audio(), &StoredEndpoint::Default);
+        let mut updated = loaded.clone();
+        updated.set_system_audio(StoredEndpoint::explicit("{render}"));
+        assert!(matches!(
+            updated.system_audio(),
+            StoredEndpoint::Explicit(_)
+        ));
         assert_eq!(loaded.recordings_directory, meetings);
         assert!(!loaded.close_to_tray);
         assert!(loaded.start_hidden);

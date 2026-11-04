@@ -37,6 +37,10 @@ pub(crate) fn main_window_is_iconic() -> bool {
     unsafe { IsIconic(hwnd).as_bool() }
 }
 
+pub(crate) fn main_window_hwnd() -> Option<HWND> {
+    find_main_window()
+}
+
 fn find_main_window() -> Option<HWND> {
     // SAFETY: class and title are static NUL-terminated literals.
     let hwnd = unsafe { FindWindowW(WINDOW_CLASS, WINDOW_TITLE) }.ok()?;

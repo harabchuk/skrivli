@@ -3,7 +3,10 @@
 use std::sync::mpsc::Receiver;
 
 use crate::domain::ids::{JobId, RecordingId};
+use crate::infrastructure::audio::devices::DeviceCatalog;
+use crate::infrastructure::storage::settings::StoredEndpoint;
 use crate::infrastructure::windows::tray::TrayCommand;
+use crate::services::recording::RecordSnapshot;
 
 use super::state::{AppTab, Presentation};
 
@@ -13,6 +16,8 @@ pub(crate) const NOT_AVAILABLE: &str = "Not available yet.";
 pub(crate) enum AppCommand {
     StartRecording,
     StopRecording,
+    SelectMicrophone(StoredEndpoint),
+    BrowseRecordings,
     // Queued until a recording service exists. The command path already accepts them.
     #[allow(dead_code)]
     Transcribe {
@@ -44,6 +49,9 @@ pub(crate) enum Effect {
     OpenSettings,
     OpenAbout,
     Unavailable,
+    StartRecording,
+    StopRecording,
+    BrowseRecordings,
 }
 
 pub(crate) fn command_from_tray(command: TrayCommand) -> AppCommand {
@@ -58,12 +66,27 @@ pub(crate) fn command_from_tray(command: TrayCommand) -> AppCommand {
     }
 }
 
-/// Recording execution stays idle. The command is accepted and reported as unavailable.
+/// Shell commands update presentation. Recording commands become effects the
+/// window performs off the render path.
 pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Effect {
     match command {
-        AppCommand::StartRecording
-        | AppCommand::StopRecording
-        | AppCommand::Transcribe { .. }
+        AppCommand::StartRecording => {
+            if state.inputs_locked() {
+                Effect::None
+            } else {
+                Effect::StartRecording
+            }
+        }
+        AppCommand::StopRecording => Effect::StopRecording,
+        AppCommand::BrowseRecordings => {
+            if state.inputs_locked() {
+                Effect::None
+            } else {
+                Effect::BrowseRecordings
+            }
+        }
+        AppCommand::SelectMicrophone(_) => Effect::None,
+        AppCommand::Transcribe { .. }
         | AppCommand::CancelTranscription { .. }
         | AppCommand::RefreshLibrary => {
             state.set_notice(Some(NOT_AVAILABLE));
@@ -107,22 +130,38 @@ fn hide(state: &mut Presentation) -> Effect {
 pub(crate) enum BridgeMessage {
     Command(AppCommand),
     ShellPulse,
+    Recording(RecordSnapshot),
+    Devices(DeviceCatalog),
 }
 
-/// Coalesce every queued pulse into one presentation update.
-pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentation) -> Vec<Effect> {
+pub(crate) struct BridgeBatch {
+    pub(crate) effects: Vec<Effect>,
+    pub(crate) recording: Option<RecordSnapshot>,
+    pub(crate) devices: Option<DeviceCatalog>,
+}
+
+/// Coalesce pulses and keep only the latest recording and device snapshots.
+pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentation) -> BridgeBatch {
     let mut pulses = 0_u64;
     let mut effects = Vec::new();
+    let mut recording = None;
+    let mut devices = None;
     while let Ok(message) = rx.try_recv() {
         match message {
             BridgeMessage::ShellPulse => pulses = pulses.saturating_add(1),
             BridgeMessage::Command(command) => effects.push(apply_command(state, command)),
+            BridgeMessage::Recording(snapshot) => recording = Some(snapshot),
+            BridgeMessage::Devices(catalog) => devices = Some(catalog),
         }
     }
     if pulses > 0 {
         state.add_shell_pulses(pulses);
     }
-    effects
+    BridgeBatch {
+        effects,
+        recording,
+        devices,
+    }
 }
 
 #[cfg(test)]
@@ -143,30 +182,33 @@ mod tests {
     }
 
     #[test]
-    fn recording_commands_stay_unavailable() {
+    fn recording_commands_report_availability() {
         // Arrange
         let mut state = presentation();
-        let commands = [
-            AppCommand::StartRecording,
-            AppCommand::StopRecording,
+
+        // Act
+        let start = apply_command(&mut state, AppCommand::StartRecording);
+        let stop = apply_command(&mut state, AppCommand::StopRecording);
+        state.set_record_phase(crate::app::state::RecordPhase::Recording);
+        let ignored = apply_command(&mut state, AppCommand::StartRecording);
+        let browse = apply_command(&mut state, AppCommand::BrowseRecordings);
+        let transcribe = apply_command(
+            &mut state,
             AppCommand::Transcribe {
                 recording_id: RecordingId::from_raw(7),
             },
-            AppCommand::CancelTranscription {
-                job_id: JobId::from_raw(3),
-            },
-            AppCommand::RefreshLibrary,
-        ];
-
-        // Act
-        let effects: Vec<_> = commands
-            .into_iter()
-            .map(|command| apply_command(&mut state, command))
-            .collect();
+        );
 
         // Assert
-        assert!(effects.iter().all(|effect| *effect == Effect::Unavailable));
-        assert_eq!(state.status_line(), format!("{NOT_AVAILABLE} Idle"));
+        assert_eq!(start, Effect::StartRecording);
+        assert_eq!(stop, Effect::StopRecording);
+        assert_eq!(ignored, Effect::None);
+        assert_eq!(browse, Effect::None);
+        assert_eq!(transcribe, Effect::Unavailable);
+        assert_eq!(
+            state.status_line(),
+            format!("Recording {NOT_AVAILABLE} Idle")
+        );
         assert_eq!(RecordingId::from_raw(7).raw(), 7);
         assert_eq!(JobId::from_raw(3).raw(), 3);
     }
@@ -256,8 +298,8 @@ mod tests {
         let again = drain_bridge(&rx, &mut state);
 
         // Assert
-        assert!(effects.is_empty());
-        assert!(again.is_empty());
+        assert!(effects.effects.is_empty());
+        assert!(again.effects.is_empty());
         assert_eq!(state.shell_pulses(), 5);
         assert_eq!(state.status_line(), "Shell ready (5)");
     }

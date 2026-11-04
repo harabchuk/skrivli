@@ -42,6 +42,12 @@ impl AppError {
             "open recordings folder" => "Could not open the recordings folder.",
             "tray" => "Could not show the Skrivli icon.",
             "activation" => "Could not ask the running Skrivli window to open.",
+            "recordings folder" => "The recordings folder is not writable.",
+            "save recording" | "recover recording" => "Could not save the recording.",
+            "free space" => "There is not enough free disk space to record.",
+            "microphone" => "The microphone is not available.",
+            "microphone privacy" => "Microphone access is turned off in Windows privacy settings.",
+            "wav limit" => "Recording stopped because the file reached its size limit.",
             _ => "Something went wrong.",
         }
     }

@@ -57,4 +57,18 @@ Keyboard focus is wired (`focus_handle().tab_stop(true)`, `track_focus`, `window
 
 **Shutdown order:** D-02. `request` on the last window or Exit, `cx.quit()`, `application().run` returns, `ShutdownController::join`, drop the mutex, then drop the log guard. No capture threads exist yet.
 
-**Errors:** `AppError` `Display` includes context and the source. `user_message()` is a fixed sentence and does not include paths, audio, or transcript text. Panic hook logs `panic at file:line:column` and does not format the panic payload. Logs are a non-blocking `tracing` subscriber writing `skrivli.log` under `%LOCALAPPDATA%\Skrivli\logs`, rotating at about 1 MB with two archives (three files). Settings unknown `schema_version` values above 1 fall back to defaults. Saves write a temp sibling, `sync_all`, then `ReplaceFileW` when the destination exists (`std::fs::rename` fails on Windows in that case).
+**Errors:** `AppError` `Display` includes context and the source. `user_message()` is a fixed sentence and does not include paths, audio, or transcript text. Panic hook logs `panic at file:line:column` and does not format the panic payload. Logs are a non-blocking `tracing` subscriber writing `skrivli.log` under `%LOCALAPPDATA%\Skrivli\logs`, rotating at about 1 MB with two archives (three files). Settings unknown `schema_version` values above the supported version fall back to defaults. Saves write a temp sibling, `sync_all`, then `ReplaceFileW` when the destination exists (`std::fs::rename` fails on Windows in that case).
+
+## D-03 — WASAPI through the `windows` crate
+
+**Outcome:** microphone capture calls WASAPI directly through `windows` 0.58 (`IAudioClient`, `IAudioCaptureClient`, `IMMDeviceEnumerator`). No `wasapi` / `cpal` wrapper. The capture thread calls `CoInitializeEx(COINIT_MULTITHREADED)` and releases that apartment, the audio client, and the event handle with `Drop`. Those COM pointers are not `Send` or `Sync`.
+
+**Not spiked on hardware:** opening a real capture endpoint was not run in this session. `cargo test` never calls `WasapiCapture::open`. The shared-mode event-driven path (format probe, ~200 ms buffer when the engine period allows it, packet drain, silence and discontinuity flags, QPC timestamps) is compiled and covered by pure helpers plus a fake port.
+
+## D-04 — Bounded capture queue (microphone side)
+
+**Outcome:** the capture thread sends timestamped blocks on `std::sync::mpsc::sync_channel` with capacity 64. On `TrySendError::Full` the **new** packet is rejected, an overrun is counted, and the capture loop does not wait on the writer. The writer keeps the timeline by inserting silence (capped at 5 s per gap) when the next accepted block's sample index jumps ahead, and records `overrun`, `gap`, and `discontinuity` on the sidecar. There is no custom lock-free queue. Loopback still needs its own queue in M3; this policy is the microphone side only.
+
+## D-05 — RIFF size limit
+
+**Outcome:** recordings are canonical PCM16 stereo 48 kHz RIFF, not RF64. The header is 44 bytes. The RIFF size field stores `36 + data_bytes` and must fit in `u32`, so the largest safe payload is `u32::MAX - 36` (`4_294_967_259` bytes, about 6 h 13 min). Before a write that would pass that limit, the writer emits only the frames that still fit, repairs the header, and stops. It does not publish a header whose length fields disagree with the bytes on disk. Lengths are rewritten about every 2 s of audio and again on finalize. A crash leaves `*.wav.partial`; launch repairs a canonical header and renames it to `*.recovered.wav`, or leaves the partial in place when the header is not safe to trust.

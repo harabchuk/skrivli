@@ -12,3 +12,9 @@ pub(crate) mod infrastructure;
 pub(crate) mod services;
 pub(crate) mod ui;
 pub(crate) mod views;
+
+/// In-process recording harness. It drives the microphone service with a fake
+/// capture port so `cargo test` does not open a WASAPI device.
+pub mod testing {
+    pub use crate::services::recording::{HarnessNotice, RecordingHarness, RecordingHarnessPhase};
+}

@@ -142,27 +142,27 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M2.1 — Audio domain, device discovery and folder choice
 
-- [ ] `domain/audio.rs`: `AudioFormat`, frame counts, monotonic session time and sample index conversion with checked integer arithmetic.
-- [ ] `infrastructure/audio/devices.rs`: enumerate `eCapture`/`eRender` endpoints via MMDevice; expose stable IDs and friendly display names; select Windows default communications microphone and default render endpoint.
-- [ ] Design `DeviceSelection` with explicit/default modes and missing-device fallback notification; persist stable endpoint choices.
-- [ ] `infrastructure/windows/dialogs.rs`: native folder picker; validate write permissions and folder creation. Wire GPUI Kit device selectors and destination read-only field in `views/recording.rs`.
-- [ ] Test absent/disabled devices and microphone privacy denied. Do not allow endpoint/path modifications during active recording.
+- [x] `domain/audio.rs`: `AudioFormat`, frame counts, monotonic session time and sample index conversion with checked integer arithmetic.
+- [x] `infrastructure/audio/devices.rs`: enumerate `eCapture`/`eRender` endpoints via MMDevice; expose stable IDs and friendly display names; select Windows default communications microphone and default render endpoint.
+- [x] Design `DeviceSelection` with explicit/default modes and missing-device fallback notification; persist stable endpoint choices.
+- [x] `infrastructure/windows/dialogs.rs`: native folder picker; validate write permissions and folder creation. Wire GPUI Kit device selectors and destination read-only field in `views/recording.rs`.
+- [x] Test absent/disabled devices and microphone privacy denied. Do not allow endpoint/path modifications during active recording.
 
 ### M2.2 — Mic WASAPI worker and normalization
 
-- [ ] `infrastructure/audio/capture.rs`: capture thread owns COM apartment, `IAudioClient` and `IAudioCaptureClient`; open shared-mode event-driven capture after checking supported format and engine period.
-- [ ] Drain available packets on wakeup; honor silent and discontinuity flags; capture accurate QPC/device timestamps. Use RAII for COM and Windows event handles.
-- [ ] Implement format conversion in `infrastructure/audio/format.rs` and `resampler.rs` to internal 48 kHz stereo interleaved `f32`, including mono mapping. Do not assume requested hardware format is accepted.
-- [ ] Bound memory and packet queues; no blocking disk writes, UI access, unbounded allocations or high-contention locks in hot loop.
-- [ ] Expose testable interfaces for synthetic packet input and a fake capture backend.
+- [x] `infrastructure/audio/capture.rs`: capture thread owns COM apartment, `IAudioClient` and `IAudioCaptureClient`; open shared-mode event-driven capture after checking supported format and engine period.
+- [x] Drain available packets on wakeup; honor silent and discontinuity flags; capture accurate QPC/device timestamps. Use RAII for COM and Windows event handles.
+- [x] Implement format conversion in `infrastructure/audio/format.rs` and `resampler.rs` to internal 48 kHz stereo interleaved `f32`, including mono mapping. Do not assume requested hardware format is accepted.
+- [x] Bound memory and packet queues; no blocking disk writes, UI access, unbounded allocations or high-contention locks in hot loop.
+- [x] Expose testable interfaces for synthetic packet input and a fake capture backend.
 
 ### M2.3 — WAV writer and recording service
 
-- [ ] `infrastructure/files/wav.rs`: streaming PCM16 stereo 48 kHz RIFF writer to collision-safe `Skrivli_YYYY-MM-DD_HH-MM-SS.wav.partial`; quantize/clamp `f32`, write/repair RIFF/data sizes periodically (~2 s), flush/finalize then rename.
-- [ ] Choose and document a RIFF boundary policy now: **safe stop or rotate** before 32-bit size overflow; do not write invalid headers. Include tests for boundary math without generating multi-GB files.
-- [ ] `services/recording.rs`: `Idle → Starting → Recording → Stopping → Idle/Error`, start readiness handshake, owned workers, bounded channel and orderly shutdown/drain/flush. Stop must be idempotent.
-- [ ] Ensure UI shows state/timer/errors and delegates to service, never directly calls WASAPI. Persist basic sidecar info now if this makes recording identity stable; expand in M5.
-- [ ] Add `tests/recording_flow.rs` using fake capture, injectable clock and temporary recording directory.
+- [x] `infrastructure/files/wav.rs`: streaming PCM16 stereo 48 kHz RIFF writer to collision-safe `Skrivli_YYYY-MM-DD_HH-MM-SS.wav.partial`; quantize/clamp `f32`, write/repair RIFF/data sizes periodically (~2 s), flush/finalize then rename.
+- [x] Choose and document a RIFF boundary policy now: **safe stop or rotate** before 32-bit size overflow; do not write invalid headers. Include tests for boundary math without generating multi-GB files.
+- [x] `services/recording.rs`: `Idle → Starting → Recording → Stopping → Idle/Error`, start readiness handshake, owned workers, bounded channel and orderly shutdown/drain/flush. Stop must be idempotent.
+- [x] Ensure UI shows state/timer/errors and delegates to service, never directly calls WASAPI. Persist basic sidecar info now if this makes recording identity stable; expand in M5.
+- [x] Add `tests/recording_flow.rs` using fake capture, injectable clock and temporary recording directory.
 
 **Validate:** one-minute mic WAV opens in a common Windows player; duration approximately matches wall clock, data/header lengths correct; repeated start/stop and startup failure clean up threads/files.
 

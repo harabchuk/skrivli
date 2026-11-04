@@ -1,0 +1,4 @@
+//! File adapters for recordings.
+
+pub(crate) mod sidecar;
+pub(crate) mod wav;
