@@ -37,6 +37,8 @@ pub(crate) enum AppCommand {
     OpenRecordingsFolder,
     About,
     Exit,
+    /// Windows logoff/shutdown: stop and finalize without a confirm dialog.
+    SessionEnding,
     SelectTab(AppTab),
 }
 
@@ -44,8 +46,12 @@ pub(crate) enum AppCommand {
 pub(crate) enum Effect {
     None,
     Show,
-    Hide { explain: bool },
+    Hide {
+        explain: bool,
+    },
     Quit,
+    /// Ask to stop/save before quitting while a recording is active.
+    ConfirmExit,
     OpenFolder,
     OpenSettings,
     OpenAbout,
@@ -64,6 +70,7 @@ pub(crate) fn command_from_tray(command: TrayCommand) -> AppCommand {
         TrayCommand::OpenRecordingsFolder => AppCommand::OpenRecordingsFolder,
         TrayCommand::Settings => AppCommand::OpenSettings,
         TrayCommand::Exit => AppCommand::Exit,
+        TrayCommand::SessionEnding => AppCommand::SessionEnding,
     }
 }
 
@@ -110,7 +117,14 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
         AppCommand::OpenSettings => Effect::OpenSettings,
         AppCommand::OpenRecordingsFolder => Effect::OpenFolder,
         AppCommand::About => Effect::OpenAbout,
-        AppCommand::Exit => Effect::Quit,
+        AppCommand::Exit => {
+            if state.inputs_locked() {
+                Effect::ConfirmExit
+            } else {
+                Effect::Quit
+            }
+        }
+        AppCommand::SessionEnding => Effect::StopRecording,
         AppCommand::SelectTab(tab) => {
             state.set_tab(tab);
             Effect::None
@@ -227,6 +241,9 @@ mod tests {
         let folder = apply_command(&mut state, AppCommand::OpenRecordingsFolder);
         let about = apply_command(&mut state, AppCommand::About);
         let exit = apply_command(&mut state, AppCommand::Exit);
+        state.set_record_phase(crate::app::state::RecordPhase::Recording);
+        let exit_while_recording = apply_command(&mut state, AppCommand::Exit);
+        let session_ending = apply_command(&mut state, AppCommand::SessionEnding);
 
         // Assert
         assert_eq!(tab, Effect::None);
@@ -239,6 +256,8 @@ mod tests {
         assert_eq!(folder, Effect::OpenFolder);
         assert_eq!(about, Effect::OpenAbout);
         assert_eq!(exit, Effect::Quit);
+        assert_eq!(exit_while_recording, Effect::ConfirmExit);
+        assert_eq!(session_ending, Effect::StopRecording);
     }
 
     #[test]
@@ -269,6 +288,7 @@ mod tests {
             ),
             (TrayCommand::Settings, AppCommand::OpenSettings),
             (TrayCommand::Exit, AppCommand::Exit),
+            (TrayCommand::SessionEnding, AppCommand::SessionEnding),
         ];
 
         // Act

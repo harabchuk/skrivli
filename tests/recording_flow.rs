@@ -212,3 +212,220 @@ fn mixed_sources_are_summed_and_a_dead_loopback_still_saves() {
     let _ = fs::remove_dir_all(mixed_dir);
     let _ = fs::remove_dir_all(degraded);
 }
+
+#[test]
+fn mid_session_low_disk_stops_with_warning() {
+    // Arrange
+    let dir = temp_dir("low-disk");
+    let harness = RecordingHarness::new(&dir);
+    harness.fail_system();
+    harness.stream_mic(480, 0.2);
+
+    // Act
+    harness.start_default();
+    harness
+        .wait_phase(RecordingHarnessPhase::Recording)
+        .expect("recording");
+    harness.set_free_bytes(1024);
+    let stopped = harness
+        .wait_notice_contains("free disk space is low")
+        .expect("low disk");
+
+    // Assert
+    assert!(matches!(
+        stopped.phase,
+        RecordingHarnessPhase::Recording
+            | RecordingHarnessPhase::Stopping
+            | RecordingHarnessPhase::Error
+            | RecordingHarnessPhase::Idle
+    ));
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while harness.workers() > 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(harness.workers(), 0);
+    assert!(
+        !wav_files(&dir).is_empty()
+            || dir
+                .read_dir()
+                .expect("dir")
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().contains("partial"))
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn mid_session_write_fault_preserves_usable_output() {
+    // Arrange
+    let dir = temp_dir("write-fault");
+    let harness = RecordingHarness::new(&dir);
+    harness.fail_system();
+    harness.push_frames(480, 0.25);
+    harness.push_frames(480, 0.25);
+    harness.inject_write_fault();
+
+    // Act — fault is armed before the first mix write after Recording.
+    harness.start_default();
+    let failed = harness
+        .wait_notice_contains("Could not save the recording")
+        .expect("save failure");
+
+    // Assert
+    assert!(failed.notice.unwrap_or("").contains("Could not save"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while harness.workers() > 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(harness.workers(), 0);
+    let has_artifact = !wav_files(&dir).is_empty()
+        || dir.read_dir().expect("dir").flatten().any(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name.contains("partial") || name.contains("rescued")
+        })
+        || harness
+            .rescue_dir()
+            .read_dir()
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|entry| entry.file_name().to_string_lossy().contains("rescued"))
+            })
+            .unwrap_or(false);
+    assert!(has_artifact);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn folder_fault_rescues_readable_partial() {
+    // Arrange
+    let dir = temp_dir("folder-fault");
+    let harness = RecordingHarness::new(&dir);
+    harness.fail_system();
+    harness.stream_mic(480, 0.2);
+
+    // Act
+    harness.start_default();
+    harness
+        .wait_phase(RecordingHarnessPhase::Recording)
+        .expect("recording");
+    std::thread::sleep(Duration::from_millis(40));
+    harness.inject_folder_fault();
+    let failed = harness
+        .wait_notice_contains("rescue folder")
+        .or_else(|_| harness.wait_notice_contains("partial file was kept"))
+        .expect("rescue or partial");
+
+    // Assert
+    assert!(matches!(
+        failed.phase,
+        RecordingHarnessPhase::Recording
+            | RecordingHarnessPhase::Stopping
+            | RecordingHarnessPhase::Error
+            | RecordingHarnessPhase::Idle
+    ));
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while harness.workers() > 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let rescued = harness
+        .rescue_dir()
+        .read_dir()
+        .expect("rescue")
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().contains("rescued"));
+    let partial_kept = dir
+        .read_dir()
+        .expect("dir")
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().contains("partial"));
+    assert!(rescued || partial_kept || !wav_files(&dir).is_empty());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn mid_session_mic_loss_keeps_system_and_degrades() {
+    // Arrange
+    let dir = temp_dir("mic-loss");
+    let harness = RecordingHarness::new(&dir);
+    harness.stream_mic(480, 0.2);
+    harness.stream_system(480, 0.2);
+
+    // Act
+    harness.start_default();
+    harness
+        .wait_phase(RecordingHarnessPhase::Recording)
+        .expect("recording");
+    harness.fail_next_mic_open();
+    harness.fail_mic_pull();
+    let degraded = harness
+        .wait_notice_contains("microphone is unavailable")
+        .expect("degraded");
+    harness.stop();
+    let idle = harness
+        .wait_phase(RecordingHarnessPhase::Idle)
+        .expect("idle");
+
+    // Assert
+    assert!(degraded.notice.unwrap_or("").contains("microphone"));
+    assert!(idle.notice.is_some());
+    assert_eq!(wav_files(&dir).len(), 1);
+    let sidecar = fs::read_dir(&dir)
+        .expect("dir")
+        .flatten()
+        .find(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .expect("sidecar");
+    let text = fs::read_to_string(sidecar.path()).expect("json");
+    assert!(text.contains("gap") || text.contains("capture") || text.contains("source_change"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn capture_worker_panic_is_surfaced() {
+    // Arrange
+    let dir = temp_dir("panic");
+    let harness = RecordingHarness::new(&dir);
+    harness.fail_system();
+    harness.stream_mic(480, 0.2);
+
+    // Act
+    harness.start_default();
+    harness
+        .wait_phase(RecordingHarnessPhase::Recording)
+        .expect("recording");
+    harness.panic_mic_pull();
+    let noticed = harness
+        .wait_notice_contains("capture worker failed")
+        .expect("worker notice");
+    harness.stop();
+    let _ = harness.wait_phase(RecordingHarnessPhase::Idle);
+
+    // Assert
+    assert!(noticed.notice.unwrap_or("").contains("worker"));
+    assert_eq!(harness.workers(), 0);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn silent_open_source_reports_stall() {
+    // Arrange
+    let dir = temp_dir("stall");
+    let harness = RecordingHarness::new(&dir);
+    harness.fail_system();
+    harness.silent_mic();
+
+    // Act
+    harness.start_default();
+    harness
+        .wait_phase(RecordingHarnessPhase::Recording)
+        .expect("recording");
+    let stalled = harness
+        .wait_notice_contains("stalled")
+        .expect("stall notice");
+    harness.stop();
+    let _ = harness.wait_phase(RecordingHarnessPhase::Idle);
+
+    // Assert
+    assert!(stalled.notice.unwrap_or("").contains("stalled"));
+    let _ = fs::remove_dir_all(dir);
+}

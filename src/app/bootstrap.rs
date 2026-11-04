@@ -121,6 +121,7 @@ pub(crate) fn run() -> i32 {
         Arc::clone(&gain),
         Arc::clone(&lease),
         Arc::clone(&targets),
+        paths.rescue_dir(),
     );
 
     tracing::info!(
@@ -149,6 +150,7 @@ pub(crate) fn run() -> i32 {
     0
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_workers(
     tx: mpsc::Sender<BridgeMessage>,
     shutdown: &ShutdownController,
@@ -157,6 +159,7 @@ fn spawn_workers(
     gain: Arc<GainControl>,
     lease: Arc<EndpointLease>,
     targets: Arc<MonitorTargets>,
+    rescue_dir: std::path::PathBuf,
 ) -> crate::services::recording::RecordingHost {
     let (host, session) = spawn_recording_host(
         RecordingEngine {
@@ -168,6 +171,12 @@ fn spawn_workers(
             levels: Arc::clone(&levels),
             gain: Arc::clone(&gain),
             lease: Arc::clone(&lease),
+            rescue_dir,
+            space_check_every: crate::services::recording::SPACE_CHECK_INTERVAL,
+            write_fault: Arc::new(AtomicBool::new(false)),
+            folder_fault: Arc::new(AtomicBool::new(false)),
+            device_wake: Arc::new(AtomicBool::new(false)),
+            stall_after: crate::services::recording::STALL_IDLE,
         },
         {
             let tx = tx.clone();

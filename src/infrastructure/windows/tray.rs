@@ -25,8 +25,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer,
     ShowWindow, TrackPopupMenuEx, TranslateMessage, IDI_APPLICATION, MF_GRAYED, MF_STRING, SW_HIDE,
     TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE,
-    WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP, WM_TIMER, WM_USER,
-    WNDCLASSW,
+    WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_QUERYENDSESSION,
+    WM_RBUTTONUP, WM_TIMER, WM_USER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 use crate::common::error::AppError;
@@ -53,6 +53,8 @@ pub(crate) enum TrayCommand {
     OpenRecordingsFolder,
     Settings,
     Exit,
+    /// Windows logoff/shutdown: finalize without an Exit confirmation.
+    SessionEnding,
 }
 
 pub(crate) fn command_from_menu_id(id: i32) -> Option<TrayCommand> {
@@ -98,18 +100,20 @@ pub(crate) fn run(
     });
     let instance = module_instance()?;
     register_class(instance)?;
+    // Hidden top-level window (not HWND_MESSAGE) so WM_QUERYENDSESSION /
+    // WM_ENDSESSION reach the tray pump for bounded recording finalization.
     let hwnd = unsafe {
         CreateWindowExW(
-            WINDOW_EX_STYLE(0),
+            WINDOW_EX_STYLE(WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0),
             CLASS_NAME,
             w!("Skrivli.Tray"),
-            WINDOW_STYLE(0),
+            WINDOW_STYLE(WS_POPUP.0),
             0,
             0,
             0,
             0,
-            windows::Win32::UI::WindowsAndMessaging::HWND_MESSAGE,
-            windows::Win32::UI::WindowsAndMessaging::HMENU(std::ptr::null_mut()),
+            None,
+            None,
             instance,
             None,
         )
@@ -235,6 +239,14 @@ unsafe extern "system" fn tray_wndproc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if message == WM_QUERYENDSESSION {
+        emit(TrayCommand::SessionEnding);
+        return LRESULT(1);
+    }
+    if message == WM_ENDSESSION && wparam.0 != 0 {
+        emit(TrayCommand::SessionEnding);
+        return LRESULT(0);
+    }
     if message == WM_CLOSE || message == WM_DESTROY {
         remove_icon(hwnd);
         if message == WM_CLOSE {

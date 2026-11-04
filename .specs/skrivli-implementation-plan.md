@@ -201,7 +201,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M3 acceptance
 
-- [ ] Mic + system audio are audible and aligned in one playable WAV; deterministic mixer test matrix passes; meters remain responsive while idle and recording.
+- [x] Mic + system audio are audible and aligned in one playable WAV; deterministic mixer test matrix passes; meters remain responsive while idle and recording.
 
 ---
 
@@ -212,28 +212,28 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M4.1 — Device and source-failure handling
 
-- [ ] Register `IMMNotificationClient`; callback only queues a device-changed event. Re-enumeration/restart occurs on workers, not inside COM callback.
-- [ ] Detect device invalidation/privacy/format failures; keep remaining source alive, insert timeline silence, attempt appropriate default endpoint reopen and record gaps/source changes.
-- [ ] Ensure single-source operation when mic or render endpoint is unavailable; report degraded mode in app status.
+- [x] Register `IMMNotificationClient`; callback only queues a device-changed event. Re-enumeration/restart occurs on workers, not inside COM callback.
+- [x] Detect device invalidation/privacy/format failures; keep remaining source alive, insert timeline silence, attempt appropriate default endpoint reopen and record gaps/source changes.
+- [x] Ensure single-source operation when mic or render endpoint is unavailable; report degraded mode in app status.
 
 ### M4.2 — Storage safeguards and recovery
 
-- [ ] Check destination writable and free space before start and about every 30 s; gracefully finalize below initially 200 MB, with a visible warning.
-- [ ] Periodically repair partial-WAV headers and implement startup recovery: inspect `.wav.partial`, validate sizes/PCM boundaries, repair if safe, rename to `.recovered.wav` without overwriting existing files.
-- [ ] On write or folder failure, preserve usable partial files and attempt bounded rescue in `%LOCALAPPDATA%\Skrivli\rescue\` only when original bytes can still be read; report unrecoverable failures accurately.
-- [ ] Strengthen atomic sidecar state writes, corrupt metadata handling and safe partial preservation; define cleanup policy, no automatic deletion of unknown partial files.
+- [x] Check destination writable and free space before start and about every 30 s; gracefully finalize below initially 200 MB, with a visible warning.
+- [x] Periodically repair partial-WAV headers and implement startup recovery: inspect `.wav.partial`, validate sizes/PCM boundaries, repair if safe, rename to `.recovered.wav` without overwriting existing files.
+- [x] On write or folder failure, preserve usable partial files and attempt bounded rescue in `%LOCALAPPDATA%\Skrivli\rescue\` only when original bytes can still be read; report unrecoverable failures accurately.
+- [x] Strengthen atomic sidecar state writes, corrupt metadata handling and safe partial preservation; define cleanup policy, no automatic deletion of unknown partial files.
 
 ### M4.3 — Shutdown and fault injection
 
-- [ ] Explicit Exit while recording asks to stop/save; close-to-tray never stops capture. Windows session-ending notifications trigger bounded best-effort finalization.
-- [ ] Supervise workers and join on normal shutdown; surface worker panic, capture stall, disk error and session rollback failures through typed events.
-- [ ] Add tests for disk full/write error, forced worker termination, crash-interrupted header, output-folder removal, restart recovery, duplicate Stop and stale events.
+- [x] Explicit Exit while recording asks to stop/save; close-to-tray never stops capture. Windows session-ending notifications trigger bounded best-effort finalization.
+- [x] Supervise workers and join on normal shutdown; surface worker panic, capture stall, disk error and session rollback failures through typed events.
+- [x] Add tests for disk full/write error, forced worker termination, crash-interrupted header, output-folder removal, restart recovery, duplicate Stop and stale events.
 
 **Validate:** kill process mid-recording and recover partial on next boot; unplug capture device and retain timeline; stop with low disk or unwritable folder without silently corrupting prior files.
 
 ### M4 acceptance
 
-- [ ] Every induced failure either yields a playable recording/recoverable partial or produces an explicit actionable error with preserved artifacts where possible.
+- [x] Every induced failure either yields a playable recording/recoverable partial or produces an explicit actionable error with preserved artifacts where possible.
 
 ---
 

@@ -4,6 +4,11 @@
 //! two seconds and again on finalize, then the file is renamed to `.wav`.
 //! A standard RIFF size is a `u32`. This writer stops before `36 + data`
 //! would exceed that field. It does not switch to RF64.
+//!
+//! Cleanup policy: never auto-delete unknown `*.wav.partial` files. [`Self::abandon`]
+//! removes a partial only after a failed start before usable audio must be kept.
+//! Crash recovery renames safe partials to `*.recovered.wav` and leaves unsafe
+//! headers in place.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -94,7 +99,6 @@ impl WavWriter {
         &self.final_path
     }
 
-    #[cfg(test)]
     pub(crate) fn partial_path(&self) -> &Path {
         &self.partial
     }
@@ -182,6 +186,14 @@ impl WavWriter {
             .map_err(|source| AppError::io("save recording", source))?;
         self.finalized = true;
         Ok(self.final_path.clone())
+    }
+
+    /// Close the handle after a header repair, leaving the partial on disk.
+    pub(crate) fn release_partial(mut self) -> Result<PathBuf, AppError> {
+        let _ = self.repair();
+        self.file.take();
+        self.finalized = true;
+        Ok(self.partial.clone())
     }
 
     pub(crate) fn abandon(mut self) -> Result<(), AppError> {

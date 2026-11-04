@@ -1,4 +1,9 @@
 //! Versioned recording sidecar. The write is a temp file, `sync_all`, then replace.
+//!
+//! Corrupt or missing sidecars are never deleted automatically. Recovery paths
+//! keep the audio partial/WAV and leave a bad `.json` in place for the library
+//! (M5) to present as malformed metadata. Unknown `*.wav.partial` files are also
+//! never auto-deleted (see `wav` recovery and `rescue`).
 
 use std::fs::OpenOptions;
 use std::io::Write;

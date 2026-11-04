@@ -38,7 +38,9 @@ use crate::services::recording::{
 
 use super::recording::record_tab;
 use super::recordings::recordings_placeholder;
-use super::settings::{open_about, open_settings, open_tray_explanation};
+use super::settings::{
+    open_about, open_exit_while_recording, open_settings, open_tray_explanation,
+};
 
 const BOUNDS_DEBOUNCE: Duration = Duration::from_millis(400);
 
@@ -336,14 +338,18 @@ impl MainWindow {
             Effect::StartRecording => self.begin_recording(),
             Effect::StopRecording => self.recording.stop(),
             Effect::BrowseRecordings => self.browse_folder(),
-            Effect::Quit => {
-                if self.presentation.inputs_locked() {
-                    self.exit_after_stop = true;
-                    self.recording.stop();
-                } else {
-                    self.quit_now(window);
-                }
+            Effect::ConfirmExit => {
+                let entity = cx.entity();
+                open_exit_while_recording(window, cx, move |window, cx| {
+                    entity.update(cx, |view, cx| {
+                        view.exit_after_stop = true;
+                        view.recording.stop();
+                        cx.notify();
+                        let _ = window;
+                    });
+                });
             }
+            Effect::Quit => self.quit_now(window),
         }
         cx.notify();
     }
@@ -488,6 +494,9 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.presentation.inputs_locked() {
+            self.recording.devices_changed();
+        }
         self.catalog = catalog;
         let mut labels = vec![SharedString::from("Default communications")];
         let mut choices = vec![StoredEndpoint::Default];
