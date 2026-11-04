@@ -157,7 +157,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M2.3 — WAV writer and recording service
 
-- [x] `infrastructure/files/wav.rs`: streaming PCM16 stereo 48 kHz RIFF writer to collision-safe `Skrivli_YYYY-MM-DD_HH-MM-SS.wav.partial`; quantize/clamp `f32`, write/repair RIFF/data sizes periodically (~2 s), flush/finalize then rename.
+- [x] `infrastructure/files/wav.rs`: streaming PCM16 stereo 48 kHz RIFF writer (`hound`) to collision-safe `Skrivli_YYYY-MM-DD_HH-MM-SS.wav.partial`; quantize/clamp `f32`, write/repair RIFF/data sizes periodically (~2 s), flush/finalize then rename.
 - [x] Choose and document a RIFF boundary policy now: **safe stop or rotate** before 32-bit size overflow; do not write invalid headers. Include tests for boundary math without generating multi-GB files.
 - [x] `services/recording.rs`: `Idle → Starting → Recording → Stopping → Idle/Error`, start readiness handshake, owned workers, bounded channel and orderly shutdown/drain/flush. Stop must be idempotent.
 - [x] Ensure UI shows state/timer/errors and delegates to service, never directly opens capture. Persist basic sidecar info now if this makes recording identity stable; expand in M5.

@@ -324,7 +324,7 @@ System loopback uses flexaudio’s classic silent-render keepalive so idle endpo
 ### 6.5 Audio files, metadata and crash safety
 
 - Name recordings `Skrivli_YYYY-MM-DD_HH-MM-SS.wav` in local time, with a collision suffix.
-- Write into `*.wav.partial` first, as **48 kHz, stereo, PCM16 WAV**. Ensure the writer can periodically repair its RIFF/data length fields (e.g. every two seconds) and finalize lengths on close. Standard RIFF size limitations must be handled explicitly: stop/rotate before overflow or adopt a compatible large-file format; do not silently create corrupt recordings.
+- Write into `*.wav.partial` first, as **48 kHz, stereo, PCM16 WAV**, using the `hound` library for encoding and header updates. Ensure the writer can periodically repair its RIFF/data length fields (e.g. every two seconds) and finalize lengths on close. Standard RIFF size limitations must be handled explicitly: stop/rotate before overflow or adopt a compatible large-file format; do not silently create corrupt recordings.
 - When stopping: drain queued samples, flush and close the writer, persist metadata, and rename to final `.wav`. Use a unique temporary path within the destination directory to keep rename semantics reliable.
 - On launch, detect unfinished `.partial` WAV files, validate enough header/data to recover, repair lengths and rename as `*.recovered.wav`. Preserve originals or report an error if recovery isn't safe.
 - Check free space before start and periodically (~30 s). Below a safety threshold (initially 200 MB) stop gracefully, finalize what can be saved, and notify.

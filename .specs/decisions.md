@@ -73,7 +73,7 @@ The second source did not change the policy. Microphone and loopback each have o
 
 ## D-05 — RIFF size limit
 
-**Outcome:** recordings are canonical PCM16 stereo 48 kHz RIFF, not RF64. The header is 44 bytes. The RIFF size field stores `36 + data_bytes` and must fit in `u32`, so the largest safe payload is `u32::MAX - 36` (`4_294_967_259` bytes, about 6 h 13 min). Before a write that would pass that limit, the writer emits only the frames that still fit, repairs the header, and stops. It does not publish a header whose length fields disagree with the bytes on disk. Lengths are rewritten about every 2 s of audio and again on finalize. A crash leaves `*.wav.partial`; launch repairs a canonical header and renames it to `*.recovered.wav`, or leaves the partial in place when the header is not safe to trust.
+**Outcome:** recordings are canonical PCM16 stereo 48 kHz RIFF, not RF64. Encoding uses the `hound` crate (`WavWriter` + periodic `flush` for header repair, `finalize` on close). The header is 44 bytes. The RIFF size field stores `36 + data_bytes` and must fit in `u32`, so the largest safe payload is `u32::MAX - 36` (`4_294_967_259` bytes, about 6 h 13 min). Before a write that would pass that limit, the writer emits only the frames that still fit, repairs the header, and stops. It does not publish a header whose length fields disagree with the bytes on disk. Lengths are rewritten about every 2 s of audio and again on finalize. A crash leaves `*.wav.partial`; launch repairs a canonical header and renames it to `*.recovered.wav`, or leaves the partial in place when the header is not safe to trust.
 
 ## D-06 — Adaptive Rubato resampling for gradual drift
 

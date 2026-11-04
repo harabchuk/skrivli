@@ -1,4 +1,4 @@
-//! Streaming PCM16 stereo 48 kHz RIFF writer.
+//! Streaming PCM16 stereo 48 kHz RIFF writer via [`hound`].
 //!
 //! Bytes land in `Name.wav.partial`. Length fields are rewritten about every
 //! two seconds and again on finalize, then the file is renamed to `.wav`.
@@ -27,6 +27,16 @@ pub(crate) const RIFF_OVERHEAD_BYTES: u64 = 36;
 pub(crate) const MAX_SAFE_DATA_BYTES: u64 = u32::MAX as u64 - RIFF_OVERHEAD_BYTES;
 const REPAIR_EVERY_FRAMES: u64 = INTERNAL_SAMPLE_RATE as u64 * 2;
 const BYTES_PER_FRAME: u64 = 4;
+const BYTES_PER_SAMPLE: u64 = 2;
+
+fn wav_spec() -> hound::WavSpec {
+    hound::WavSpec {
+        channels: INTERNAL_CHANNELS,
+        sample_rate: INTERNAL_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    }
+}
 
 pub(crate) fn data_bytes_fit(existing: u64, additional: u64) -> bool {
     match existing.checked_add(additional) {
@@ -47,6 +57,37 @@ pub(crate) fn quantize_sample(sample: f32) -> i16 {
     truncated.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }
 
+fn map_hound(context: &'static str, error: hound::Error) -> AppError {
+    match error {
+        hound::Error::IoError(source) => AppError::io(context, source),
+        other => AppError::message(context, other.to_string()),
+    }
+}
+
+/// File wrapper so [`hound::WavWriter::flush`] also `sync_all`s for crash durability.
+struct SyncFile {
+    file: File,
+}
+
+impl Write for SyncFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()?;
+        self.file.sync_all()
+    }
+}
+
+impl Seek for SyncFile {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.file.seek(pos)
+    }
+}
+
+type HoundWriter = hound::WavWriter<SyncFile>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WavWrite {
     Wrote {
@@ -59,10 +100,9 @@ pub(crate) enum WavWrite {
 }
 
 pub(crate) struct WavWriter {
-    file: Option<File>,
+    writer: Option<HoundWriter>,
     partial: PathBuf,
     final_path: PathBuf,
-    data_bytes: u64,
     frames_since_repair: u64,
     finalized: bool,
 }
@@ -78,19 +118,16 @@ impl WavWriter {
             .read(true)
             .open(&partial)
             .map_err(|source| AppError::io("save recording", source))?;
+        let writer = hound::WavWriter::new(SyncFile { file }, wav_spec())
+            .map_err(|error| map_hound("save recording", error))?;
         let mut writer = Self {
-            file: Some(file),
+            writer: Some(writer),
             partial,
             final_path,
-            data_bytes: 0,
             frames_since_repair: 0,
             finalized: false,
         };
-        writer.write_header()?;
-        writer
-            .file_mut()?
-            .sync_all()
-            .map_err(|source| AppError::io("save recording", source))?;
+        writer.repair()?;
         Ok(writer)
     }
 
@@ -105,7 +142,7 @@ impl WavWriter {
 
     #[cfg(test)]
     pub(crate) fn data_bytes(&self) -> u64 {
-        self.data_bytes
+        self.data_bytes_written()
     }
 
     pub(crate) fn write_samples(&mut self, stereo: &[f32]) -> Result<WavWrite, AppError> {
@@ -123,26 +160,31 @@ impl WavWriter {
             .ok_or_else(|| {
                 AppError::message("save recording", "frame count does not fit in a length")
             })?;
-        let (accept_frames, stop) = if data_bytes_fit(self.data_bytes, wanted) {
+        let data_bytes = self.data_bytes_written();
+        let (accept_frames, stop) = if data_bytes_fit(data_bytes, wanted) {
             (frames, false)
         } else {
-            let room = MAX_SAFE_DATA_BYTES.saturating_sub(self.data_bytes);
+            let room = MAX_SAFE_DATA_BYTES.saturating_sub(data_bytes);
             ((room / BYTES_PER_FRAME) as usize, true)
         };
         if accept_frames == 0 {
             self.repair()?;
             return Ok(WavWrite::SafeStop { frames: 0 });
         }
-        let mut pcm = Vec::with_capacity(accept_frames.saturating_mul(4));
-        for sample in stereo.iter().take(accept_frames.saturating_mul(2)) {
-            pcm.extend_from_slice(&quantize_sample(*sample).to_le_bytes());
+        let num_samples = u32::try_from(accept_frames.saturating_mul(usize::from(INTERNAL_CHANNELS)))
+            .map_err(|_| {
+                AppError::message("save recording", "frame count does not fit in a length")
+            })?;
+        {
+            let writer = self.writer_mut()?;
+            let mut samples = writer.get_i16_writer(num_samples);
+            for sample in stereo.iter().take(num_samples as usize) {
+                samples.write_sample(quantize_sample(*sample));
+            }
+            samples
+                .flush()
+                .map_err(|error| map_hound("save recording", error))?;
         }
-        let file = self.file_mut()?;
-        file.seek(SeekFrom::End(0))
-            .map_err(|source| AppError::io("save recording", source))?;
-        file.write_all(&pcm)
-            .map_err(|source| AppError::io("save recording", source))?;
-        self.data_bytes = self.data_bytes.saturating_add(pcm.len() as u64);
         self.frames_since_repair = self
             .frames_since_repair
             .saturating_add(accept_frames as u64);
@@ -162,26 +204,17 @@ impl WavWriter {
     }
 
     pub(crate) fn repair(&mut self) -> Result<(), AppError> {
-        let data_bytes = u32::try_from(self.data_bytes)
-            .map_err(|_| AppError::message("wav limit", "data length exceeds the RIFF field"))?;
-        let riff_size = data_bytes.saturating_add(RIFF_OVERHEAD_BYTES as u32);
-        let file = self.file_mut()?;
-        file.seek(SeekFrom::Start(4))
-            .map_err(|source| AppError::io("save recording", source))?;
-        file.write_all(&riff_size.to_le_bytes())
-            .map_err(|source| AppError::io("save recording", source))?;
-        file.seek(SeekFrom::Start(40))
-            .map_err(|source| AppError::io("save recording", source))?;
-        file.write_all(&data_bytes.to_le_bytes())
-            .map_err(|source| AppError::io("save recording", source))?;
-        file.sync_all()
-            .map_err(|source| AppError::io("save recording", source))?;
-        Ok(())
+        self.writer_mut()?
+            .flush()
+            .map_err(|error| map_hound("save recording", error))
     }
 
     pub(crate) fn finalize(mut self) -> Result<PathBuf, AppError> {
-        self.repair()?;
-        self.file.take();
+        if let Some(writer) = self.writer.take() {
+            writer
+                .finalize()
+                .map_err(|error| map_hound("save recording", error))?;
+        }
         std::fs::rename(&self.partial, &self.final_path)
             .map_err(|source| AppError::io("save recording", source))?;
         self.finalized = true;
@@ -190,15 +223,18 @@ impl WavWriter {
 
     /// Close the handle after a header repair, leaving the partial on disk.
     pub(crate) fn release_partial(mut self) -> Result<PathBuf, AppError> {
-        let _ = self.repair();
-        self.file.take();
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.finalize();
+        }
         self.finalized = true;
         Ok(self.partial.clone())
     }
 
     pub(crate) fn abandon(mut self) -> Result<(), AppError> {
         self.finalized = true;
-        self.file.take();
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.finalize();
+        }
         if self.partial.exists() {
             std::fs::remove_file(&self.partial)
                 .map_err(|source| AppError::io("save recording", source))?;
@@ -206,15 +242,15 @@ impl WavWriter {
         Ok(())
     }
 
-    fn write_header(&mut self) -> Result<(), AppError> {
-        let header = pcm_header(0);
-        self.file_mut()?
-            .write_all(&header)
-            .map_err(|source| AppError::io("save recording", source))
+    fn data_bytes_written(&self) -> u64 {
+        self.writer
+            .as_ref()
+            .map(|writer| u64::from(writer.len()).saturating_mul(BYTES_PER_SAMPLE))
+            .unwrap_or(0)
     }
 
-    fn file_mut(&mut self) -> Result<&mut File, AppError> {
-        self.file
+    fn writer_mut(&mut self) -> Result<&mut HoundWriter, AppError> {
+        self.writer
             .as_mut()
             .ok_or_else(|| AppError::message("save recording", "the wav file is closed"))
     }
@@ -222,31 +258,13 @@ impl WavWriter {
 
 impl Drop for WavWriter {
     fn drop(&mut self) {
-        if self.finalized || self.file.is_none() {
+        if self.finalized {
             return;
         }
-        let _ = self.repair();
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.finalize();
+        }
     }
-}
-
-pub(crate) fn pcm_header(data_bytes: u32) -> [u8; 44] {
-    let mut header = [0_u8; 44];
-    header[0..4].copy_from_slice(b"RIFF");
-    let riff_size = data_bytes.saturating_add(RIFF_OVERHEAD_BYTES as u32);
-    header[4..8].copy_from_slice(&riff_size.to_le_bytes());
-    header[8..12].copy_from_slice(b"WAVE");
-    header[12..16].copy_from_slice(b"fmt ");
-    header[16..20].copy_from_slice(&16_u32.to_le_bytes());
-    header[20..22].copy_from_slice(&1_u16.to_le_bytes());
-    header[22..24].copy_from_slice(&INTERNAL_CHANNELS.to_le_bytes());
-    header[24..28].copy_from_slice(&INTERNAL_SAMPLE_RATE.to_le_bytes());
-    let byte_rate = INTERNAL_SAMPLE_RATE * u32::from(INTERNAL_CHANNELS) * 2;
-    header[28..32].copy_from_slice(&byte_rate.to_le_bytes());
-    header[32..34].copy_from_slice(&4_u16.to_le_bytes());
-    header[34..36].copy_from_slice(&16_u16.to_le_bytes());
-    header[36..40].copy_from_slice(b"data");
-    header[40..44].copy_from_slice(&data_bytes.to_le_bytes());
-    header
 }
 
 fn allocate_paths(directory: &Path, when: CivilTime) -> Result<(PathBuf, PathBuf), AppError> {
@@ -312,13 +330,7 @@ pub(crate) fn recover_partials(directory: &Path) -> RecoveryReport {
 }
 
 fn recover_one(partial: &Path) -> Result<(), AppError> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(partial)
-        .map_err(|source| AppError::io("recover recording", source))?;
-    let length = file
-        .metadata()
+    let length = std::fs::metadata(partial)
         .map_err(|source| AppError::io("recover recording", source))?
         .len();
     if length < WAV_HEADER_BYTES {
@@ -327,15 +339,30 @@ fn recover_one(partial: &Path) -> Result<(), AppError> {
             "partial header is incomplete",
         ));
     }
-    let mut header = [0_u8; 44];
-    file.seek(SeekFrom::Start(0))
+    {
+        let reader = hound::WavReader::open(partial)
+            .map_err(|error| map_hound("recover recording", error))?;
+        if reader.spec() != wav_spec() {
+            return Err(AppError::message(
+                "recover recording",
+                "partial header is not a Skrivli wav",
+            ));
+        }
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(partial)
         .map_err(|source| AppError::io("recover recording", source))?;
-    file.read_exact(&mut header)
+    let mut data_tag = [0_u8; 4];
+    file.seek(SeekFrom::Start(36))
         .map_err(|source| AppError::io("recover recording", source))?;
-    if !header_is_canonical(&header) {
+    file.read_exact(&mut data_tag)
+        .map_err(|source| AppError::io("recover recording", source))?;
+    if &data_tag != b"data" {
         return Err(AppError::message(
             "recover recording",
-            "partial header is not a Skrivli wav",
+            "partial header is not a canonical 44-byte wav",
         ));
     }
     let data_bytes = (length - WAV_HEADER_BYTES) / BYTES_PER_FRAME * BYTES_PER_FRAME;
@@ -347,10 +374,14 @@ fn recover_one(partial: &Path) -> Result<(), AppError> {
     }
     let data_u32 = u32::try_from(data_bytes)
         .map_err(|_| AppError::message("recover recording", "data length does not fit"))?;
-    let repaired = pcm_header(data_u32);
-    file.seek(SeekFrom::Start(0))
+    let riff_size = data_u32.saturating_add(RIFF_OVERHEAD_BYTES as u32);
+    file.seek(SeekFrom::Start(4))
         .map_err(|source| AppError::io("recover recording", source))?;
-    file.write_all(&repaired)
+    file.write_all(&riff_size.to_le_bytes())
+        .map_err(|source| AppError::io("recover recording", source))?;
+    file.seek(SeekFrom::Start(40))
+        .map_err(|source| AppError::io("recover recording", source))?;
+    file.write_all(&data_u32.to_le_bytes())
         .map_err(|source| AppError::io("recover recording", source))?;
     file.set_len(WAV_HEADER_BYTES + data_bytes)
         .map_err(|source| AppError::io("recover recording", source))?;
@@ -361,11 +392,6 @@ fn recover_one(partial: &Path) -> Result<(), AppError> {
     std::fs::rename(partial, &recovered)
         .map_err(|source| AppError::io("recover recording", source))?;
     Ok(())
-}
-
-fn header_is_canonical(header: &[u8; 44]) -> bool {
-    let expected = pcm_header(0);
-    &header[0..4] == b"RIFF" && &header[8..12] == b"WAVE" && header[8..40] == expected[8..40]
 }
 
 fn recovered_path(partial: &Path) -> Result<PathBuf, AppError> {
@@ -411,7 +437,7 @@ pub(crate) fn read_wav_lengths(path: &Path) -> Result<(u32, u32, u64), AppError>
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::fs::{self, OpenOptions};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
@@ -538,10 +564,18 @@ mod tests {
     fn recoverable_partial_is_renamed_and_a_bad_header_is_left() {
         // Arrange
         let dir = temp_dir("recover");
-        let partial = dir.join("Skrivli_2026-11-04_13-01-02.wav.partial");
-        let mut bytes = super::pcm_header(0).to_vec();
-        bytes.extend_from_slice(&[1, 0, 2, 0, 3, 0, 4, 0]);
-        fs::write(&partial, &bytes).expect("partial");
+        let writer = WavWriter::create(&dir, stamp()).expect("create");
+        let partial = writer.partial_path().to_path_buf();
+        writer.release_partial().expect("release");
+        {
+            use std::io::Write;
+            let mut file = OpenOptions::new()
+                .append(true)
+                .open(&partial)
+                .expect("append");
+            file.write_all(&[1, 0, 2, 0, 3, 0, 4, 0])
+                .expect("pcm");
+        }
         let garbage = dir.join("Skrivli_bad.wav.partial");
         fs::write(&garbage, b"not a wav header at all, still too short").expect("garbage");
 
@@ -558,6 +592,22 @@ mod tests {
         assert_eq!(data, 8);
         assert_eq!(riff, 44);
         assert_eq!(length, 52);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn writer_output_opens_as_skrivli_spec_in_hound() {
+        // Arrange
+        let dir = temp_dir("hound-hdr");
+        let writer = WavWriter::create(&dir, stamp()).expect("create");
+        let path = writer.partial_path().to_path_buf();
+
+        // Act
+        let reader = hound::WavReader::open(&path).expect("open");
+
+        // Assert
+        assert_eq!(reader.spec(), super::wav_spec());
+        writer.abandon().expect("abandon");
         let _ = fs::remove_dir_all(dir);
     }
 }
