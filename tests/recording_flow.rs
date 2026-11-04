@@ -87,6 +87,7 @@ fn startup_failure_leaves_no_worker_and_no_wav() {
     let dir = temp_dir("privacy");
     let harness = RecordingHarness::new(&dir);
     harness.fail_open(true);
+    harness.fail_system();
 
     // Act
     harness.start_default();
@@ -127,4 +128,56 @@ fn idle_stop_does_not_create_a_recording() {
     assert_eq!(harness.workers(), 0);
     assert!(wav_files(&dir).is_empty());
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn mixed_sources_are_summed_and_a_dead_loopback_still_saves() {
+    // Arrange
+    let mixed_dir = temp_dir("mix");
+    let mixed = RecordingHarness::new(&mixed_dir);
+    mixed.push_frames(480, 0.2);
+    mixed.push_system_frames(480, 0.2);
+    let degraded = temp_dir("loop");
+    let mic_only = RecordingHarness::new(&degraded);
+    mic_only.fail_system();
+    mic_only.push_frames(480, 0.25);
+    mic_only.set_overruns(2);
+
+    // Act
+    mixed.start_default();
+    mixed
+        .wait_phase(RecordingHarnessPhase::Recording)
+        .expect("recording");
+    mixed.stop();
+    mixed
+        .wait_phase(RecordingHarnessPhase::Idle)
+        .expect("saved");
+    mic_only.start_default();
+    mic_only
+        .wait_phase(RecordingHarnessPhase::Recording)
+        .expect("mic recording");
+    mic_only.stop();
+    let saved = mic_only
+        .wait_phase(RecordingHarnessPhase::Idle)
+        .expect("mic only");
+
+    // Assert
+    let wav = wav_files(&mixed_dir);
+    assert_eq!(wav.len(), 1);
+    let bytes = fs::read(&wav[0]).expect("wav");
+    let sample = i16::from_le_bytes([bytes[44], bytes[45]]);
+    assert!(sample > 8_000 && sample < 14_000);
+    assert!(saved
+        .notice
+        .unwrap_or("")
+        .contains("System audio is unavailable"));
+    let sidecar = fs::read_dir(&degraded)
+        .expect("dir")
+        .flatten()
+        .find(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .expect("sidecar");
+    let text = fs::read_to_string(sidecar.path()).expect("json");
+    assert!(text.contains("overrun"));
+    let _ = fs::remove_dir_all(mixed_dir);
+    let _ = fs::remove_dir_all(degraded);
 }

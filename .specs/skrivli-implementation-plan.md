@@ -179,24 +179,24 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M3.1 — Loopback worker and per-source transport
 
-- [ ] `infrastructure/audio/loopback.rs`: shared-mode `eRender` endpoint loopback on separate COM-owning native thread, format negotiation/conversion and packet timestamps.
-- [ ] Handle zero packets during silence as a normal state; optionally prototype silent-render keep-alive only after validating no audible output or adverse power behavior.
-- [ ] Select a proven bounded SPSC queue for each source. Define timestamped packet/block representation, maximum queue latency and overflow/drop/gap accounting. Do not invent a custom lock-free queue unless necessary.
+- [x] `infrastructure/audio/loopback.rs`: shared-mode `eRender` endpoint loopback on separate COM-owning native thread, format negotiation/conversion and packet timestamps.
+- [x] Handle zero packets during silence as a normal state; optionally prototype silent-render keep-alive only after validating no audible output or adverse power behavior.
+- [x] Select a proven bounded SPSC queue for each source. Define timestamped packet/block representation, maximum queue latency and overflow/drop/gap accounting. Do not invent a custom lock-free queue unless necessary.
 
 ### M3.2 — Deterministic mixer and drift correction
 
-- [ ] `domain/chunk_plan.rs`: pure mapping from QPC ticks to 48 kHz sample indices, with integer/rational conversion that avoids cumulative floating-point drift. Define session origin `t0` and treatment of latency, missing packets, overlaps and discontinuities.
-- [ ] `infrastructure/audio/mixer.rs`: emit 480-frame (10 ms) stereo blocks; wait for input until data available or block lags real time by about 150 ms, then fill absent source with zeros.
-- [ ] Implement source-specific gains (mic `1.0`, system `0.8` initially), stable summation and tested soft limiter. Capture gaps and overruns in diagnostics and sidecar metadata.
-- [ ] Handle clocks that drift apart (test ±100 ppm); document initial sparse-frame correction threshold (~20 ms) and migrate to adaptive resampling if artifacts are audible.
-- [ ] Add synthetic tests: different start times, silent output for 30 s, 5 ms gaps, overlapping/late packets, discontinuity, queue overrun, drift, clipping, missing source, and final tail drain.
+- [x] `domain/chunk_plan.rs`: pure mapping from QPC ticks to 48 kHz sample indices, with integer/rational conversion that avoids cumulative floating-point drift. Define session origin `t0` and treatment of latency, missing packets, overlaps and discontinuities.
+- [x] `infrastructure/audio/mixer.rs`: emit 480-frame (10 ms) stereo blocks; wait for input until data available or block lags real time by about 150 ms, then fill absent source with zeros.
+- [x] Implement source-specific gains (mic `1.0`, system `0.8` initially), stable summation and tested soft limiter. Capture gaps and overruns in diagnostics and sidecar metadata.
+- [x] Handle clocks that drift apart (test ±100 ppm); document initial sparse-frame correction threshold (~20 ms) and migrate to adaptive resampling if artifacts are audible.
+- [x] Add synthetic tests: different start times, silent output for 30 s, 5 ms gaps, overlapping/late packets, discontinuity, queue overrun, drift, clipping, missing source, and final tail drain.
 
 ### M3.3 — Live gain, meters and idle monitoring
 
-- [ ] `services/level_monitor.rs`: monitors selected devices while idle, stopping and fully releasing handles before a recording starts; resumes after save. Share underlying device-opening policy without parallel capture sessions fighting over endpoints.
-- [ ] Expose atomic peak snapshots for microphone, loopback and mixed output plus gain; GPUI polls near 30 Hz and renders in custom `ui/components/level_meter.rs` using GPUI Kit tokens.
-- [ ] Wire live mic gain slider, automatic gain toggle and system level display; ensure gain changes are applied to worker-owned processing state safely. Implement AGC only if enabled, initially off; target values per design document with smooth updates.
-- [ ] UI readouts use dBFS (−60 to 0), peak hold and clear text indication not color alone.
+- [x] `services/level_monitor.rs`: monitors selected devices while idle, stopping and fully releasing handles before a recording starts; resumes after save. Share underlying device-opening policy without parallel capture sessions fighting over endpoints.
+- [x] Expose atomic peak snapshots for microphone, loopback and mixed output plus gain; GPUI polls near 30 Hz and renders in custom `ui/components/level_meter.rs` using GPUI Kit tokens.
+- [x] Wire live mic gain slider, automatic gain toggle and system level display; ensure gain changes are applied to worker-owned processing state safely. Implement AGC only if enabled, initially off; target values per design document with smooth updates.
+- [x] UI readouts use dBFS (−60 to 0), peak hold and clear text indication not color alone.
 
 **Validate:** 10-minute manual two-source recording with intermittent silence, headphone mic and shared sync cue; document sync offset/drift, meter overhead, no timeline contraction during system silence.
 

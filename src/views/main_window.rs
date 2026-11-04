@@ -1,10 +1,12 @@
 //! Resizable shell: menus, Record and Recordings tabs, and the status strip.
 
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
 use gpui_kit::prelude::*;
@@ -20,15 +22,18 @@ use crate::app::state::{AppTab, Presentation, RecordPhase};
 use crate::domain::audio::{
     format_elapsed, resolve_endpoint, EndpointChoice, EndpointFlow, EndpointId,
 };
+use crate::domain::gain::{db_fs, format_gain};
 use crate::domain::window_frame::LogicalRect;
 use crate::infrastructure::audio::devices::DeviceCatalog;
+use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::storage::settings::{Settings, StoredEndpoint, StoredWindowBounds};
 use crate::infrastructure::windows::dialogs::pick_recordings_folder;
 use crate::infrastructure::windows::recordings_folder::open_recordings_folder;
 use crate::infrastructure::windows::shell_window;
+use crate::services::level_monitor::MonitorTargets;
 use crate::services::recording::{
     RecordPhase as ServicePhase, RecordSnapshot, RecordingHost, StartRequest, NOTICE_FALLBACK,
-    NOTICE_MIC,
+    NOTICE_MIC, NOTICE_MIC_MISSING, NOTICE_SYSTEM_FALLBACK, NOTICE_SYSTEM_MISSING,
 };
 
 use super::recording::record_tab;
@@ -46,11 +51,23 @@ pub(crate) struct MainWindow {
     commands: Receiver<BridgeMessage>,
     shutdown: ShutdownController,
     recording: RecordingHost,
+    levels: Arc<LevelSnapshot>,
+    gain_control: Arc<GainControl>,
+    targets: Arc<MonitorTargets>,
     catalog: DeviceCatalog,
     microphone: Entity<SelectState<SearchableVec<SharedString>>>,
     mic_labels: Vec<SharedString>,
     mic_choices: Vec<StoredEndpoint>,
     _mic_sub: Subscription,
+    system: Entity<SelectState<SearchableVec<SharedString>>>,
+    system_labels: Vec<SharedString>,
+    system_choices: Vec<StoredEndpoint>,
+    _system_sub: Subscription,
+    gain_slider: Entity<SliderState>,
+    _gain_sub: Subscription,
+    mic_meter: PeakHold,
+    system_meter: PeakHold,
+    _meters: Task<()>,
     started: Option<Instant>,
     exit_after_stop: bool,
     last_saved: Option<LogicalRect>,
@@ -67,6 +84,9 @@ impl MainWindow {
         commands: Receiver<BridgeMessage>,
         shutdown: ShutdownController,
         recording: RecordingHost,
+        levels: Arc<LevelSnapshot>,
+        gain_control: Arc<GainControl>,
+        targets: Arc<MonitorTargets>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -92,6 +112,40 @@ impl MainWindow {
                 }
             },
         );
+        let system_labels = vec![SharedString::from("Default output device")];
+        let system_choices = vec![StoredEndpoint::Default];
+        let system = cx.new(|cx| {
+            SelectState::new(
+                SearchableVec::new(system_labels.clone()),
+                Some(gpui_kit::component::IndexPath::new(0)),
+                window,
+                cx,
+            )
+        });
+        let system_sub = cx.subscribe_in(
+            &system,
+            window,
+            |this, _select, event: &SelectEvent<SearchableVec<SharedString>>, window, cx| {
+                if let SelectEvent::Confirm(Some(label)) = event {
+                    this.choose_system(label.clone(), window, cx);
+                }
+            },
+        );
+        let gain_slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(4.0)
+                .step(0.1)
+                .default_value(settings.mic_gain())
+        });
+        let gain_sub = cx.subscribe_in(
+            &gain_slider,
+            window,
+            |this, _slider, event: &SliderEvent, _window, cx| {
+                let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
+                this.set_slider_gain(value.start(), cx);
+            },
+        );
         let executor = cx.background_executor().clone();
         let bridge = cx.spawn_in(window, async move |this, async_cx| loop {
             executor.timer(Duration::from_millis(150)).await;
@@ -100,6 +154,26 @@ impl MainWindow {
                 break;
             }
         });
+        let meter_executor = cx.background_executor().clone();
+        let meters = cx.spawn_in(window, async move |this, async_cx| loop {
+            meter_executor.timer(Duration::from_millis(33)).await;
+            let step = this.update_in(async_cx, |view, _window, cx| {
+                if view.shutdown.is_requested() {
+                    return false;
+                }
+                if view.sample_meters() {
+                    cx.notify();
+                }
+                true
+            });
+            if !matches!(step, Ok(true)) {
+                break;
+            }
+        });
+        targets.set(
+            endpoint_token(settings.microphone()),
+            endpoint_token(settings.system_audio()),
+        );
         let session = cx.entity();
         window.on_window_should_close(cx, move |window, cx| {
             session.update(cx, |view, cx| view.on_close_requested(window, cx))
@@ -113,11 +187,23 @@ impl MainWindow {
             commands,
             shutdown,
             recording,
+            levels,
+            gain_control,
+            targets,
             catalog: DeviceCatalog::empty(),
             microphone,
             mic_labels: labels,
             mic_choices: choices,
             _mic_sub: mic_sub,
+            system,
+            system_labels,
+            system_choices,
+            _system_sub: system_sub,
+            gain_slider,
+            _gain_sub: gain_sub,
+            mic_meter: PeakHold::new(),
+            system_meter: PeakHold::new(),
+            _meters: meters,
             started: None,
             exit_after_stop: false,
             last_saved: None,
@@ -147,6 +233,16 @@ impl MainWindow {
             if !self.presentation.inputs_locked() {
                 self.settings.set_microphone(choice);
                 self.writer.save(self.settings.clone());
+                self.publish_targets();
+            }
+            cx.notify();
+            return;
+        }
+        if let AppCommand::SelectSystem(choice) = command {
+            if !self.presentation.inputs_locked() {
+                self.settings.set_system_audio(choice);
+                self.writer.save(self.settings.clone());
+                self.publish_targets();
             }
             cx.notify();
             return;
@@ -321,6 +417,47 @@ impl MainWindow {
         self.handle(AppCommand::SelectMicrophone(choice), _window, cx);
     }
 
+    fn choose_system(&mut self, label: SharedString, window: &mut Window, cx: &mut Context<Self>) {
+        if self.presentation.inputs_locked() {
+            return;
+        }
+        let Some(index) = self.system_labels.iter().position(|item| item == &label) else {
+            return;
+        };
+        let Some(choice) = self.system_choices.get(index).cloned() else {
+            return;
+        };
+        self.handle(AppCommand::SelectSystem(choice), window, cx);
+    }
+
+    fn set_slider_gain(&mut self, gain: f32, cx: &mut Context<Self>) {
+        self.gain_control.set_slider(gain);
+        self.settings.set_mic_gain(self.gain_control.slider());
+        self.writer.save(self.settings.clone());
+        cx.notify();
+    }
+
+    fn set_agc(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.gain_control.set_agc_enabled(enabled);
+        self.settings.set_agc_enabled(enabled);
+        self.writer.save(self.settings.clone());
+        cx.notify();
+    }
+
+    fn sample_meters(&mut self) -> bool {
+        let mic = self.mic_meter.update(self.levels.take_mic());
+        let system = self.system_meter.update(self.levels.take_system());
+        let _mixed = self.levels.take_mixed();
+        mic || system
+    }
+
+    fn publish_targets(&self) {
+        self.targets.set(
+            endpoint_token(self.settings.microphone()),
+            endpoint_token(self.settings.system_audio()),
+        );
+    }
+
     fn apply_snapshot(&mut self, snapshot: RecordSnapshot, window: &mut Window) {
         let phase = match snapshot.phase {
             ServicePhase::Idle => RecordPhase::Idle,
@@ -375,6 +512,34 @@ impl MainWindow {
             self.writer.save(self.settings.clone());
         }
         self.install_mics(labels, choices, selected, window, cx);
+        let mut system_labels = vec![SharedString::from("Default output device")];
+        let mut system_choices = vec![StoredEndpoint::Default];
+        for device in &self.catalog.render {
+            if !device.is_active() {
+                continue;
+            }
+            let mut label = device.name().to_string();
+            if system_labels
+                .iter()
+                .any(|existing| existing.as_ref() == label)
+            {
+                label.push_str(" (2)");
+            }
+            system_labels.push(SharedString::from(label));
+            system_choices.push(StoredEndpoint::explicit(device.id().as_str()));
+        }
+        let system_selected = system_choices
+            .iter()
+            .position(|choice| choice == self.settings.system_audio())
+            .unwrap_or(0);
+        if system_selected == 0 && !matches!(self.settings.system_audio(), StoredEndpoint::Default)
+        {
+            self.presentation.set_notice(Some(NOTICE_SYSTEM_FALLBACK));
+            self.settings.set_system_audio(StoredEndpoint::Default);
+            self.writer.save(self.settings.clone());
+        }
+        self.install_system(system_labels, system_choices, system_selected, window, cx);
+        self.publish_targets();
     }
 
     fn install_mics(
@@ -407,48 +572,102 @@ impl MainWindow {
         self.mic_choices = choices;
     }
 
-    fn begin_recording(&mut self) {
-        let endpoint_id = match self.settings.microphone().clone() {
-            StoredEndpoint::Default => self
-                .catalog
-                .default_capture
-                .as_ref()
-                .map(|id| id.as_str().to_string())
-                .unwrap_or_default(),
-            StoredEndpoint::Explicit(id) => {
-                let Some(endpoint) = EndpointId::new(id) else {
-                    self.presentation.set_notice(Some(NOTICE_MIC));
-                    return;
-                };
-                match resolve_endpoint(
-                    &EndpointChoice::Explicit(endpoint),
-                    EndpointFlow::Capture,
-                    &self.catalog.capture,
-                    self.catalog.default_capture.as_ref(),
-                ) {
-                    Ok(resolved) => {
-                        if resolved.fell_back() {
-                            self.presentation.set_notice(Some(NOTICE_FALLBACK));
-                        }
-                        tracing::debug!(microphone = resolved.name(), "microphone resolved");
-                        resolved.id().as_str().to_string()
-                    }
-                    Err(_) => {
-                        self.presentation.set_notice(Some(NOTICE_MIC));
-                        return;
-                    }
+    fn install_system(
+        &mut self,
+        labels: Vec<SharedString>,
+        choices: Vec<StoredEndpoint>,
+        selected: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let system = cx.new(|cx| {
+            SelectState::new(
+                SearchableVec::new(labels.clone()),
+                Some(gpui_kit::component::IndexPath::new(selected)),
+                window,
+                cx,
+            )
+        });
+        self._system_sub = cx.subscribe_in(
+            &system,
+            window,
+            |this, _select, event: &SelectEvent<SearchableVec<SharedString>>, window, cx| {
+                if let SelectEvent::Confirm(Some(label)) = event {
+                    this.choose_system(label.clone(), window, cx);
                 }
+            },
+        );
+        self.system = system;
+        self.system_labels = labels;
+        self.system_choices = choices;
+    }
+
+    fn begin_recording(&mut self) {
+        let mic = resolve_choice(
+            self.settings.microphone(),
+            EndpointFlow::Capture,
+            &self.catalog.capture,
+            self.catalog.default_capture.as_ref(),
+        );
+        let system = resolve_choice(
+            self.settings.system_audio(),
+            EndpointFlow::Render,
+            &self.catalog.render,
+            self.catalog.default_render.as_ref(),
+        );
+        let (open_microphone, endpoint_id, microphone_id, mut notice) = match mic {
+            Ok(resolved) => {
+                let id = resolved.id;
+                let label = if id.is_empty() {
+                    "default".to_string()
+                } else {
+                    id.clone()
+                };
+                let notice = resolved.fell_back.then_some(NOTICE_FALLBACK);
+                (true, id, label, notice)
+            }
+            Err(()) => (
+                false,
+                String::new(),
+                "unavailable".to_string(),
+                Some(NOTICE_MIC_MISSING),
+            ),
+        };
+        let (system_endpoint_id, system_audio_id) = match system {
+            Ok(resolved) => {
+                if resolved.fell_back && notice.is_none() {
+                    notice = Some(NOTICE_SYSTEM_FALLBACK);
+                }
+                let label = if resolved.id.is_empty() {
+                    "default".to_string()
+                } else {
+                    resolved.id.clone()
+                };
+                (Some(resolved.id), label)
+            }
+            Err(()) => {
+                if notice.is_none() || !open_microphone {
+                    notice = Some(if open_microphone {
+                        NOTICE_SYSTEM_MISSING
+                    } else {
+                        NOTICE_MIC
+                    });
+                }
+                (None, "unavailable".to_string())
             }
         };
-        let microphone_id = if endpoint_id.is_empty() {
-            "default".to_string()
-        } else {
-            endpoint_id.clone()
-        };
+        if !open_microphone && system_endpoint_id.is_none() {
+            self.presentation.set_notice(Some(NOTICE_MIC));
+            return;
+        }
         self.recording.start(StartRequest {
             directory: self.settings.recordings_directory().to_path_buf(),
             endpoint_id,
             microphone_id,
+            system_endpoint_id,
+            system_audio_id,
+            open_microphone,
+            degraded_notice: notice,
         });
     }
 
@@ -478,6 +697,82 @@ impl MainWindow {
 
 fn apply(state: &mut Presentation, command: AppCommand) -> Effect {
     crate::app::actions::apply_command(state, command)
+}
+
+struct ResolvedChoice {
+    id: String,
+    fell_back: bool,
+}
+
+fn resolve_choice(
+    choice: &StoredEndpoint,
+    flow: EndpointFlow,
+    devices: &[crate::domain::audio::EndpointDescriptor],
+    default_id: Option<&EndpointId>,
+) -> Result<ResolvedChoice, ()> {
+    let endpoint_choice = match choice {
+        StoredEndpoint::Default => {
+            return Ok(ResolvedChoice {
+                id: default_id
+                    .map(|id| id.as_str().to_string())
+                    .unwrap_or_default(),
+                fell_back: false,
+            });
+        }
+        StoredEndpoint::Explicit(id) => {
+            let Some(endpoint) = EndpointId::new(id) else {
+                return Err(());
+            };
+            EndpointChoice::Explicit(endpoint)
+        }
+    };
+    match resolve_endpoint(&endpoint_choice, flow, devices, default_id) {
+        Ok(resolved) => {
+            tracing::debug!(endpoint = resolved.name(), "endpoint resolved");
+            Ok(ResolvedChoice {
+                id: resolved.id().as_str().to_string(),
+                fell_back: resolved.fell_back(),
+            })
+        }
+        Err(_) => Err(()),
+    }
+}
+
+fn endpoint_token(choice: &StoredEndpoint) -> String {
+    match choice {
+        StoredEndpoint::Default => String::new(),
+        StoredEndpoint::Explicit(id) => id.clone(),
+    }
+}
+
+struct PeakHold {
+    level: f32,
+    hold: f32,
+    hold_at: Instant,
+}
+
+impl PeakHold {
+    fn new() -> Self {
+        Self {
+            level: -60.0,
+            hold: -60.0,
+            hold_at: Instant::now(),
+        }
+    }
+
+    fn update(&mut self, linear: f32) -> bool {
+        let db = db_fs(linear);
+        let mut changed = (db - self.level).abs() > 0.4;
+        self.level = db;
+        if db >= self.hold || self.hold_at.elapsed() >= Duration::from_secs(1) {
+            if (self.hold - db).abs() > 0.4 {
+                changed = true;
+            }
+            self.hold = db;
+            self.hold_at = Instant::now();
+        }
+        changed
+    }
 }
 
 fn logical_bounds(window: &Window) -> Option<LogicalRect> {
@@ -519,16 +814,32 @@ impl Render for MainWindow {
         let entity = cx.entity();
         let browse_entity = entity.clone();
         let toggle_entity = entity.clone();
+        let agc_entity = entity.clone();
+        let gain_value = if self.settings.agc_enabled()
+            && matches!(phase, RecordPhase::Recording | RecordPhase::Starting)
+        {
+            self.gain_control.effective()
+        } else {
+            self.settings.mic_gain()
+        };
         let body = match self.presentation.tab() {
             AppTab::Record => record_tab(
                 &self.microphone,
+                &self.system,
+                &self.gain_slider,
                 folder,
                 locked,
                 show_stop,
                 phase == RecordPhase::Stopping,
+                self.settings.agc_enabled(),
+                SharedString::from(format_gain(gain_value)),
                 SharedString::from(elapsed),
                 SharedString::from(phase_label),
                 notice,
+                self.mic_meter.level,
+                self.mic_meter.hold,
+                self.system_meter.level,
+                self.system_meter.hold,
                 move |_event, window, cx| {
                     browse_entity.update(cx, |view, cx| {
                         view.handle(AppCommand::BrowseRecordings, window, cx);
@@ -544,6 +855,10 @@ impl Render for MainWindow {
                         view.handle(command, window, cx);
                     });
                 },
+                move |checked, _window, cx| {
+                    agc_entity.update(cx, |view, cx| view.set_agc(*checked, cx));
+                },
+                cx,
             )
             .into_any_element(),
             AppTab::Recordings => recordings_placeholder().into_any_element(),

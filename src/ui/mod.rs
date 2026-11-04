@@ -1,1 +1,3 @@
-//! Kit overrides and custom controls. None are implemented in the foundation milestone.
+//! Kit overrides and custom controls.
+
+pub(crate) mod components;

@@ -9,7 +9,11 @@ use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_IGNORE_MERGE
 
 use crate::common::error::AppError;
 
-pub(crate) const SCHEMA_VERSION: u32 = 2;
+pub(crate) const SCHEMA_VERSION: u32 = 3;
+
+fn default_mic_gain() -> f32 {
+    1.0
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,7 +80,7 @@ impl StoredEndpoint {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Settings {
     schema_version: u32,
     recordings_directory: PathBuf,
@@ -91,6 +95,10 @@ pub(crate) struct Settings {
     microphone: StoredEndpoint,
     #[serde(default)]
     system_audio: StoredEndpoint,
+    #[serde(default = "default_mic_gain")]
+    mic_gain: f32,
+    #[serde(default)]
+    agc_enabled: bool,
 }
 
 impl Settings {
@@ -111,6 +119,8 @@ impl Settings {
             tray_explanation_seen: false,
             microphone: StoredEndpoint::Default,
             system_audio: StoredEndpoint::Default,
+            mic_gain: default_mic_gain(),
+            agc_enabled: false,
         })
     }
 
@@ -162,9 +172,24 @@ impl Settings {
         self.microphone = microphone;
     }
 
-    #[cfg(test)]
     pub(crate) fn set_system_audio(&mut self, system_audio: StoredEndpoint) {
         self.system_audio = system_audio;
+    }
+
+    pub(crate) fn mic_gain(&self) -> f32 {
+        self.mic_gain
+    }
+
+    pub(crate) fn set_mic_gain(&mut self, gain: f32) {
+        self.mic_gain = crate::domain::gain::clamp_slider_gain(gain);
+    }
+
+    pub(crate) fn agc_enabled(&self) -> bool {
+        self.agc_enabled
+    }
+
+    pub(crate) fn set_agc_enabled(&mut self, enabled: bool) {
+        self.agc_enabled = enabled;
     }
 
     pub(crate) fn set_recordings_directory(&mut self, directory: PathBuf) -> Result<(), AppError> {
@@ -242,6 +267,7 @@ fn normalize(mut settings: Settings) -> Option<Settings> {
     }
     settings.microphone = clean_endpoint(settings.microphone);
     settings.system_audio = clean_endpoint(settings.system_audio);
+    settings.mic_gain = crate::domain::gain::clamp_slider_gain(settings.mic_gain);
     settings.schema_version = SCHEMA_VERSION;
     Some(settings)
 }
@@ -439,6 +465,8 @@ mod tests {
         assert_eq!(loaded.schema_version, SCHEMA_VERSION);
         assert_eq!(loaded.microphone(), &StoredEndpoint::Default);
         assert_eq!(loaded.system_audio(), &StoredEndpoint::Default);
+        assert!((loaded.mic_gain() - 1.0).abs() < 0.001);
+        assert!(!loaded.agc_enabled());
         let mut updated = loaded.clone();
         updated.set_system_audio(StoredEndpoint::explicit("{render}"));
         assert!(matches!(

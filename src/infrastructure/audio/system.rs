@@ -10,7 +10,7 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 
 use crate::common::error::AppError;
 use crate::domain::audio::CivilTime;
-use crate::services::recording::{FreeSpace, RecordingClock};
+use crate::services::recording::{FreeSpace, PerformanceCounter, RecordingClock};
 
 pub(crate) struct SystemClock;
 
@@ -40,6 +40,14 @@ impl RecordingClock for SystemClock {
             minute: 0,
             second: 0,
         })
+    }
+}
+
+pub(crate) struct QpcCounter;
+
+impl PerformanceCounter for QpcCounter {
+    fn sample(&self) -> (u64, u64) {
+        super::capture::qpc_now().unwrap_or((0, 0))
     }
 }
 

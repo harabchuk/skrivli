@@ -13,11 +13,15 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::common::error::AppError;
-use crate::domain::audio::CivilTime;
+use crate::domain::audio::{CivilTime, SessionOrigin, INTERNAL_SAMPLE_RATE};
 use crate::domain::ids::RecordingId;
+use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
+use crate::infrastructure::audio::mixer::Mixer;
 use crate::infrastructure::audio::queue::AudioBlock;
 use crate::infrastructure::files::sidecar::{write_sidecar, Sidecar};
 use crate::infrastructure::files::wav::{WavWrite, WavWriter};
+
+use super::lease::EndpointLease;
 
 /// Free space required before a recording starts.
 pub(crate) const FREE_SPACE_FLOOR_BYTES: u64 = 200 * 1024 * 1024;
@@ -34,6 +38,12 @@ pub(crate) const NOTICE_SAVE: &str = "Could not save the recording.";
 pub(crate) const NOTICE_LIMIT: &str = "Recording stopped because the file reached its size limit.";
 pub(crate) const NOTICE_FALLBACK: &str =
     "The selected microphone is unavailable. Using the Windows default.";
+pub(crate) const NOTICE_SYSTEM_FALLBACK: &str =
+    "The selected output is unavailable. Using the Windows default.";
+pub(crate) const NOTICE_SYSTEM_MISSING: &str =
+    "System audio is unavailable. Recording the microphone with silence on that side.";
+pub(crate) const NOTICE_MIC_MISSING: &str =
+    "The microphone is unavailable. Recording system audio with silence on that side.";
 pub(crate) const NOTICE_RECOVERED: &str = "A previous recording was recovered.";
 pub(crate) const NOTICE_RECOVER_FAILED: &str = "A previous recording could not be recovered.";
 
@@ -77,7 +87,16 @@ pub(crate) trait CaptureStream: Send {
 }
 
 pub(crate) trait CapturePort: Send {
-    fn open(&mut self, endpoint_id: &str) -> Result<Box<dyn CaptureStream>, CaptureError>;
+    fn open(
+        &mut self,
+        endpoint_id: &str,
+        origin: SessionOrigin,
+    ) -> Result<Box<dyn CaptureStream>, CaptureError>;
+}
+
+/// QPC sample used to build the session origin and to decide mix lateness.
+pub(crate) trait PerformanceCounter: Send {
+    fn sample(&self) -> (u64, u64);
 }
 
 pub(crate) trait RecordingClock: Send {
@@ -93,6 +112,23 @@ pub(crate) struct StartRequest {
     pub(crate) directory: PathBuf,
     pub(crate) endpoint_id: String,
     pub(crate) microphone_id: String,
+    /// `None` skips loopback and records silence on the system side.
+    pub(crate) system_endpoint_id: Option<String>,
+    pub(crate) system_audio_id: String,
+    pub(crate) open_microphone: bool,
+    /// Shown instead of the saved notice when a chosen device was substituted.
+    pub(crate) degraded_notice: Option<&'static str>,
+}
+
+pub(crate) struct RecordingEngine {
+    pub(crate) mic: Box<dyn CapturePort>,
+    pub(crate) system: Box<dyn CapturePort>,
+    pub(crate) clock: Box<dyn RecordingClock>,
+    pub(crate) space: Box<dyn FreeSpace>,
+    pub(crate) performance: Box<dyn PerformanceCounter>,
+    pub(crate) levels: Arc<LevelSnapshot>,
+    pub(crate) gain: Arc<GainControl>,
+    pub(crate) lease: Arc<EndpointLease>,
 }
 
 enum HostCommand {
@@ -142,9 +178,7 @@ impl RecordingHost {
 }
 
 pub(crate) fn spawn_recording_host(
-    mut port: Box<dyn CapturePort>,
-    clock: Box<dyn RecordingClock>,
-    space: Box<dyn FreeSpace>,
+    mut engine: RecordingEngine,
     emit: Box<dyn Fn(RecordSnapshot) + Send>,
     tray_recording: Arc<AtomicBool>,
 ) -> (RecordingHost, JoinHandle<()>) {
@@ -160,9 +194,7 @@ pub(crate) fn spawn_recording_host(
     let handle = thread::spawn(move || {
         host_loop(
             rx,
-            &mut *port,
-            &*clock,
-            &*space,
+            &mut engine,
             &*emit,
             &thread_stop,
             &workers,
@@ -172,12 +204,9 @@ pub(crate) fn spawn_recording_host(
     (host, handle)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn host_loop(
     rx: Receiver<HostCommand>,
-    port: &mut dyn CapturePort,
-    clock: &dyn RecordingClock,
-    space: &dyn FreeSpace,
+    engine: &mut RecordingEngine,
     emit: &dyn Fn(RecordSnapshot),
     stop: &AtomicBool,
     workers: &AtomicUsize,
@@ -191,7 +220,7 @@ fn host_loop(
                 }
                 workers.fetch_add(1, Ordering::AcqRel);
                 tray_recording.store(true, Ordering::Release);
-                let snapshot = run_session(port, clock, space, &request, stop, emit);
+                let snapshot = run_session(engine, &request, stop, emit);
                 workers.fetch_sub(1, Ordering::AcqRel);
                 tray_recording.store(false, Ordering::Release);
                 emit(snapshot);
@@ -203,19 +232,17 @@ fn host_loop(
 }
 
 pub(crate) fn run_session(
-    port: &mut dyn CapturePort,
-    clock: &dyn RecordingClock,
-    space: &dyn FreeSpace,
+    engine: &mut RecordingEngine,
     request: &StartRequest,
     stop: &AtomicBool,
     emit: &dyn Fn(RecordSnapshot),
 ) -> RecordSnapshot {
     emit(RecordSnapshot {
         phase: RecordPhase::Starting,
-        notice: None,
+        notice: request.degraded_notice,
         id: None,
     });
-    match session_body(port, clock, space, request, stop, emit) {
+    match session_body(engine, request, stop, emit) {
         Ok(snapshot) => snapshot,
         Err(notice) => RecordSnapshot {
             phase: RecordPhase::Error,
@@ -225,18 +252,27 @@ pub(crate) fn run_session(
     }
 }
 
+struct LeaseGuard(Arc<EndpointLease>);
+
+impl Drop for LeaseGuard {
+    fn drop(&mut self) {
+        self.0.release_recording();
+    }
+}
+
 fn session_body(
-    port: &mut dyn CapturePort,
-    clock: &dyn RecordingClock,
-    space: &dyn FreeSpace,
+    engine: &mut RecordingEngine,
     request: &StartRequest,
     stop: &AtomicBool,
     emit: &dyn Fn(RecordSnapshot),
 ) -> Result<RecordSnapshot, &'static str> {
-    let available = space.available_bytes(&request.directory).map_err(|error| {
-        tracing::error!(error = %error, "free space was not read");
-        NOTICE_DISK
-    })?;
+    let available = engine
+        .space
+        .available_bytes(&request.directory)
+        .map_err(|error| {
+            tracing::error!(error = %error, "free space was not read");
+            NOTICE_DISK
+        })?;
     if available < FREE_SPACE_FLOOR_BYTES {
         return Err(NOTICE_DISK);
     }
@@ -244,8 +280,11 @@ fn session_body(
         tracing::error!(error = %error, "recordings folder is not writable");
         return Err(NOTICE_FOLDER);
     }
-    let started_ms = clock.unix_millis();
-    let when = clock.local();
+    let lease = Arc::clone(&engine.lease);
+    lease.acquire_recording();
+    let _lease = LeaseGuard(lease);
+    let started_ms = engine.clock.unix_millis();
+    let when = engine.clock.local();
     let mut wav = match WavWriter::create(&request.directory, when) {
         Ok(wav) => wav,
         Err(error) => {
@@ -253,74 +292,147 @@ fn session_body(
             return Err(error.user_message());
         }
     };
-    let mut stream = match port.open(&request.endpoint_id) {
-        Ok(stream) => stream,
+    let (ticks, frequency) = engine.performance.sample();
+    let origin = match SessionOrigin::new(ticks, frequency, INTERNAL_SAMPLE_RATE) {
+        Some(origin) => origin,
+        None => {
+            let _ = wav.abandon();
+            return Err(NOTICE_START);
+        }
+    };
+    let mic_result = if request.open_microphone {
+        engine.mic.open(&request.endpoint_id, origin)
+    } else {
+        Err(CaptureError::Unavailable)
+    };
+    let system_result = match &request.system_endpoint_id {
+        Some(id) => engine.system.open(id, origin),
+        None => Err(CaptureError::Unavailable),
+    };
+    let mut degraded = request.degraded_notice;
+    let mic_error = mic_result.as_ref().err().copied();
+    let mut mic = match mic_result {
+        Ok(stream) => Some(stream),
         Err(error) => {
-            tracing::error!("microphone capture did not start");
-            if let Err(abandon) = wav.abandon() {
-                tracing::error!(error = %abandon, "partial recording was not removed");
+            if system_result.is_err() {
+                tracing::error!("microphone capture did not start");
+                if let Err(abandon) = wav.abandon() {
+                    tracing::error!(error = %abandon, "partial recording was not removed");
+                }
+                return Err(capture_notice(error));
             }
-            return Err(capture_notice(error));
+            degraded = Some(NOTICE_MIC_MISSING);
+            let _ = error;
+            None
+        }
+    };
+    let mut system = match system_result {
+        Ok(stream) => Some(stream),
+        Err(error) => {
+            if mic.is_none() {
+                tracing::error!("system audio capture did not start");
+                if let Err(abandon) = wav.abandon() {
+                    tracing::error!(error = %abandon, "partial recording was not removed");
+                }
+                return Err(mic_error.map(capture_notice).unwrap_or(NOTICE_START));
+            }
+            tracing::error!("system audio capture did not start");
+            let _ = error;
+            if degraded.is_none() {
+                degraded = Some(NOTICE_SYSTEM_MISSING);
+            }
+            None
         }
     };
     let id = RecordingId::from_raw(started_ms.max(1));
     emit(RecordSnapshot {
         phase: RecordPhase::Recording,
-        notice: None,
+        notice: degraded,
         id: Some(id),
     });
+    let mut mixer = Mixer::new(
+        system.is_some(),
+        Arc::clone(&engine.gain),
+        Arc::clone(&engine.levels),
+    );
     let mut frames = 0_u64;
     let mut problems = Vec::new();
     let mut failed: Option<&'static str> = None;
     let mut limited = false;
     loop {
-        match stream.pull() {
-            Ok(Some(block)) => {
-                note_problem(&mut problems, &block);
-                let samples = samples_for_block(&block, frames, &mut problems);
-                match wav.write_samples(&samples) {
-                    Ok(WavWrite::Wrote { frames: written }) => {
-                        frames = frames.saturating_add(written);
-                    }
-                    Ok(WavWrite::SafeStop { frames: written }) => {
-                        frames = frames.saturating_add(written);
-                        note(&mut problems, "safe_stop");
-                        limited = true;
-                        break;
-                    }
-                    Err(error) => {
-                        tracing::error!(error = %error, "recording write failed");
-                        failed = Some(NOTICE_SAVE);
-                        break;
-                    }
+        let stopping = stop.load(Ordering::Acquire);
+        let mic_packet = pull_source(mic.as_mut(), &mut problems, "capture");
+        let system_packet = pull_source(system.as_mut(), &mut problems, "loopback");
+        if let Some(block) = mic_packet {
+            mixer.push_mic(block);
+        }
+        if let Some(block) = system_packet {
+            mixer.push_system(block);
+        }
+        let now = frame_now(origin, engine.performance.as_ref());
+        let mut wrote = false;
+        while let Some(mixed) = mixer.pull(now, stopping) {
+            debug_assert_eq!(mixed.frames as usize * 2, mixed.samples.len());
+            match wav.write_samples(&mixed.samples) {
+                Ok(WavWrite::Wrote { frames: written }) => {
+                    frames = frames.saturating_add(written);
+                    wrote = true;
                 }
-                if limited {
+                Ok(WavWrite::SafeStop { frames: written }) => {
+                    frames = frames.saturating_add(written);
+                    note(&mut problems, "safe_stop");
+                    limited = true;
+                    break;
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "recording write failed");
+                    failed = Some(NOTICE_SAVE);
+                    limited = true;
                     break;
                 }
             }
-            Ok(None) => {
-                if stop.load(Ordering::Acquire) {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(5));
-            }
-            Err(error) => {
-                tracing::error!("capture stopped during recording");
-                note(&mut problems, "capture");
-                failed = Some(capture_notice(error));
-                break;
-            }
+        }
+        if limited {
+            break;
+        }
+        let mic_open = mic.is_some();
+        let system_open = system.is_some();
+        if stopping && !wrote {
+            break;
+        }
+        if !mic_open && !system_open && !wrote {
+            break;
+        }
+        if !wrote {
+            thread::sleep(Duration::from_millis(5));
         }
     }
     emit(RecordSnapshot {
         phase: RecordPhase::Stopping,
-        notice: None,
+        notice: degraded,
         id: Some(id),
     });
-    if stream.overruns() > 0 {
+    let diagnostics = mixer.diagnostics();
+    if diagnostics.gaps > 0 {
+        note(&mut problems, "gap");
+    }
+    if diagnostics.discontinuities > 0 {
+        note(&mut problems, "discontinuity");
+    }
+    if diagnostics.drift_drops > 0 || diagnostics.drift_duplicates > 0 {
+        note(&mut problems, "drift");
+    }
+    let overruns = mic.as_ref().map(|stream| stream.overruns()).unwrap_or(0)
+        + system.as_ref().map(|stream| stream.overruns()).unwrap_or(0);
+    if overruns > 0 {
         note(&mut problems, "overrun");
     }
-    stream.close();
+    if let Some(stream) = mic.as_mut() {
+        stream.close();
+    }
+    if let Some(stream) = system.as_mut() {
+        stream.close();
+    }
     if let Some(notice) = failed {
         let _ = wav.finalize();
         return Err(notice);
@@ -332,22 +444,26 @@ fn session_body(
             return Err(NOTICE_SAVE);
         }
     };
-    let ended_ms = clock.unix_millis().max(started_ms);
-    let duration_ms =
-        frames.saturating_mul(1_000) / u64::from(crate::domain::audio::INTERNAL_SAMPLE_RATE);
+    let ended_ms = engine.clock.unix_millis().max(started_ms);
+    let duration_ms = frames.saturating_mul(1_000) / u64::from(INTERNAL_SAMPLE_RATE);
     let sidecar = Sidecar {
         id: id.raw(),
         started_at_unix_ms: started_ms,
         ended_at_unix_ms: ended_ms,
         duration_ms,
         microphone_id: request.microphone_id.clone(),
+        system_audio_id: request.system_audio_id.clone(),
         problems,
     };
     if let Err(error) = write_sidecar(&path, &sidecar) {
         tracing::error!(error = %error, "recording sidecar was not written");
         return Err(NOTICE_SAVE);
     }
-    let notice = if limited { NOTICE_LIMIT } else { NOTICE_SAVED };
+    let notice = if limited {
+        NOTICE_LIMIT
+    } else {
+        degraded.unwrap_or(NOTICE_SAVED)
+    };
     Ok(RecordSnapshot {
         phase: RecordPhase::Idle,
         notice: Some(notice),
@@ -355,27 +471,25 @@ fn session_body(
     })
 }
 
-fn samples_for_block(block: &AudioBlock, frames: u64, problems: &mut Vec<String>) -> Vec<f32> {
-    let mut output = Vec::new();
-    let mut samples = block.samples.as_slice();
-    if let Some(index) = block.timeline_frame {
-        if index > frames {
-            let gap = (index - frames).min(48_000 * 5);
-            note(problems, "gap");
-            output.resize((gap as usize).saturating_mul(2), 0.0);
-        } else if index < frames {
-            let skip = ((frames - index) as usize).saturating_mul(2);
-            let skip = skip.min(samples.len());
-            samples = &samples[skip..];
-        }
-    }
-    output.extend_from_slice(samples);
-    output
+fn frame_now(origin: SessionOrigin, performance: &dyn PerformanceCounter) -> u64 {
+    let (ticks, _) = performance.sample();
+    origin.sample_index(ticks).unwrap_or(0)
 }
 
-fn note_problem(problems: &mut Vec<String>, block: &AudioBlock) {
-    if block.discontinuity {
-        note(problems, "discontinuity");
+fn pull_source(
+    stream: Option<&mut Box<dyn CaptureStream>>,
+    problems: &mut Vec<String>,
+    code: &str,
+) -> Option<AudioBlock> {
+    let stream = stream?;
+    match stream.pull() {
+        Ok(block) => block,
+        Err(_) => {
+            tracing::error!("capture stopped during recording");
+            note(problems, code);
+            stream.close();
+            None
+        }
     }
 }
 
@@ -406,6 +520,7 @@ struct SharedCapture {
 struct FakeState {
     error: Option<CaptureError>,
     blocks: std::collections::VecDeque<AudioBlock>,
+    overruns: u64,
 }
 
 struct FakeStream {
@@ -416,12 +531,17 @@ struct FakeStream {
 }
 
 impl CapturePort for SharedCapture {
-    fn open(&mut self, _endpoint_id: &str) -> Result<Box<dyn CaptureStream>, CaptureError> {
+    fn open(
+        &mut self,
+        _endpoint_id: &str,
+        _origin: SessionOrigin,
+    ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         let mut state = lock_fake(&self.inner);
         if let Some(error) = state.error.take() {
             return Err(error);
         }
         let blocks = std::mem::take(&mut state.blocks);
+        let overruns = state.overruns;
         drop(state);
         let stop = Arc::new(AtomicBool::new(false));
         let live = Arc::clone(&self.live);
@@ -437,7 +557,7 @@ impl CapturePort for SharedCapture {
             blocks,
             stop,
             worker: Some(worker),
-            overruns: 0,
+            overruns,
         }))
     }
 }
@@ -513,6 +633,7 @@ pub struct RecordingHarness {
     host: RecordingHost,
     join: Option<JoinHandle<()>>,
     capture: SharedCapture,
+    system: SharedCapture,
     space: Arc<AtomicU64>,
     events: Receiver<RecordSnapshot>,
     directory: PathBuf,
@@ -524,27 +645,43 @@ impl RecordingHarness {
             inner: Arc::new(Mutex::new(FakeState {
                 error: None,
                 blocks: std::collections::VecDeque::new(),
+                overruns: 0,
+            })),
+            live: Arc::new(AtomicUsize::new(0)),
+        };
+        let system = SharedCapture {
+            inner: Arc::new(Mutex::new(FakeState {
+                error: None,
+                blocks: std::collections::VecDeque::new(),
+                overruns: 0,
             })),
             live: Arc::new(AtomicUsize::new(0)),
         };
         let space = Arc::new(AtomicU64::new(u64::MAX));
         let (tx, rx) = mpsc::channel();
         let (host, join) = spawn_recording_host(
-            Box::new(capture.clone()),
-            Box::new(SharedClock {
-                unix_ms: 1_700_000_000_000,
-                local: CivilTime {
-                    year: 2026,
-                    month: 11,
-                    day: 4,
-                    hour: 13,
-                    minute: 5,
-                    second: 6,
-                },
-            }),
-            Box::new(SharedSpace {
-                bytes: Arc::clone(&space),
-            }),
+            RecordingEngine {
+                mic: Box::new(capture.clone()),
+                system: Box::new(system.clone()),
+                clock: Box::new(SharedClock {
+                    unix_ms: 1_700_000_000_000,
+                    local: CivilTime {
+                        year: 2026,
+                        month: 11,
+                        day: 4,
+                        hour: 13,
+                        minute: 5,
+                        second: 6,
+                    },
+                }),
+                space: Box::new(SharedSpace {
+                    bytes: Arc::clone(&space),
+                }),
+                performance: Box::new(FixedCounter),
+                levels: Arc::new(LevelSnapshot::new()),
+                gain: Arc::new(GainControl::new(1.0, false)),
+                lease: Arc::new(EndpointLease::new()),
+            },
             Box::new(move |snapshot| {
                 let _ = tx.send(snapshot);
             }),
@@ -554,6 +691,7 @@ impl RecordingHarness {
             host,
             join: Some(join),
             capture,
+            system,
             space,
             events: rx,
             directory: directory.to_path_buf(),
@@ -574,17 +712,21 @@ impl RecordingHarness {
     }
 
     pub fn push_frames(&self, frames: usize, sample: f32) {
-        let mut samples = Vec::with_capacity(frames.saturating_mul(2));
-        for _ in 0..frames {
-            samples.push(sample);
-            samples.push(sample);
-        }
+        push_into(&self.capture, frames, sample);
+    }
+
+    pub fn push_system_frames(&self, frames: usize, sample: f32) {
+        push_into(&self.system, frames, sample);
+    }
+
+    pub fn fail_system(&self) {
+        let mut state = lock_fake(&self.system.inner);
+        state.error = Some(CaptureError::Unavailable);
+    }
+
+    pub fn set_overruns(&self, count: u64) {
         let mut state = lock_fake(&self.capture.inner);
-        state.blocks.push_back(AudioBlock {
-            samples,
-            timeline_frame: None,
-            discontinuity: false,
-        });
+        state.overruns = count;
     }
 
     pub fn start_default(&self) {
@@ -592,6 +734,10 @@ impl RecordingHarness {
             directory: self.directory.clone(),
             endpoint_id: String::new(),
             microphone_id: "default".to_string(),
+            system_endpoint_id: Some(String::new()),
+            system_audio_id: "system".to_string(),
+            open_microphone: true,
+            degraded_notice: None,
         });
     }
 
@@ -604,7 +750,10 @@ impl RecordingHarness {
     }
 
     pub fn capture_threads(&self) -> usize {
-        self.capture.live.load(Ordering::Acquire)
+        self.capture
+            .live
+            .load(Ordering::Acquire)
+            .saturating_add(self.system.live.load(Ordering::Acquire))
     }
 
     pub fn directory(&self) -> &Path {
@@ -646,6 +795,28 @@ impl Drop for RecordingHarness {
     }
 }
 
+fn push_into(port: &SharedCapture, frames: usize, sample: f32) {
+    let mut samples = Vec::with_capacity(frames.saturating_mul(2));
+    for _ in 0..frames {
+        samples.push(sample);
+        samples.push(sample);
+    }
+    let mut state = lock_fake(&port.inner);
+    state.blocks.push_back(AudioBlock {
+        samples,
+        timeline_frame: None,
+        discontinuity: false,
+    });
+}
+
+struct FixedCounter;
+
+impl PerformanceCounter for FixedCounter {
+    fn sample(&self) -> (u64, u64) {
+        (0, 48_000)
+    }
+}
+
 fn map_phase(phase: RecordPhase) -> RecordingHarnessPhase {
     match phase {
         RecordPhase::Idle => RecordingHarnessPhase::Idle,
@@ -669,12 +840,17 @@ mod tests {
 
     struct OneShot {
         block: Option<AudioBlock>,
-        opened: bool,
+        opened: std::sync::Arc<AtomicBool>,
     }
 
     impl super::CapturePort for OneShot {
-        fn open(&mut self, _: &str) -> Result<Box<dyn super::CaptureStream>, CaptureError> {
-            self.opened = true;
+        fn open(
+            &mut self,
+            _: &str,
+            _: crate::domain::audio::SessionOrigin,
+        ) -> Result<Box<dyn super::CaptureStream>, CaptureError> {
+            self.opened
+                .store(true, std::sync::atomic::Ordering::Release);
             let block = self.block.take();
             Ok(Box::new(ShotStream {
                 block,
@@ -731,24 +907,47 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("skrivli-low-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
-        let mut port = OneShot {
+        let mic_opened = std::sync::Arc::new(AtomicBool::new(false));
+        let system_opened = std::sync::Arc::new(AtomicBool::new(false));
+        let port = OneShot {
             block: None,
-            opened: false,
+            opened: std::sync::Arc::clone(&mic_opened),
+        };
+        let system = OneShot {
+            block: None,
+            opened: std::sync::Arc::clone(&system_opened),
         };
         let stop = AtomicBool::new(false);
         let request = StartRequest {
             directory: dir.clone(),
             endpoint_id: "mic".to_string(),
             microphone_id: "mic".to_string(),
+            system_endpoint_id: Some("system".to_string()),
+            system_audio_id: "system".to_string(),
+            open_microphone: true,
+            degraded_notice: None,
+        };
+        let mut engine = super::RecordingEngine {
+            mic: Box::new(port),
+            system: Box::new(system),
+            clock: Box::new(Clock),
+            space: Box::new(Space(1024)),
+            performance: Box::new(super::FixedCounter),
+            levels: std::sync::Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
+            gain: std::sync::Arc::new(crate::infrastructure::audio::levels::GainControl::new(
+                1.0, false,
+            )),
+            lease: std::sync::Arc::new(crate::services::lease::EndpointLease::new()),
         };
 
         // Act
-        let snapshot = run_session(&mut port, &Clock, &Space(1024), &request, &stop, &|_| {});
+        let snapshot = run_session(&mut engine, &request, &stop, &|_| {});
 
         // Assert
         assert_eq!(snapshot.phase, RecordPhase::Error);
         assert_eq!(snapshot.notice, Some(NOTICE_DISK));
-        assert!(!port.opened);
+        assert!(!mic_opened.load(std::sync::atomic::Ordering::Acquire));
+        assert!(!system_opened.load(std::sync::atomic::Ordering::Acquire));
         assert!(capture_notice(CaptureError::PrivacyDenied).contains("privacy"));
         assert!(ensure_writable(&dir).is_ok());
         let _ = std::fs::remove_dir_all(dir);

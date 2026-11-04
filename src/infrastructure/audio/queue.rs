@@ -1,10 +1,17 @@
-//! Bounded handoff from the capture thread to the WAV writer.
+//! Bounded handoff from a capture thread to the mixer.
 //!
+//! One queue per source (microphone and loopback). Both use this module.
 //! Overflow policy (D-04): reject the new packet. `try_send` on a full
 //! [`std::sync::mpsc::sync_channel`] does not remove a queued packet and does
-//! not wait. The capture loop counts the rejection and continues. The writer
-//! keeps the timeline by inserting silence when the next accepted packet's
-//! sample index jumps ahead. Disk I/O never runs on the capture thread.
+//! not wait. The capture loop counts the rejection (`overrun`) and continues.
+//! A rejected packet leaves a timestamp gap; the mixer fills that gap with
+//! silence instead of stalling the device thread. Disk I/O never runs here.
+//!
+//! Capacity is [`CAPTURE_QUEUE_CAPACITY`] blocks, not a custom lock-free
+//! ring. At a 10 ms device period that is 640 ms of queued audio, which is
+//! past the mixer's 150 ms lateness limit. A larger engine period shortens
+//! how many milliseconds fit in the same 64 blocks. The cap is the block
+//! count either way.
 
 use std::sync::mpsc::{SyncSender, TrySendError};
 

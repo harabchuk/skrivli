@@ -172,8 +172,7 @@ impl EndpointDescriptor {
 /// Explicit endpoint id, or the Windows default for the role.
 ///
 /// Microphone default is the communications capture endpoint. Render default
-/// is the console render endpoint. Render is stored for a later milestone and
-/// is not opened in M2.
+/// is the console render endpoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum EndpointChoice {
     #[default]
@@ -292,6 +291,10 @@ impl SessionOrigin {
             .checked_mul(u128::from(self.sample_rate))?
             .checked_div(u128::from(self.ticks_per_second))?;
         u64::try_from(samples).ok()
+    }
+
+    pub(crate) fn ticks_per_second(self) -> u64 {
+        self.ticks_per_second
     }
 }
 

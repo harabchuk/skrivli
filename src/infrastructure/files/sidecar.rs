@@ -11,7 +11,7 @@ use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_IGNORE_MERGE
 
 use crate::common::error::AppError;
 
-pub(crate) const SIDECAR_SCHEMA: u32 = 1;
+pub(crate) const SIDECAR_SCHEMA: u32 = 2;
 
 #[derive(Debug, Serialize)]
 struct FormatBody {
@@ -28,6 +28,7 @@ struct SidecarBody {
     ended_at_unix_ms: u64,
     duration_ms: u64,
     microphone_id: String,
+    system_audio_id: String,
     format: FormatBody,
     problems: Vec<String>,
 }
@@ -38,6 +39,7 @@ pub(crate) struct Sidecar {
     pub(crate) ended_at_unix_ms: u64,
     pub(crate) duration_ms: u64,
     pub(crate) microphone_id: String,
+    pub(crate) system_audio_id: String,
     pub(crate) problems: Vec<String>,
 }
 
@@ -50,6 +52,7 @@ pub(crate) fn write_sidecar(wav_path: &Path, sidecar: &Sidecar) -> Result<PathBu
         ended_at_unix_ms: sidecar.ended_at_unix_ms,
         duration_ms: sidecar.duration_ms,
         microphone_id: sidecar.microphone_id.clone(),
+        system_audio_id: sidecar.system_audio_id.clone(),
         format: FormatBody {
             sample_rate: 48_000,
             channels: 2,
@@ -144,6 +147,7 @@ mod tests {
             ended_at_unix_ms: 20,
             duration_ms: 10,
             microphone_id: "{mic}".to_string(),
+            system_audio_id: "{system}".to_string(),
             problems: vec!["overrun".to_string()],
         };
 
@@ -152,7 +156,8 @@ mod tests {
         let text = fs::read_to_string(&path).expect("read");
 
         // Assert
-        assert!(text.contains("\"schema_version\": 1"));
+        assert!(text.contains("\"schema_version\": 2"));
+        assert!(text.contains("{system}"));
         assert!(text.contains("\"id\": 7"));
         assert!(text.contains("pcm16"));
         assert!(text.contains("overrun"));

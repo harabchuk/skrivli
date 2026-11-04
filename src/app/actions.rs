@@ -17,6 +17,7 @@ pub(crate) enum AppCommand {
     StartRecording,
     StopRecording,
     SelectMicrophone(StoredEndpoint),
+    SelectSystem(StoredEndpoint),
     BrowseRecordings,
     // Queued until a recording service exists. The command path already accepts them.
     #[allow(dead_code)]
@@ -85,7 +86,7 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
                 Effect::BrowseRecordings
             }
         }
-        AppCommand::SelectMicrophone(_) => Effect::None,
+        AppCommand::SelectMicrophone(_) | AppCommand::SelectSystem(_) => Effect::None,
         AppCommand::Transcribe { .. }
         | AppCommand::CancelTranscription { .. }
         | AppCommand::RefreshLibrary => {

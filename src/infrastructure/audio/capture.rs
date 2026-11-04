@@ -14,11 +14,12 @@ use std::time::Duration;
 use windows::core::HRESULT;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
-    eCapture, eCommunications, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY, AUDCLNT_BUFFERFLAGS_SILENT,
-    AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR, AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED,
-    AUDCLNT_E_BUFFER_TOO_LARGE, AUDCLNT_E_UNSUPPORTED_FORMAT, AUDCLNT_SHAREMODE_SHARED,
-    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
+    eCapture, eCommunications, EDataFlow, ERole, IAudioCaptureClient, IAudioClient, IMMDevice,
+    IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY,
+    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR,
+    AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED, AUDCLNT_E_BUFFER_TOO_LARGE, AUDCLNT_E_UNSUPPORTED_FORMAT,
+    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, WAVEFORMATEX,
+    WAVEFORMATEXTENSIBLE,
 };
 use windows::Win32::Media::KernelStreaming::{KSDATAFORMAT_SUBTYPE_PCM, WAVE_FORMAT_EXTENSIBLE};
 use windows::Win32::Media::Multimedia::WAVE_FORMAT_IEEE_FLOAT;
@@ -30,6 +31,7 @@ use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerforma
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
 use crate::domain::audio::{AudioFormat, SampleEncoding, SessionOrigin, INTERNAL_SAMPLE_RATE};
+use crate::domain::chunk_plan::{latency_reference_to_ticks, map_packet_frame};
 use crate::services::recording::{CaptureError, CapturePort, CaptureStream};
 
 use super::queue::{offer_block, AudioBlock, CAPTURE_QUEUE_CAPACITY};
@@ -69,16 +71,16 @@ impl Drop for ComApartment {
 
 const RPC_E_CHANGED_MODE: HRESULT = HRESULT(0x80010106_u32 as i32);
 
-struct EventHandle(HANDLE);
+pub(crate) struct EventHandle(HANDLE);
 
 impl EventHandle {
-    fn new() -> Result<Self, CaptureError> {
+    pub(crate) fn new() -> Result<Self, CaptureError> {
         let handle =
             unsafe { CreateEventW(None, false, false, None) }.map_err(|_| CaptureError::Failed)?;
         Ok(Self(handle))
     }
 
-    fn get(&self) -> HANDLE {
+    pub(crate) fn get(&self) -> HANDLE {
         self.0
     }
 }
@@ -120,33 +122,65 @@ pub(crate) fn choose_buffer_hns(default_period: i64, minimum_period: i64) -> i64
 pub(crate) struct WasapiCapture;
 
 impl CapturePort for WasapiCapture {
-    fn open(&mut self, endpoint_id: &str) -> Result<Box<dyn CaptureStream>, CaptureError> {
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        let (packet_tx, packet_rx) = sync_channel(CAPTURE_QUEUE_CAPACITY);
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let overruns = Arc::new(AtomicU64::new(0));
+    fn open(
+        &mut self,
+        endpoint_id: &str,
+        origin: SessionOrigin,
+    ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         let endpoint = endpoint_id.to_string();
-        let thread_stop = Arc::clone(&stop);
-        let thread_overruns = Arc::clone(&overruns);
-        let worker = thread::spawn(move || {
-            capture_thread(&endpoint, packet_tx, thread_stop, thread_overruns, ready_tx);
-        });
-        match ready_rx.recv_timeout(Duration::from_secs(8)) {
-            Ok(Ok(())) => Ok(Box::new(WasapiStream {
-                packets: packet_rx,
-                stop,
-                worker: Some(worker),
-                overruns,
-            })),
-            Ok(Err(error)) => {
-                let _ = worker.join();
-                Err(error)
+        spawn_audio_worker(move |tx, stop, overruns, ready| {
+            if let Err(error) = run_endpoint(
+                &endpoint,
+                origin,
+                eCapture,
+                eCommunications,
+                AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                &tx,
+                &stop,
+                &overruns,
+                &ready,
+            ) {
+                let _ = ready.send(Err(error));
             }
-            Err(_) => {
-                stop.store(true, Ordering::Release);
-                let _ = worker.join();
-                Err(CaptureError::Unavailable)
-            }
+        })
+    }
+}
+
+/// Starts one COM-owning capture thread. The closure runs on that thread.
+pub(crate) fn spawn_audio_worker<F>(worker: F) -> Result<Box<dyn CaptureStream>, CaptureError>
+where
+    F: FnOnce(
+            SyncSender<AudioBlock>,
+            Arc<std::sync::atomic::AtomicBool>,
+            Arc<AtomicU64>,
+            std::sync::mpsc::Sender<Result<(), CaptureError>>,
+        ) + Send
+        + 'static,
+{
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (packet_tx, packet_rx) = sync_channel(CAPTURE_QUEUE_CAPACITY);
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let overruns = Arc::new(AtomicU64::new(0));
+    let thread_stop = Arc::clone(&stop);
+    let thread_overruns = Arc::clone(&overruns);
+    let thread = thread::spawn(move || {
+        worker(packet_tx, thread_stop, thread_overruns, ready_tx);
+    });
+    match ready_rx.recv_timeout(Duration::from_secs(8)) {
+        Ok(Ok(())) => Ok(Box::new(WasapiStream {
+            packets: packet_rx,
+            stop,
+            worker: Some(thread),
+            overruns,
+        })),
+        Ok(Err(error)) => {
+            let _ = thread.join();
+            Err(error)
+        }
+        Err(_) => {
+            stop.store(true, Ordering::Release);
+            let _ = thread.join();
+            Err(CaptureError::Unavailable)
         }
     }
 }
@@ -184,20 +218,13 @@ impl Drop for WasapiStream {
     }
 }
 
-fn capture_thread(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_endpoint(
     endpoint_id: &str,
-    tx: SyncSender<AudioBlock>,
-    stop: Arc<std::sync::atomic::AtomicBool>,
-    overruns: Arc<AtomicU64>,
-    ready: std::sync::mpsc::Sender<Result<(), CaptureError>>,
-) {
-    if let Err(error) = open_and_run(endpoint_id, &tx, &stop, &overruns, &ready) {
-        let _ = ready.send(Err(error));
-    }
-}
-
-fn open_and_run(
-    endpoint_id: &str,
+    origin: SessionOrigin,
+    flow: EDataFlow,
+    role: ERole,
+    stream_flags: u32,
     tx: &SyncSender<AudioBlock>,
     stop: &std::sync::atomic::AtomicBool,
     overruns: &AtomicU64,
@@ -206,7 +233,7 @@ fn open_and_run(
     let _apartment = ComApartment::multithreaded().map_err(|_| CaptureError::Failed)?;
     let enumerator: IMMDeviceEnumerator =
         unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.map_err(map_hresult)?;
-    let device = open_device(&enumerator, endpoint_id)?;
+    let device = open_device(&enumerator, endpoint_id, flow, role)?;
     let client: IAudioClient = unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(map_hresult)?;
     let format_bytes = negotiate_format(&client)?;
     let audio_format = audio_format_of(&format_bytes).ok_or(CaptureError::UnsupportedFormat)?;
@@ -215,18 +242,17 @@ fn open_and_run(
     unsafe { client.GetDevicePeriod(Some(&mut default_period), Some(&mut minimum_period)) }
         .map_err(map_hresult)?;
     let buffer = choose_buffer_hns(default_period, minimum_period);
-    initialize_client(&client, &format_bytes, buffer, default_period)?;
+    initialize_client(&client, &format_bytes, buffer, default_period, stream_flags)?;
     let event = EventHandle::new()?;
     unsafe { client.SetEventHandle(event.get()) }.map_err(map_hresult)?;
     let capture: IAudioCaptureClient = unsafe { client.GetService() }.map_err(map_hresult)?;
+    let latency_hns = unsafe { client.GetStreamLatency() }.unwrap_or(0);
+    let latency_ticks = latency_reference_to_ticks(latency_hns, origin.ticks_per_second());
     unsafe { client.Start() }.map_err(map_hresult)?;
     if ready.send(Ok(())).is_err() {
         let _ = unsafe { client.Stop() };
         return Ok(());
     }
-    let (counter, frequency) = qpc_now()?;
-    let origin =
-        SessionOrigin::new(counter, frequency, INTERNAL_SAMPLE_RATE).ok_or(CaptureError::Failed)?;
     let mut pending_gap = false;
     while !stop.load(Ordering::Acquire) {
         let status = unsafe { WaitForSingleObject(event.get(), 200) };
@@ -238,9 +264,9 @@ fn open_and_run(
         }
         if let Err(error) = drain(
             &capture,
-            &format_bytes,
             audio_format,
             origin,
+            latency_ticks,
             tx,
             overruns,
             &mut pending_gap,
@@ -257,10 +283,11 @@ fn open_and_run(
 fn open_device(
     enumerator: &IMMDeviceEnumerator,
     endpoint_id: &str,
+    flow: EDataFlow,
+    role: ERole,
 ) -> Result<IMMDevice, CaptureError> {
     if endpoint_id.is_empty() {
-        return unsafe { enumerator.GetDefaultAudioEndpoint(eCapture, eCommunications) }
-            .map_err(map_hresult);
+        return unsafe { enumerator.GetDefaultAudioEndpoint(flow, role) }.map_err(map_hresult);
     }
     let wide = wide_id(endpoint_id);
     unsafe { enumerator.GetDevice(windows::core::PCWSTR(wide.as_ptr())) }.map_err(map_hresult)
@@ -270,7 +297,7 @@ fn wide_id(id: &str) -> Vec<u16> {
     id.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn negotiate_format(client: &IAudioClient) -> Result<Vec<u8>, CaptureError> {
+pub(crate) fn negotiate_format(client: &IAudioClient) -> Result<Vec<u8>, CaptureError> {
     let mix = unsafe { client.GetMixFormat() }.map_err(map_hresult)?;
     let mix_bytes = copy_format(mix);
     unsafe { CoTaskMemFree(Some(mix.cast())) };
@@ -302,17 +329,18 @@ fn negotiate_format(client: &IAudioClient) -> Result<Vec<u8>, CaptureError> {
     Err(CaptureError::UnsupportedFormat)
 }
 
-fn initialize_client(
+pub(crate) fn initialize_client(
     client: &IAudioClient,
     format: &[u8],
     buffer: i64,
     fallback_period: i64,
+    stream_flags: u32,
 ) -> Result<(), CaptureError> {
     let pointer = format.as_ptr().cast::<WAVEFORMATEX>();
     let first = unsafe {
         client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+            stream_flags,
             buffer,
             0,
             pointer,
@@ -327,7 +355,7 @@ fn initialize_client(
         return unsafe {
             client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
-                AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                stream_flags,
                 fallback_period.max(10_000),
                 0,
                 pointer,
@@ -341,9 +369,9 @@ fn initialize_client(
 
 fn drain(
     capture: &IAudioCaptureClient,
-    format_bytes: &[u8],
     format: AudioFormat,
     origin: SessionOrigin,
+    latency_ticks: u64,
     tx: &SyncSender<AudioBlock>,
     overruns: &AtomicU64,
     pending_gap: &mut bool,
@@ -382,7 +410,7 @@ fn drain(
         let timeline = if parsed.timestamp_error {
             None
         } else {
-            origin.sample_index(qpc)
+            map_packet_frame(origin, qpc, latency_ticks)
         };
         let block = match super::queue::block_from_packet(
             &bytes,
@@ -400,7 +428,6 @@ fn drain(
             overruns.fetch_add(1, Ordering::Relaxed);
             *pending_gap = true;
         }
-        let _ = format_bytes;
     }
     Ok(())
 }
@@ -505,7 +532,7 @@ fn guid_bytes(guid: &windows::core::GUID) -> [u8; 16] {
     bytes
 }
 
-fn qpc_now() -> Result<(u64, u64), CaptureError> {
+pub(crate) fn qpc_now() -> Result<(u64, u64), CaptureError> {
     let mut counter = 0_i64;
     let mut frequency = 0_i64;
     unsafe { QueryPerformanceCounter(&mut counter) }.map_err(|_| CaptureError::Failed)?;
@@ -516,7 +543,7 @@ fn qpc_now() -> Result<(u64, u64), CaptureError> {
     Ok((counter as u64, frequency as u64))
 }
 
-fn map_hresult(error: windows::core::Error) -> CaptureError {
+pub(crate) fn map_hresult(error: windows::core::Error) -> CaptureError {
     let code = error.code();
     if code == windows::Win32::Foundation::E_ACCESSDENIED {
         CaptureError::PrivacyDenied

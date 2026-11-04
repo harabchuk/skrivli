@@ -18,7 +18,9 @@ use crate::common::paths::AppPaths;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
 use crate::infrastructure::audio::capture::WasapiCapture;
 use crate::infrastructure::audio::devices::spawn_device_watch;
-use crate::infrastructure::audio::system::{SystemClock, WindowsDisk};
+use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
+use crate::infrastructure::audio::loopback::WasapiLoopback;
+use crate::infrastructure::audio::system::{QpcCounter, SystemClock, WindowsDisk};
 use crate::infrastructure::files::wav::recover_partials;
 use crate::infrastructure::storage::settings::{Settings, ThemePreference};
 use crate::infrastructure::windows::single_instance::{
@@ -26,7 +28,11 @@ use crate::infrastructure::windows::single_instance::{
     SINGLE_INSTANCE_MUTEX,
 };
 use crate::infrastructure::windows::tray::{self, TrayCommand};
-use crate::services::recording::{spawn_recording_host, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED};
+use crate::services::lease::EndpointLease;
+use crate::services::level_monitor::{spawn_level_monitor, MonitorTargets};
+use crate::services::recording::{
+    spawn_recording_host, RecordingEngine, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED,
+};
 use crate::views::main_window::MainWindow;
 
 use super::actions::{command_from_tray, AppCommand, BridgeMessage};
@@ -101,7 +107,22 @@ pub(crate) fn run() -> i32 {
     let writer = SettingsWriter::spawn(settings_path, &shutdown);
     let recording_flag = Arc::new(AtomicBool::new(false));
     let recovery_notice = recovery_notice(settings.recordings_directory());
-    let recording = spawn_workers(tx, &shutdown, Arc::clone(&recording_flag));
+    let levels = Arc::new(LevelSnapshot::new());
+    let gain = Arc::new(GainControl::new(
+        settings.mic_gain(),
+        settings.agc_enabled(),
+    ));
+    let lease = Arc::new(EndpointLease::new());
+    let targets = Arc::new(MonitorTargets::new());
+    let recording = spawn_workers(
+        tx,
+        &shutdown,
+        Arc::clone(&recording_flag),
+        Arc::clone(&levels),
+        Arc::clone(&gain),
+        Arc::clone(&lease),
+        Arc::clone(&targets),
+    );
 
     tracing::info!(
         close_to_tray = settings.close_to_tray(),
@@ -119,6 +140,9 @@ pub(crate) fn run() -> i32 {
         shutdown.clone(),
         recording,
         recovery_notice,
+        levels,
+        gain,
+        targets,
     );
     shutdown.join();
     drop(instance);
@@ -130,11 +154,22 @@ fn spawn_workers(
     tx: mpsc::Sender<BridgeMessage>,
     shutdown: &ShutdownController,
     recording_flag: Arc<AtomicBool>,
+    levels: Arc<LevelSnapshot>,
+    gain: Arc<GainControl>,
+    lease: Arc<EndpointLease>,
+    targets: Arc<MonitorTargets>,
 ) -> crate::services::recording::RecordingHost {
     let (host, session) = spawn_recording_host(
-        Box::new(WasapiCapture),
-        Box::new(SystemClock),
-        Box::new(WindowsDisk),
+        RecordingEngine {
+            mic: Box::new(WasapiCapture),
+            system: Box::new(WasapiLoopback),
+            clock: Box::new(SystemClock),
+            space: Box::new(WindowsDisk),
+            performance: Box::new(QpcCounter),
+            levels: Arc::clone(&levels),
+            gain: Arc::clone(&gain),
+            lease: Arc::clone(&lease),
+        },
         {
             let tx = tx.clone();
             Box::new(move |snapshot| {
@@ -143,6 +178,16 @@ fn spawn_workers(
         },
         Arc::clone(&recording_flag),
     );
+    let monitor_stop = shutdown.flag();
+    shutdown.track(spawn_level_monitor(
+        Box::new(WasapiCapture),
+        Box::new(WasapiLoopback),
+        lease,
+        levels,
+        gain,
+        targets,
+        monitor_stop,
+    ));
     let stop_host = host.clone();
     shutdown.on_stop(move || stop_host.shutdown());
     shutdown.track(session);
@@ -220,6 +265,7 @@ fn listen_for_activation(stop: &std::sync::atomic::AtomicBool, tx: &mpsc::Sender
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open_shell(
     settings: Settings,
     commands: mpsc::Receiver<BridgeMessage>,
@@ -227,6 +273,9 @@ fn open_shell(
     shutdown: ShutdownController,
     recording: crate::services::recording::RecordingHost,
     recovery_notice: Option<&'static str>,
+    levels: Arc<LevelSnapshot>,
+    gain: Arc<GainControl>,
+    targets: Arc<MonitorTargets>,
 ) {
     let theme = settings.theme();
     gpui_kit::application()
@@ -246,6 +295,9 @@ fn open_shell(
             let window_shutdown = shutdown.clone();
             let window_writer = writer;
             let window_recording = recording;
+            let window_levels = levels;
+            let window_gain = gain;
+            let window_targets = targets;
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 window.set_window_title("Skrivli");
                 cx.new(|cx| {
@@ -256,6 +308,9 @@ fn open_shell(
                         commands,
                         window_shutdown,
                         window_recording,
+                        window_levels,
+                        window_gain,
+                        window_targets,
                         window,
                         cx,
                     )
