@@ -84,6 +84,14 @@ resources/         MeetingBuddy.rc, resource.h, icons, MeetingBuddy.manifest
 .specs/            design documents
 ```
 
+## Finding files
+
+Before searching `src\`, read the `folder.md` in the layer that matches the work. Start at [`src/folder.md`](src/folder.md) for process-wide files, or the `folder.md` in `app/`, `core/`, `services/`, `ui/`, `views/`, or `infrastructure/` and its subfolders. Each row says what the file is for, its technical role, its domain, and the feature names it participates in.
+
+`tests/` folders have no `folder.md`. Do not index them.
+
+When you add, remove, rename, or change what a production file is responsible for, update that folder's `folder.md` in the same change. A new subfolder gets its own `folder.md`. If the file moves between folders, update both indexes.
+
 Each module keeps a `tests/` folder beside its sources (for example `src/core/tests/RingBufferTests.cpp`). Includes in those files stay rooted at `src`. Add each test `.cpp` only to the `MeetingBuddyTests` target in `CMakeLists.txt`, not to a `MEETINGBUDDY_*_SOURCES` list.
 
 Every new production `.cpp` must be added to the matching `MEETINGBUDDY_*_SOURCES` list in `CMakeLists.txt`.
@@ -281,6 +289,7 @@ recording, Open folder, Settings, Exit. Minimize and close hide to the tray (con
 
 ## Verification checklist for agents
 
+- If a production file under `src\` was added, removed, renamed, or its responsibility changed, update that folder's `folder.md`.
 - Run `scripts\format.bat` after the task (whole `src\` or only the files you changed).
 - The build is warning-clean at `/W4`, and `scripts\start.bat` builds and launches successfully.
 - Unit tests pass for any touched DSP, file, or formatting code (`RingBuffer`, `Mixer`, `WavWriter`, `Resampler`,
