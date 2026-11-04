@@ -66,37 +66,37 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M0.1 — Repository and toolchain
 
-- [ ] Initialize one binary/library Cargo package (`src/main.rs`, `src/lib.rs`), commit `Cargo.lock`, `rust-toolchain.toml`, `.gitignore`, `README.md` and existing `AGENTS.md`/`app-design.md`.
-- [ ] Add feature-oriented module roots `app`, `domain`, `services`, `infrastructure`, `ui`, `views`, `common`; only create concrete submodules when used.
-- [ ] Configure MSVC target and Windows SDK prerequisites; document reproducible setup in README.
-- [ ] Add CI on a Windows runner for `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and `cargo build --release`; no hardware-dependent tests in default CI.
+- [x] Initialize one binary/library Cargo package (`src/main.rs`, `src/lib.rs`), commit `Cargo.lock`, `rust-toolchain.toml`, `.gitignore`, `README.md` and existing `AGENTS.md`/`app-design.md`.
+- [x] Add feature-oriented module roots `app`, `domain`, `services`, `infrastructure`, `ui`, `views`, `common`; only create concrete submodules when used.
+- [x] Configure MSVC target and Windows SDK prerequisites; document reproducible setup in README.
+- [x] Add CI on a Windows runner for `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and `cargo build --release`; no hardware-dependent tests in default CI.
 
 **Validate:** fresh clone builds with documented prerequisites; `cargo test` succeeds without device access.
 
 ### M0.2 — GPUI Kit Windows compatibility spike (blocking)
 
-- [ ] Select and pin a GPUI Kit revision and bundled GPUI runtime; start from its official minimal sample, **not** guessed bootstrap APIs.
-- [ ] Create/close a real window, initialize GPUI Kit, apply a theme, draw a Kit button/select, and verify input/focus/keyboard interaction.
-- [ ] Check supported foreground task/event scheduling, `Render` lifecycle, close interception, selection/editor behavior, overlay/dialog positioning, timers, and window sizing on Windows.
+- [x] Select and pin a GPUI Kit revision and bundled GPUI runtime; start from its official minimal sample, **not** guessed bootstrap APIs.
+- [x] Create/close a real window, initialize GPUI Kit, apply a theme, draw a Kit button/select, and verify input/focus/keyboard interaction.
+- [x] Check supported foreground task/event scheduling, `Render` lifecycle, close interception, selection/editor behavior, overlay/dialog positioning, timers, and window sizing on Windows.
 - [ ] Test 100%/150% display scaling and multiple displays. Record issues/workarounds in `.specs/`.
 
 **Decision gate:** if any required Windows window/keyboard/text API is missing, record a targeted adapter/workaround and verify it **before** committing to dependent UI work.
 
 ### M0.3 — Common runtime, settings and Windows resources
 
-- [ ] `common/error.rs`: typed application errors with contextual diagnostics and user-safe messages; `common/paths.rs`: Roaming AppData settings, Local AppData logs/models/rescue and Documents recording defaults.
-- [ ] `common/logging.rs`: `tracing` initialization, bounded rotating logs (initially ~1 MB × 3), no captured content in logs, panic diagnostic hook.
-- [ ] `infrastructure/storage/settings.rs`: default `Settings` struct, schema version, `serde_json` load/validate/migrate-or-fallback, atomic save and temp-directory unit tests.
-- [ ] Add `resources/` icon, manifest, version metadata and `build.rs` only if needed; document DPI awareness configuration.
-- [ ] Specify single-instance named mutex and second-instance activation handshake (including startup race); implement basic guard now, complete activation in M1.
-- [ ] Document COM initialization per capture/Windows worker, foreground ownership, command/event bridge, shutdown order and error propagation.
+- [x] `common/error.rs`: typed application errors with contextual diagnostics and user-safe messages; `common/paths.rs`: Roaming AppData settings, Local AppData logs/models/rescue and Documents recording defaults.
+- [x] `common/logging.rs`: `tracing` initialization, bounded rotating logs (initially ~1 MB × 3), no captured content in logs, panic diagnostic hook.
+- [x] `infrastructure/storage/settings.rs`: default `Settings` struct, schema version, `serde_json` load/validate/migrate-or-fallback, atomic save and temp-directory unit tests.
+- [x] Add `resources/` icon, manifest, version metadata and `build.rs` only if needed; document DPI awareness configuration.
+- [x] Specify single-instance named mutex and second-instance activation handshake (including startup race); implement basic guard now, complete activation in M1.
+- [x] Document COM initialization per capture/Windows worker, foreground ownership, command/event bridge, shutdown order and error propagation.
 
 **Validate:** settings round-trip and malformed-file fallback, distinct process cannot concurrently write recording state, clean process shutdown.
 
 ### M0 acceptance
 
-- [ ] A real Windows 10/11 machine runs the packaged debug executable with GPUI Kit content.
-- [ ] Cargo format/clippy/test/release-build checks pass; GPUI Kit version and known Windows limitations are documented.
+- [x] A real Windows 10/11 machine runs the packaged debug executable with GPUI Kit content.
+- [x] Cargo format/clippy/test/release-build checks pass; GPUI Kit version and known Windows limitations are documented.
 
 ---
 
