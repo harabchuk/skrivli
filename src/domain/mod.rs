@@ -1,1 +1,4 @@
 //! Pure domain types. No platform, I/O, or UI dependencies.
+
+pub(crate) mod ids;
+pub(crate) mod window_frame;

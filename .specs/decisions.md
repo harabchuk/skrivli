@@ -33,13 +33,19 @@
 
 Keyboard focus is wired (`focus_handle().tab_stop(true)`, `track_focus`, `window.focus`, Kit button and select). On this machine Tab moved the visible focus ring onto the select. DPI scaling and a second monitor were not part of that check.
 
-## Single instance
+## D-02 — Tray pump, close interception, and single-instance handoff
 
-Mutex name: `Local\Skrivli.SingleInstance` (`infrastructure/windows/single_instance.rs`). The name is an argument so tests use a unique `Local\...` name. The guard is `!Send`; `ReleaseMutex` runs on the acquiring thread in `Drop`.
+**Outcome:** M1 uses three separate Windows objects. The GPUI window stays on the GPUI thread. A dedicated worker thread owns a message-only window of class `Skrivli.TrayMessage` and pumps `GetMessageW` there. That procedure is not attached to the GPUI HWND (`Zed::Window`). Tray commands are `TrayCommand` values sent on an `std::sync::mpsc` channel. A foreground task started with `Context::spawn_in` awaits `BackgroundExecutor::timer` (150 ms) and drains the channel on the GPUI thread, coalescing `ShellPulse` events into one presentation update. The same path serves menus (`cx.on_action` → `dispatch` → `MainWindow::handle`).
 
-If the mutex already exists, the second process logs and exits 0. It does not open a window and does not read or write recordings. Startup order is logs, then mutex, then local `models`/`rescue` folders and settings. A second process stops before those.
+**Notify icon:** `Shell_NotifyIconW` with GUID `{7C3E8A21-4B6D-4E91-9F2A-1D5C8B0E6A44}`, tooltip `Skrivli`, and `NOTIFYICON_VERSION_4`. `NIM_DELETE` runs on `WM_CLOSE` before the thread exits. `RegisterWindowMessageW("TaskbarCreated")` calls `NIM_ADD` again. The icon is the system application icon, not a recording-state icon.
 
-**M1 handshake, not implemented:** the loser should `RegisterWindowMessageW` (or a small authenticated local IPC) to ask the winner to show and focus, then exit. If the winner has not created its window yet, it must store a pending show and apply it when the window exists. Doing the signal before the window exists is the startup race.
+**Show and hide:** `Platform::hide` on gpui-pre 0.3.11 Windows is a no-op, and `Window` has no hide method. The shell finds `Zed::Window` titled `Skrivli` and calls `ShowWindow` (`SW_SHOW` plus `Window::activate_window`, or `SW_HIDE`). It does not subclass that HWND. `window.on_window_should_close` returns false when `close_to_tray` is set (default true) and hides instead; the first hide opens a Kit alert and stores `tray_explanation_seen`. Explicit Exit calls `window.remove_window`, which does not go through that callback, then `cx.quit`. Minimize is not a GPUI callback: the same foreground timer sees `IsIconic` and hides when close-to-tray is on. `WindowOptions.window_min_size` is 560×420, and `domain::window_frame` clamps saved bounds against injected work-area rectangles. Restored bounds use `PlatformDisplay::visible_bounds`. Saves are debounced about 400 ms and written by a background settings thread, not from `render`.
+
+**Single instance:** mutex `Local\Skrivli.SingleInstance`. The winner creates auto-reset event `Local\Skrivli.Activate` on a listener thread before `application().run`. The loser opens that event, `SetEvent`, and exits 0 without a window and without reading or writing recordings. The listener posts `AppCommand::Show` on the same channel. If the GPUI window is not up yet, the message stays queued and is applied when the shell drains it; if `FindWindowW` still misses, `pending_show` retries on the timer. This replaces the earlier `RegisterWindowMessageW` sketch: a window message cannot be delivered before the window exists.
+
+**Shutdown:** `ShutdownController::request` is idempotent and runs stop hooks once (tray `WM_CLOSE`, settings-writer stop, shared `AtomicBool`). Workers call `acknowledge` and are `join`ed after `application().run` returns, not on the GPUI thread. Dropping `SingleInstance` then releases the mutex.
+
+**Not verified on this machine:** Explorer restart (`TaskbarCreated` is implemented and was not exercised; Explorer was not restarted). A live second process started during window creation. 100% / 150% DPI and a second monitor. Close, minimize, show, and hide were not clicked through a full manual pass. `cargo run` was used only to see whether the process stayed up, then `skrivli.exe` was stopped.
 
 ## COM, foreground ownership, commands, shutdown, errors
 
@@ -47,8 +53,8 @@ If the mutex already exists, the second process logs and exits 0. It does not op
 
 **Foreground ownership:** `app::run` loads settings and starts logging before `application().run`. The GPUI callback only initializes Kit, applies the theme, and opens the window. Disk and inference do not run inside `render`.
 
-**Command / event bridge (M1 sketch):** one `AppCommand` path for toolbar, tray, and hotkey. Workers send discrete events on a bounded channel. A foreground `cx.spawn` drains that channel and updates entities. High-rate meters stay in atomics and are sampled by the timer above.
+**Command / event bridge:** implemented as D-02. One `AppCommand` path. A foreground `spawn_in` task awaits `BackgroundExecutor::timer` and drains the channel. High-rate meters are still out of scope.
 
-**Shutdown order:** last window closed → `cx.quit()` → `application().run` returns → drop the mutex guard → drop the log worker guard (declared first so it flushes last). No capture threads exist yet.
+**Shutdown order:** D-02. `request` on the last window or Exit, `cx.quit()`, `application().run` returns, `ShutdownController::join`, drop the mutex, then drop the log guard. No capture threads exist yet.
 
 **Errors:** `AppError` `Display` includes context and the source. `user_message()` is a fixed sentence and does not include paths, audio, or transcript text. Panic hook logs `panic at file:line:column` and does not format the panic payload. Logs are a non-blocking `tracing` subscriber writing `skrivli.log` under `%LOCALAPPDATA%\Skrivli\logs`, rotating at about 1 MB with two archives (three files). Settings unknown `schema_version` values above 1 fall back to defaults. Saves write a temp sibling, `sync_all`, then `ReplaceFileW` when the destination exists (`std::fs::rename` fails on Windows in that case).

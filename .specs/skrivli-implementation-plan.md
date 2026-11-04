@@ -107,25 +107,25 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M1.1 — Application composition and action bridge
 
-- [ ] `app/bootstrap.rs`: initialize GPUI Kit, create application context, own service handles and window lifetime.
-- [ ] `app/state.rs`: selected tab, window bounds, status summary and presentation snapshots. `app/actions.rs`: typed app intents wired to command bridge.
-- [ ] Implement worker-to-GPUI event delivery through a supported foreground scheduling mechanism; add a fake event producer to prove cross-thread changes can safely rerender.
-- [ ] Establish shutdown controller with idempotent request/acknowledge/join; initial workers may be fakes.
+- [x] `app/bootstrap.rs`: initialize GPUI Kit, create application context, own service handles and window lifetime.
+- [x] `app/state.rs`: selected tab, window bounds, status summary and presentation snapshots. `app/actions.rs`: typed app intents wired to command bridge.
+- [x] Implement worker-to-GPUI event delivery through a supported foreground scheduling mechanism; add a fake event producer to prove cross-thread changes can safely rerender.
+- [x] Establish shutdown controller with idempotent request/acknowledge/join; initial workers may be fakes.
 
 ### M1.2 — GPUI Kit shell views
 
-- [ ] `views/main_window.rs`: resizable themed window, min target 560 × 420 logical px, status strip and Record/Recordings tabs.
-- [ ] `views/recording.rs`, `views/recordings.rs`: placeholder controls and empty states; `views/settings.rs`: placeholder dialog/pane.
-- [ ] Use GPUI Kit buttons, tabs, menus, inputs, dialogs and theme tokens. Keyboard navigation and focus must work; save/restore window bounds with monitor-safe clamping.
-- [ ] Implement File/Help actions: Settings, Open Recordings Folder, About, Exit (functional where already possible).
+- [x] `views/main_window.rs`: resizable themed window, min target 560 × 420 logical px, status strip and Record/Recordings tabs.
+- [x] `views/recording.rs`, `views/recordings.rs`: placeholder controls and empty states; `views/settings.rs`: placeholder dialog/pane.
+- [x] Use GPUI Kit buttons, tabs, menus, inputs, dialogs and theme tokens. Keyboard navigation and focus must work; save/restore window bounds with monitor-safe clamping.
+- [x] Implement File/Help actions: Settings, Open Recordings Folder, About, Exit (functional where already possible).
 
 ### M1.3 — Windows tray and instance handoff
 
-- [ ] `infrastructure/windows/tray.rs`: native notification icon, stable GUID where appropriate, Show/Hide, Start/Stop (disabled until M2), Open Folder, Settings and Exit.
-- [ ] Integrate a supported message window/pump with thread-safe action handoff; never assume GPUI HWND subclassing is supported.
-- [ ] Implement configured close-to-tray/minimize behavior and explicit Exit, including first-use explanation.
-- [ ] Re-add tray icon on Explorer `TaskbarCreated`, remove icon on normal Exit, keep one authoritative lifecycle controller.
-- [ ] Complete second-instance activation (signal first process to focus/show; second exits without touching recordings).
+- [x] `infrastructure/windows/tray.rs`: native notification icon, stable GUID where appropriate, Show/Hide, Start/Stop (disabled until M2), Open Folder, Settings and Exit.
+- [x] Integrate a supported message window/pump with thread-safe action handoff; never assume GPUI HWND subclassing is supported.
+- [x] Implement configured close-to-tray/minimize behavior and explicit Exit, including first-use explanation.
+- [x] Re-add tray icon on Explorer `TaskbarCreated`, remove icon on normal Exit, keep one authoritative lifecycle controller.
+- [x] Complete second-instance activation (signal first process to focus/show; second exits without touching recordings).
 
 **Validate:** close/minimize/show/hide repeated, tray action dispatch, taskbar restart, second-instance race, clean Exit without orphaned background threads.
 

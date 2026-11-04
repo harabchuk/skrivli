@@ -39,6 +39,9 @@ impl AppError {
             "single instance" => "Could not check whether Skrivli is already running.",
             "app paths" => "Could not find the user profile folders.",
             "open window" => "Could not open the Skrivli window.",
+            "open recordings folder" => "Could not open the recordings folder.",
+            "tray" => "Could not show the Skrivli icon.",
+            "activation" => "Could not ask the running Skrivli window to open.",
             _ => "Something went wrong.",
         }
     }

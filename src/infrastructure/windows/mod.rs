@@ -1,3 +1,6 @@
-//! Windows shell adapters. Tray and hotkeys belong to a later milestone.
+//! Windows shell adapters. Hotkeys belong to a later milestone.
 
+pub(crate) mod recordings_folder;
+pub(crate) mod shell_window;
 pub(crate) mod single_instance;
+pub(crate) mod tray;

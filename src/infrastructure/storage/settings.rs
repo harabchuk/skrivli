@@ -19,6 +19,45 @@ pub(crate) enum ThemePreference {
     Dark,
 }
 
+/// Logical-pixel window placement. Zero or negative sizes are rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StoredWindowBounds {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+impl StoredWindowBounds {
+    pub(crate) fn new(x: i32, y: i32, width: i32, height: i32) -> Option<Self> {
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        Some(Self {
+            x,
+            y,
+            width,
+            height,
+        })
+    }
+
+    pub(crate) fn x(self) -> i32 {
+        self.x
+    }
+
+    pub(crate) fn y(self) -> i32 {
+        self.y
+    }
+
+    pub(crate) fn width(self) -> i32 {
+        self.width
+    }
+
+    pub(crate) fn height(self) -> i32 {
+        self.height
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Settings {
     schema_version: u32,
@@ -26,6 +65,10 @@ pub(crate) struct Settings {
     close_to_tray: bool,
     start_hidden: bool,
     theme: ThemePreference,
+    #[serde(default)]
+    window_bounds: Option<StoredWindowBounds>,
+    #[serde(default)]
+    tray_explanation_seen: bool,
 }
 
 impl Settings {
@@ -42,6 +85,8 @@ impl Settings {
             close_to_tray: true,
             start_hidden: false,
             theme: ThemePreference::System,
+            window_bounds: None,
+            tray_explanation_seen: false,
         })
     }
 
@@ -59,6 +104,26 @@ impl Settings {
 
     pub(crate) fn theme(&self) -> ThemePreference {
         self.theme
+    }
+
+    pub(crate) fn window_bounds(&self) -> Option<StoredWindowBounds> {
+        self.window_bounds
+    }
+
+    pub(crate) fn tray_explanation_seen(&self) -> bool {
+        self.tray_explanation_seen
+    }
+
+    pub(crate) fn set_close_to_tray(&mut self, close_to_tray: bool) {
+        self.close_to_tray = close_to_tray;
+    }
+
+    pub(crate) fn set_tray_explanation_seen(&mut self, seen: bool) {
+        self.tray_explanation_seen = seen;
+    }
+
+    pub(crate) fn set_window_bounds(&mut self, bounds: Option<StoredWindowBounds>) {
+        self.window_bounds = bounds;
     }
 
     /// Missing, malformed, partial, or newer-than-supported files yield `defaults`.
@@ -114,6 +179,9 @@ impl Settings {
 fn settings_valid(settings: &Settings) -> bool {
     settings.schema_version == SCHEMA_VERSION
         && !settings.recordings_directory.as_os_str().is_empty()
+        && settings
+            .window_bounds
+            .is_none_or(|bounds| bounds.width > 0 && bounds.height > 0)
 }
 
 fn temp_sibling(path: &Path) -> PathBuf {
@@ -161,7 +229,7 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::{Settings, ThemePreference};
+    use super::{Settings, StoredWindowBounds, ThemePreference};
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -196,6 +264,29 @@ mod tests {
         // Assert
         assert_eq!(loaded, settings);
         assert!(!dir.join("settings.json.tmp").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn round_trip_preserves_bounds_and_tray_explanation() {
+        // Arrange
+        let dir = temp_dir("bounds");
+        let path = dir.join("settings.json");
+        let mut settings = sample(&dir);
+        let bounds = StoredWindowBounds::new(-40, 12, 640, 480).expect("bounds");
+        settings.set_window_bounds(Some(bounds));
+        settings.set_tray_explanation_seen(true);
+        settings.set_close_to_tray(false);
+
+        // Act
+        settings.save(&path).expect("save");
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert_eq!(loaded, settings);
+        assert_eq!(loaded.window_bounds(), Some(bounds));
+        assert!(loaded.tray_explanation_seen());
+        assert!(!loaded.close_to_tray());
         let _ = fs::remove_dir_all(dir);
     }
 
