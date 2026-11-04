@@ -1,8 +1,9 @@
 //! Convert captured PCM into the internal 48 kHz stereo `f32` layout.
 //!
-//! The hardware mix format is whatever WASAPI accepted. This module does not
-//! assume the requested format was granted. Resampling is stateful and owned
-//! by the capture stream ([`super::resampler::StereoResampler`]).
+//! flexaudio already delivers interleaved f32; this module remains for PCM
+//! decode helpers and unit tests (device-format edge cases).
+
+#![allow(dead_code)]
 
 use crate::domain::audio::{AudioFormat, SampleEncoding, INTERNAL_CHANNELS};
 

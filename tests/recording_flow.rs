@@ -43,6 +43,8 @@ fn start_stop_writes_header_lengths_and_stop_is_idempotent() {
     let recording = harness
         .wait_phase(RecordingHarnessPhase::Recording)
         .expect("recording");
+    // Let the host pull the queued block before stop closes both streams.
+    std::thread::sleep(Duration::from_millis(50));
     harness.stop();
     let idle = harness
         .wait_phase(RecordingHarnessPhase::Idle)

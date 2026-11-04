@@ -15,7 +15,7 @@ This document defines a new Windows-first application built from scratch with Ru
 
 ### Goals (v1)
 
-- Record **microphone** input using WASAPI capture and **system playback** using WASAPI loopback at the same time.
+- Record **microphone** input and **system playback** (loopback) at the same time via flexaudio.
 - Timestamp, synchronize and mix both streams into one audio recording without losing the timeline when one source is silent.
 - Save to a **user-selected directory** and persist that selection.
 - Optionally transcribe **after recording stops**, on-device, with no upload to a cloud service.
@@ -51,9 +51,9 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | --- | --- | --- |
 | Application | Cargo; one Rust package, `lib.rs` + `main.rs` | `cargo build`, `cargo test`, `cargo clippy` |
 | UI | **GPUI Kit** (`gpui-kit`), pinned Windows-tested version | Primary framework; re-exports compatible GPUI, `gpui-base`, `gpui-component`, and assets; use its styled components and app setup |
-| Windows interfaces | `windows` crate (or a compatible higher-level wrapper where justified) | Core Audio/WASAPI, COM, Shell, device notifications, dialogs, hotkeys |
-| Audio capture | WASAPI shared-mode, event-driven | Microphone input + render-endpoint loopback; dedicated native threads |
-| Device format conversion | WASAPI negotiated formats plus Rubato `Async` resampler/converter | Internal 48 kHz stereo `f32`; do not assume every driver accepts requested format |
+| Windows interfaces | `windows` crate plus flexaudio for capture | Shell, COM device notifications, dialogs, hotkeys; flexaudio owns WASAPI/cpal capture |
+| Audio capture | flexaudio 0.8 (`Mic` + `SystemLoopback`) behind `CapturePort` | Dedicated worker threads; classic loopback keepalive on |
+| Device format conversion | flexaudio normalizer to 48 kHz stereo `f32`, plus Rubato `Async` drift nudge | Internal 48 kHz stereo `f32`; device ids from `flexaudio::devices()` |
 | Audio mixing | Rust DSP module, bounded SPSC buffers | Timestamp alignment, drift handling, limiter, meters |
 | Recording | PCM16 stereo 48 kHz WAV first | `.wav.partial` while writing; finalize and recover on startup |
 | Optional M4A | Windows Media Foundation `IMFSinkWriter` | Post-processing worker; user opt-in |
@@ -110,7 +110,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
             │                           │                   │
  ┌──────────▼───────────────────────────▼───────────────────▼──────────────┐
  │ infrastructure/                                                      │
- │  audio: WASAPI mic + loopback → SPSC → timed mixer → peak snapshots  │
+ │  audio: flexaudio mic + loopback → SPSC → timed mixer → peak snapshots │
  │  files: WAV writer / reader / playback / optional M4A encoder        │
  │  ai: decode → 16 kHz mono → whisper.cpp → transcript                  │
  │  storage: settings / library / sidecars / folder watcher             │
@@ -119,14 +119,14 @@ This is a firm framework decision, **not** an optional later UI improvement.
                         domain/: pure models, timestamp rules, text
 ```
 
-`domain/` contains no GPUI, Windows, COM, file I/O or AI dependency. `services/` express use cases and depend on small ports where implementation interchangeability or testing warrants them. `infrastructure/` implements adapters. `app/` wires services into views. UI rendering must never own a WASAPI handle or call Whisper.
+`domain/` contains no GPUI, Windows, COM, file I/O or AI dependency. `services/` express use cases and depend on small ports where implementation interchangeability or testing warrants them. `infrastructure/` implements adapters. `app/` wires services into views. UI rendering must never own a capture handle or call Whisper.
 
 ### 4.2 Threads and communication
 
 | Execution context | Responsibilities | Constraints |
 | --- | --- | --- |
 | GPUI foreground | Windows, entities, views, focus, menu state, message presentation | No blocking audio/file/model operations |
-| Microphone capture thread | COM apartment, WASAPI event loop, packet timestamping | Short bounded packet processing, no UI calls |
+| Microphone capture thread | flexaudio stream worker, timeline mapping, drift resampler | Short bounded packet processing, no UI calls |
 | Loopback capture thread | Separate COM apartment + loopback event loop | Handle silence, discontinuity and device invalidation |
 | Mixer/writer thread | Merge 10 ms blocks, disk output, meter atomics | Bounded latency; protect recording on I/O error |
 | Idle level-monitor worker(s) | Meter selected sources without recording | Stop/hand over before recording starts |
@@ -272,7 +272,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `app/` | GPUI Kit bootstrap, dependency wiring, application-wide actions and lifecycle |
 | `domain/` | Audio formats, timestamp/chunk types, recording and transcript data models, pure text formatting |
 | `services/` | Recording sessions, idle level monitoring, transcription jobs and orchestration |
-| `infrastructure/audio/` | WASAPI device enumeration, capture, loopback keep-alive, mixing and resampling |
+| `infrastructure/audio/` | flexaudio capture adapters, device catalog, mixing and resampling |
 | `infrastructure/ai/` | Whisper engine integration and local model management |
 | `infrastructure/storage/` | JSON settings, recording library, sidecars and directory watching |
 | `infrastructure/files/` | WAV writer, optional M4A encoder, audio reader and player |
@@ -295,7 +295,7 @@ Prefer channels and typed events for worker-to-UI communication, with updates di
 - Register a Windows endpoint-notification callback. It should enqueue a lightweight event, not reinitialize streams inside the callback.
 - Do not allow a selection change during a recording; support mid-recording device loss via the recovery policy below.
 
-### 6.2 WASAPI capture
+### 6.2 flexaudio capture
 
 - Two independent shared-mode streams, one capture endpoint and one render endpoint with `AUDCLNT_STREAMFLAGS_LOOPBACK`.
 - Prefer event-driven buffering and a roughly 200 ms engine buffer if supported; check the negotiated format/device period rather than assuming one setting fits every device.
@@ -307,7 +307,7 @@ Prefer channels and typed events for worker-to-UI communication, with updates di
 
 ### 6.3 Silence and loopback keep-alive
 
-When system playback is silent, WASAPI loopback may yield no packets. The mixer must **never infer that the recording clock has stopped**. Use QPC-based time alignment and synthesize silence for missing intervals. Investigate a silent-render keep-alive stream on the selected output endpoint as a compatibility improvement; verify it does not create audible output or undesirable power/device behavior. Timestamp-based gap filling remains required even with keep-alive.
+System loopback uses flexaudio’s classic silent-render keepalive so idle endpoints keep delivering silence on the device clock. The mixer must **never infer that the recording clock has stopped**. Use session-timeline alignment (`frame_index` anchored at open) and synthesize silence for remaining gaps. Timestamp-based gap filling remains required even with keepalive.
 
 ### 6.4 Timeline, mixing and clock drift
 
@@ -562,7 +562,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | --- | --- | --- |
 | **M0 — Foundation** | Cargo package, pinned Windows-tested GPUI Kit, manifest/resources, logging/settings skeleton, single-instance policy, COM threading design | Opens a GPUI window on target Windows hardware; Cargo checks pass |
 | **M1 — Shell UI** | Resizable tabbed window, placeholder Record/Recordings views, tray icon, close/minimize policy | UI/tray lifecycle works including Explorer restart |
-| **M2 — Microphone capture** | Device enumeration, single mic WASAPI capture, WAV `.partial`, folder picker, start/stop | Produces playable WAV and cleanly finalizes |
+| **M2 — Microphone capture** | Device enumeration, single mic flexaudio capture, WAV `.partial`, folder picker, start/stop | Produces playable WAV and cleanly finalizes |
 | **M3 — Loopback + mixer** | Loopback capture, timestamp alignment, ring buffers, mixer, gains, level meters and idle monitoring | Synthetic tests pass; real two-source sync verified |
 | **M4 — Robustness** | Endpoint changes, disk checks, privacy flow, partial-file recovery, shutdown behavior | Device loss and interrupted recording preserve usable data |
 | **M5 — Recording library** | Library scan/watch, sidecars, list, playback, rename/delete/open folder | Files remain correctly paired and selected |
@@ -579,7 +579,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | --- | --- |
 | Selected GPUI Kit/GPUI distribution does not fully support required Windows APIs/lifecycle | M0 Windows spike; pin exact revision; isolate native tray/dialog integration behind adapters |
 | GPUI Kit / GPUI foreground thread stalls from capture/inference | Dedicated workers, bounded channels, throttled state updates |
-| COM thread/apartment misuse | Construct and dispose WASAPI objects on owning worker threads; no unchecked cross-thread interface movement |
+| COM thread/apartment misuse | flexaudio owns capture COM; device-watch COM stays on its worker; no unchecked cross-thread interface movement |
 | Silent loopback produces no packets | QPC timeline and silence insertion; investigate silent render keep-alive |
 | Drift between independent devices | Unit-test 100 ppm deviations; Rubato adaptive resample ratio on each capture stream |
 | Driver rejects requested format/conversion | Probe `IsFormatSupported`/mix format; test alternate converter path |
@@ -609,7 +609,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 These are deliberate implementation choices to settle during M0–M3, not implicit claims of already-working APIs:
 
 1. **GPUI Kit version and Windows backend:** confirm `Application`/window creation, focus, close interception, timers/tasks, text selection, and exact event subscription API with a pinned revision.
-2. **WASAPI wrapper versus direct `windows` bindings:** select after testing event-driven capture, device notifications and loopback with COM lifetime constraints.
+2. **Capture stack:** flexaudio 0.8 behind `CapturePort` (D-03); keep Skrivli mixer for gains/meters/degrade.
 3. **Audio buffer implementation:** use a proven SPSC implementation unless custom time-stamped packet semantics demand a bespoke ring; test contention and overrun behavior.
 4. **Format conversion:** verify negotiated shared-mode capture formats and preferred fallback resampler, rather than assuming auto-conversion is universal.
 5. **Tray event bridge:** determine safe native HWND/message registration and shutdown interaction with the chosen GPUI Kit / GPUI Windows backend.

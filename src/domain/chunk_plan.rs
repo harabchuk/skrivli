@@ -27,6 +27,7 @@ pub(crate) const HOLE_FRAMES: u64 = 48;
 pub(crate) const MAX_GAP_FRAMES: u64 = 48_000 * 5;
 
 /// `latency_hns` is a WASAPI stream latency in 100 ns units.
+#[allow(dead_code)]
 pub(crate) fn latency_reference_to_ticks(latency_hns: i64, ticks_per_second: u64) -> u64 {
     if latency_hns <= 0 || ticks_per_second == 0 {
         return 0;
@@ -39,6 +40,7 @@ pub(crate) fn latency_reference_to_ticks(latency_hns: i64, ticks_per_second: u64
 /// Frame index of a packet after subtracting device latency.
 /// A timestamp that latency pulls before `t0` clamps to frame 0 when the raw
 /// timestamp is still inside the session.
+#[allow(dead_code)]
 pub(crate) fn map_packet_frame(
     origin: SessionOrigin,
     timestamp: u64,

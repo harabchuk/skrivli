@@ -1,8 +1,8 @@
 # Skrivli — agent guide
 
-Windows desktop app (Win10/11, `x86_64-pc-windows-msvc`). Rust stable, one Cargo package (`src/lib.rs` testable library, `src/main.rs` thin entry). UI is **GPUI Kit** (`gpui-kit`); do not mix its re-exported GPUI crates at other versions. Windows APIs via the `windows` crate. Audio is WASAPI on dedicated threads. Settings and sidecars are `serde_json`. Transcription is local whisper.cpp. Logs use `tracing`. Commit `Cargo.lock`.
+Windows desktop app (Win10/11, `x86_64-pc-windows-msvc`). Rust stable, one Cargo package (`src/lib.rs` testable library, `src/main.rs` thin entry). UI is **GPUI Kit** (`gpui-kit`); do not mix its re-exported GPUI crates at other versions. Windows APIs via the `windows` crate. Audio capture is **flexaudio** (mic via cpal/WASAPI, system via WASAPI loopback) on dedicated worker threads. Settings and sidecars are `serde_json`. Transcription is local whisper.cpp. Logs use `tracing`. Commit `Cargo.lock`.
 
-`domain/` is the core. It has no GPUI, Windows, COM, file I/O, or AI types. `services/` own use cases and depend on ports. `infrastructure/` implements adapters. `ui/` is only Kit overrides and custom controls. `views/` compose screens. Rendering never owns a WASAPI handle or calls Whisper. The GPUI thread does no blocking audio, disk, or inference work.
+`domain/` is the core. It has no GPUI, Windows, COM, file I/O, or AI types. `services/` own use cases and depend on ports. `infrastructure/` implements adapters. `ui/` is only Kit overrides and custom controls. `views/` compose screens. Rendering never owns a capture handle or calls Whisper. The GPUI thread does no blocking audio, disk, or inference work.
 
 ## Specs keep pace with features
 
@@ -29,7 +29,7 @@ src/
 ├── domain/               # core: formats, timeline, recording, transcript
 ├── services/             # recording, level monitor, transcription, ports
 ├── infrastructure/
-│   ├── audio/            # WASAPI capture, loopback, mixer, resample
+│   ├── audio/            # flexaudio capture, mixer, resample, device watch
 │   ├── files/            # WAV, optional M4A, reader, player
 │   ├── ai/               # whisper.cpp, model files
 │   ├── storage/          # settings, library, sidecars, watcher

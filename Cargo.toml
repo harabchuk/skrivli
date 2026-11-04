@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 build = "build.rs"
 
 [dependencies]
+flexaudio = "0.8"
 gpui-kit = "=0.9.0"
 rubato = { version = "5", default-features = false }
 serde = { version = "1", features = ["derive"] }

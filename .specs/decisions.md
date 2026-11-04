@@ -49,7 +49,7 @@ Keyboard focus is wired (`focus_handle().tab_stop(true)`, `track_focus`, `window
 
 ## COM, foreground ownership, commands, shutdown, errors
 
-**COM (design only, no WASAPI yet):** each capture or other Windows worker that touches COM calls `CoInitializeEx` / `CoUninitialize` on that thread. COM pointers stay in that apartment. Do not mark those wrappers `Send` or `Sync`. The GPUI foreground thread does not initialize a capture apartment and does not join workers inline.
+**COM:** flexaudio owns capture COM apartments on its worker threads. The device-watch thread still calls `CoInitializeEx` / `CoUninitialize` for `IMMNotificationClient` only. COM pointers stay in that apartment. Do not mark those wrappers `Send` or `Sync`. The GPUI foreground thread does not initialize a capture apartment and does not join workers inline.
 
 **Foreground ownership:** `app::run` loads settings and starts logging before `application().run`. The GPUI callback only initializes Kit, applies the theme, and opens the window. Disk and inference do not run inside `render`.
 
@@ -59,11 +59,11 @@ Keyboard focus is wired (`focus_handle().tab_stop(true)`, `track_focus`, `window
 
 **Errors:** `AppError` `Display` includes context and the source. `user_message()` is a fixed sentence and does not include paths, audio, or transcript text. Panic hook logs `panic at file:line:column` and does not format the panic payload. Logs are a non-blocking `tracing` subscriber writing `skrivli.log` under `%LOCALAPPDATA%\Skrivli\logs`, rotating at about 1 MB with two archives (three files). Settings unknown `schema_version` values above the supported version fall back to defaults. Saves write a temp sibling, `sync_all`, then `ReplaceFileW` when the destination exists (`std::fs::rename` fails on Windows in that case).
 
-## D-03 — WASAPI through the `windows` crate
+## D-03 — Capture through flexaudio
 
-**Outcome:** microphone capture calls WASAPI directly through `windows` 0.58 (`IAudioClient`, `IAudioCaptureClient`, `IMMDeviceEnumerator`). No `wasapi` / `cpal` wrapper. The capture thread calls `CoInitializeEx(COINIT_MULTITHREADED)` and releases that apartment, the audio client, and the event handle with `Drop`. Those COM pointers are not `Send` or `Sync`.
+**Outcome:** microphone and system capture go through **flexaudio 0.8** behind `CapturePort`. Mic uses flexaudio-mic (cpal/WASAPI). System uses flexaudio-os-windows classic WASAPI loopback with silent-render keepalive enabled by default. Device ids for selection come from `flexaudio::devices()` (cpal names / FriendlyName), not MMDevice `GetId`. Hot-plug wake still uses `IMMNotificationClient` on a COM-owning watch thread; re-enumeration calls flexaudio. Skrivli keeps its own mixer, gains, meters, Rubato drift nudge, and WAV writer. `SourceKind::Mix` is not used (product needs separate meters and single-source degrade).
 
-**Not spiked on hardware:** opening a real capture endpoint was not run in this session. `cargo test` never calls `WasapiCapture::open`. The shared-mode event-driven path (format probe, ~200 ms buffer when the engine period allows it, packet drain, silence and discontinuity flags, QPC timestamps) is compiled and covered by pure helpers plus a fake port.
+**Not spiked on hardware:** opening a real flexaudio endpoint was not run in this session. `cargo test` never calls `FlexMicCapture::open` / `FlexSystemCapture::open` against hardware. Mapping helpers and fake recording ports cover the port contract.
 
 ## D-04 — Bounded capture queue (microphone and loopback)
 
@@ -79,4 +79,4 @@ The second source did not change the policy. Microphone and loopback each have o
 
 **Outcome:** each capture stream owns a Rubato `Async` polynomial (Cubic) resampler that converts the device rate to internal 48 kHz stereo `f32`, including when the device already reports 48 kHz. Sudden holes of at least about 1 ms become silence on the shared QPC timeline; sudden overlaps are dropped from the front of the late packet. Gradual clock error is tracked as `AlignState.last_error` and published to an `AtomicI64` that the capture thread reads into `set_resample_ratio` (ramped, ±1% max relative). The mixer no longer drop/duplicates frames for gradual drift. Diagnostics count when absolute error passes about 20 ms (`960` frames). Tests cover ±100 ppm error publication and that a positive drift error increases resampler output length.
 
-A silent-render keep-alive on the output endpoint is still deferred. WASAPI loopback may deliver no packets during silence; that is treated as a normal gap and filled from the session clock. The keep-alive stays out until a real device shows it is inaudible and does not change power behavior.
+Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default `windows_classic_loopback_keepalive`. Idle system capture therefore keeps delivering device-clocked silence instead of stalling; the mixer still fills any remaining timeline gaps.

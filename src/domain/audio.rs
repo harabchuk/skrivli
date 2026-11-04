@@ -11,6 +11,7 @@ pub(crate) const INTERNAL_SAMPLE_RATE: u32 = 48_000;
 pub(crate) const INTERNAL_CHANNELS: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum SampleEncoding {
     I16,
     I32,
@@ -33,6 +34,7 @@ pub(crate) struct AudioFormat {
     encoding: SampleEncoding,
 }
 
+#[allow(dead_code)]
 impl AudioFormat {
     pub(crate) fn new(sample_rate: u32, channels: u16, encoding: SampleEncoding) -> Option<Self> {
         if sample_rate == 0 || channels == 0 || channels > 8 {
@@ -83,7 +85,10 @@ impl AudioFormat {
     }
 }
 
-/// Stable endpoint id from the Windows MMDevice API (`IMMDevice::GetId`).
+/// Stable selectable endpoint id from flexaudio device enumeration.
+///
+/// Microphones use cpal device names; system outputs typically use FriendlyName
+/// (native id only when names collide or are unreadable).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct EndpointId(String);
 
@@ -110,6 +115,7 @@ pub(crate) enum EndpointFlow {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum EndpointAvailability {
     Active,
     Disabled,
@@ -169,10 +175,9 @@ impl EndpointDescriptor {
     }
 }
 
-/// Explicit endpoint id, or the Windows default for the role.
+/// Explicit endpoint id, or the OS default for the role.
 ///
-/// Microphone default is the communications capture endpoint. Render default
-/// is the console render endpoint.
+/// Defaults come from flexaudio device enumeration (`is_default`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum EndpointChoice {
     #[default]
@@ -293,6 +298,7 @@ impl SessionOrigin {
         u64::try_from(samples).ok()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn ticks_per_second(self) -> u64 {
         self.ticks_per_second
     }

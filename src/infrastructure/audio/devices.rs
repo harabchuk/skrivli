@@ -1,7 +1,9 @@
-//! Endpoint enumeration through MMDevice.
+//! Endpoint catalog from flexaudio, with a COM wake for hot-plug.
 //!
-//! The notification callback only enqueues a wake-up. It does not open a
-//! stream or touch the UI. Real enumeration is not called from unit tests.
+//! Device ids come from [`flexaudio::devices`] (cpal names for microphones,
+//! FriendlyName / native id for render). `IMMNotificationClient` only enqueues
+//! a wake; re-enumeration always goes through flexaudio so capture selection
+//! ids stay aligned. flexaudio's own watcher is a no-op on Windows.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
@@ -9,14 +11,13 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use flexaudio::{DeviceInfo, SourceKind};
 use windows::core::PCWSTR;
-use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::{
-    eCapture, eCommunications, eConsole, eRender, IMMDevice, IMMDeviceEnumerator,
-    IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator, DEVICE_STATE,
-    DEVICE_STATE_ACTIVE, DEVICE_STATE_DISABLED, DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
+    IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
+    DEVICE_STATE,
 };
-use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL, STGM_READ};
+use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
 
 use crate::common::error::AppError;
 use crate::domain::audio::{EndpointAvailability, EndpointDescriptor, EndpointFlow, EndpointId};
@@ -65,10 +66,10 @@ fn watch(emit: Box<dyn Fn(DeviceCatalog) + Send>, stop: &AtomicBool) -> Result<(
     let callback: IMMNotificationClient = EndpointEvents { tx: tx.clone() }.into();
     unsafe { enumerator.RegisterEndpointNotificationCallback(&callback) }
         .map_err(|error| AppError::message("microphone", error.to_string()))?;
-    emit(enumerate(&enumerator));
+    emit(enumerate_catalog());
     while !stop.load(Ordering::Acquire) {
         match recv_wake(&rx) {
-            Wake::Event => emit(enumerate(&enumerator)),
+            Wake::Event => emit(enumerate_catalog()),
             Wake::Timeout => {}
             Wake::Closed => break,
         }
@@ -96,11 +97,41 @@ fn enumerator() -> Result<IMMDeviceEnumerator, AppError> {
         .map_err(|error| AppError::message("microphone", error.to_string()))
 }
 
-fn enumerate(enumerator: &IMMDeviceEnumerator) -> DeviceCatalog {
-    let capture = list_flow(enumerator, eCapture, EndpointFlow::Capture);
-    let render = list_flow(enumerator, eRender, EndpointFlow::Render);
-    let default_capture = default_id(enumerator, eCapture, eCommunications);
-    let default_render = default_id(enumerator, eRender, eConsole);
+/// Build a catalog from flexaudio device ids (same ids `CapturePort` opens).
+pub(crate) fn enumerate_catalog() -> DeviceCatalog {
+    match flexaudio::devices() {
+        Ok(devices) => catalog_from_devices(&devices),
+        Err(error) => {
+            tracing::warn!(error = %error, "flexaudio devices were not enumerated");
+            DeviceCatalog::empty()
+        }
+    }
+}
+
+pub(crate) fn catalog_from_devices(devices: &[DeviceInfo]) -> DeviceCatalog {
+    let mut capture = Vec::new();
+    let mut render = Vec::new();
+    let mut default_capture = None;
+    let mut default_render = None;
+    for device in devices {
+        let Some(descriptor) = describe(device) else {
+            continue;
+        };
+        match descriptor.flow() {
+            EndpointFlow::Capture => {
+                if device.is_default && default_capture.is_none() {
+                    default_capture = Some(descriptor.id().clone());
+                }
+                capture.push(descriptor);
+            }
+            EndpointFlow::Render => {
+                if device.is_default && default_render.is_none() {
+                    default_render = Some(descriptor.id().clone());
+                }
+                render.push(descriptor);
+            }
+        }
+    }
     DeviceCatalog {
         capture,
         render,
@@ -109,88 +140,30 @@ fn enumerate(enumerator: &IMMDeviceEnumerator) -> DeviceCatalog {
     }
 }
 
-fn list_flow(
-    enumerator: &IMMDeviceEnumerator,
-    flow: windows::Win32::Media::Audio::EDataFlow,
-    kind: EndpointFlow,
-) -> Vec<EndpointDescriptor> {
-    let mask = DEVICE_STATE(
-        DEVICE_STATE_ACTIVE.0
-            | DEVICE_STATE_DISABLED.0
-            | DEVICE_STATE_UNPLUGGED.0
-            | DEVICE_STATE_NOTPRESENT.0,
-    );
-    let collection = match unsafe { enumerator.EnumAudioEndpoints(flow, mask) } {
-        Ok(collection) => collection,
-        Err(error) => {
-            tracing::warn!(error = %error, "endpoints were not enumerated");
-            return Vec::new();
-        }
-    };
-    let count = match unsafe { collection.GetCount() } {
-        Ok(count) => count,
-        Err(error) => {
-            tracing::warn!(error = %error, "endpoint count was not read");
-            return Vec::new();
-        }
-    };
-    let mut devices = Vec::new();
-    for index in 0..count {
-        let Ok(device) = (unsafe { collection.Item(index) }) else {
-            continue;
-        };
-        if let Some(descriptor) = describe(&device, kind) {
-            devices.push(descriptor);
-        }
-    }
-    devices
-}
-
-fn describe(device: &IMMDevice, flow: EndpointFlow) -> Option<EndpointDescriptor> {
-    let id = device_id(device)?;
-    let state = unsafe { device.GetState() }.unwrap_or(DEVICE_STATE_DISABLED);
-    let availability = if state_contains(state, DEVICE_STATE_ACTIVE) {
-        EndpointAvailability::Active
-    } else if state_contains(state, DEVICE_STATE_NOTPRESENT) {
-        EndpointAvailability::Absent
+fn describe(device: &DeviceInfo) -> Option<EndpointDescriptor> {
+    let flow = if device.is_loopback {
+        EndpointFlow::Render
+    } else if device.source_kind == SourceKind::Mic {
+        EndpointFlow::Capture
     } else {
-        EndpointAvailability::Disabled
+        return None;
     };
-    let name = friendly_name(device).unwrap_or_else(|| match flow {
-        EndpointFlow::Capture => "Microphone".to_string(),
-        EndpointFlow::Render => "Output".to_string(),
-    });
-    Some(EndpointDescriptor::new(id, name, flow, availability))
-}
-
-fn default_id(
-    enumerator: &IMMDeviceEnumerator,
-    flow: windows::Win32::Media::Audio::EDataFlow,
-    role: windows::Win32::Media::Audio::ERole,
-) -> Option<EndpointId> {
-    let device = unsafe { enumerator.GetDefaultAudioEndpoint(flow, role) }.ok()?;
-    device_id(&device)
-}
-
-fn device_id(device: &IMMDevice) -> Option<EndpointId> {
-    let raw = unsafe { device.GetId() }.ok()?;
-    let text = take_pwstr(raw);
-    EndpointId::new(text)
-}
-
-fn friendly_name(device: &IMMDevice) -> Option<String> {
-    let store = unsafe { device.OpenPropertyStore(STGM_READ) }.ok()?;
-    let value = unsafe { store.GetValue(&PKEY_Device_FriendlyName) }.ok()?;
-    let name = value.to_string();
-    if name.trim().is_empty() {
-        None
+    let id = EndpointId::new(device.id.clone())?;
+    let name = if device.name.trim().is_empty() {
+        match flow {
+            EndpointFlow::Capture => "Microphone".to_string(),
+            EndpointFlow::Render => "Output".to_string(),
+        }
     } else {
-        Some(name)
-    }
-}
-
-fn state_contains(state: DEVICE_STATE, flag: DEVICE_STATE) -> bool {
-    state.0 & flag.0 != 0
+        device.name.clone()
+    };
+    // flexaudio only lists selectable endpoints; treat them as active.
+    Some(EndpointDescriptor::new(
+        id,
+        name,
+        flow,
+        EndpointAvailability::Active,
+    ))
 }
 
 pub(crate) fn take_pwstr(value: windows::core::PWSTR) -> String {
@@ -255,7 +228,10 @@ mod tests {
     use std::sync::mpsc::sync_channel;
     use std::time::Instant;
 
-    use super::enqueue_device_event;
+    use flexaudio::{DeviceInfo, SourceKind};
+
+    use super::{catalog_from_devices, enqueue_device_event};
+    use crate::domain::audio::EndpointFlow;
 
     #[test]
     fn notification_enqueue_does_not_block_when_full() {
@@ -275,5 +251,59 @@ mod tests {
             rx.try_recv(),
             Err(std::sync::mpsc::TryRecvError::Empty)
         ));
+    }
+
+    #[test]
+    fn catalog_splits_mic_and_loopback_and_keeps_defaults() {
+        // Arrange
+        let devices = vec![
+            DeviceInfo {
+                id: "Mic A".into(),
+                name: "Mic A".into(),
+                source_kind: SourceKind::Mic,
+                sample_rate: 48_000,
+                channels: 1,
+                format_available: true,
+                is_loopback: false,
+                is_default: true,
+            },
+            DeviceInfo {
+                id: "Speakers".into(),
+                name: "Speakers".into(),
+                source_kind: SourceKind::SystemLoopback,
+                sample_rate: 48_000,
+                channels: 2,
+                format_available: true,
+                is_loopback: true,
+                is_default: true,
+            },
+            DeviceInfo {
+                id: "Headset".into(),
+                name: "Headset".into(),
+                source_kind: SourceKind::Mic,
+                sample_rate: 44_100,
+                channels: 1,
+                format_available: true,
+                is_loopback: false,
+                is_default: false,
+            },
+        ];
+
+        // Act
+        let catalog = catalog_from_devices(&devices);
+
+        // Assert
+        assert_eq!(catalog.capture.len(), 2);
+        assert_eq!(catalog.render.len(), 1);
+        assert_eq!(
+            catalog.default_capture.as_ref().map(|id| id.as_str()),
+            Some("Mic A")
+        );
+        assert_eq!(
+            catalog.default_render.as_ref().map(|id| id.as_str()),
+            Some("Speakers")
+        );
+        assert_eq!(catalog.capture[0].flow(), EndpointFlow::Capture);
+        assert_eq!(catalog.render[0].flow(), EndpointFlow::Render);
     }
 }

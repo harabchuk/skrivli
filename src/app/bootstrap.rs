@@ -16,10 +16,9 @@ use crate::common::error::AppError;
 use crate::common::logging;
 use crate::common::paths::AppPaths;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
-use crate::infrastructure::audio::capture::WasapiCapture;
 use crate::infrastructure::audio::devices::spawn_device_watch;
+use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-use crate::infrastructure::audio::loopback::WasapiLoopback;
 use crate::infrastructure::audio::system::{QpcCounter, SystemClock, WindowsDisk};
 use crate::infrastructure::files::wav::recover_partials;
 use crate::infrastructure::storage::settings::{Settings, ThemePreference};
@@ -161,8 +160,8 @@ fn spawn_workers(
 ) -> crate::services::recording::RecordingHost {
     let (host, session) = spawn_recording_host(
         RecordingEngine {
-            mic: Box::new(WasapiCapture),
-            system: Box::new(WasapiLoopback),
+            mic: Box::new(FlexMicCapture),
+            system: Box::new(FlexSystemCapture),
             clock: Box::new(SystemClock),
             space: Box::new(WindowsDisk),
             performance: Box::new(QpcCounter),
@@ -180,8 +179,8 @@ fn spawn_workers(
     );
     let monitor_stop = shutdown.flag();
     shutdown.track(spawn_level_monitor(
-        Box::new(WasapiCapture),
-        Box::new(WasapiLoopback),
+        Box::new(FlexMicCapture),
+        Box::new(FlexSystemCapture),
         lease,
         levels,
         gain,

@@ -1,7 +1,7 @@
 # Skrivli — Milestone-Based Implementation Plan
 
 **Target:** Windows 10/11, x86_64-pc-windows-msvc  
-**Stack:** Rust stable, GPUI Kit/GPUI, Windows Core Audio (WASAPI), local whisper.cpp  
+**Stack:** Rust stable, GPUI Kit/GPUI, flexaudio (WASAPI/cpal), local whisper.cpp  
 **Source of truth:** `app-design.md` for product and technical design; `AGENTS.md` for source placement, layering and coding conventions.  
 **Status:** Execution backlog; tasks unchecked until implemented and verified.
 
@@ -148,11 +148,10 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 - [x] `infrastructure/windows/dialogs.rs`: native folder picker; validate write permissions and folder creation. Wire GPUI Kit device selectors and destination read-only field in `views/recording.rs`.
 - [x] Test absent/disabled devices and microphone privacy denied. Do not allow endpoint/path modifications during active recording.
 
-### M2.2 — Mic WASAPI worker and normalization
+### M2.2 — Mic capture worker and normalization
 
-- [x] `infrastructure/audio/capture.rs`: capture thread owns COM apartment, `IAudioClient` and `IAudioCaptureClient`; open shared-mode event-driven capture after checking supported format and engine period.
-- [x] Drain available packets on wakeup; honor silent and discontinuity flags; capture accurate QPC/device timestamps. Use RAII for COM and Windows event handles.
-- [x] Implement format conversion in `infrastructure/audio/format.rs` and `resampler.rs` to internal 48 kHz stereo interleaved `f32`, including mono mapping. Do not assume requested hardware format is accepted.
+- [x] `infrastructure/audio/flex_capture.rs`: flexaudio `SourceKind::Mic` / `SystemLoopback` behind `CapturePort`; worker owns the stream, maps `frame_index` onto the session timeline, and applies Rubato drift nudge.
+- [x] Device catalog from `flexaudio::devices()`; COM `IMMNotificationClient` only wakes re-enumeration.
 - [x] Bound memory and packet queues; no blocking disk writes, UI access, unbounded allocations or high-contention locks in hot loop.
 - [x] Expose testable interfaces for synthetic packet input and a fake capture backend.
 
@@ -161,7 +160,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 - [x] `infrastructure/files/wav.rs`: streaming PCM16 stereo 48 kHz RIFF writer to collision-safe `Skrivli_YYYY-MM-DD_HH-MM-SS.wav.partial`; quantize/clamp `f32`, write/repair RIFF/data sizes periodically (~2 s), flush/finalize then rename.
 - [x] Choose and document a RIFF boundary policy now: **safe stop or rotate** before 32-bit size overflow; do not write invalid headers. Include tests for boundary math without generating multi-GB files.
 - [x] `services/recording.rs`: `Idle → Starting → Recording → Stopping → Idle/Error`, start readiness handshake, owned workers, bounded channel and orderly shutdown/drain/flush. Stop must be idempotent.
-- [x] Ensure UI shows state/timer/errors and delegates to service, never directly calls WASAPI. Persist basic sidecar info now if this makes recording identity stable; expand in M5.
+- [x] Ensure UI shows state/timer/errors and delegates to service, never directly opens capture. Persist basic sidecar info now if this makes recording identity stable; expand in M5.
 - [x] Add `tests/recording_flow.rs` using fake capture, injectable clock and temporary recording directory.
 
 **Validate:** one-minute mic WAV opens in a common Windows player; duration approximately matches wall clock, data/header lengths correct; repeated start/stop and startup failure clean up threads/files.
@@ -179,8 +178,8 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M3.1 — Loopback worker and per-source transport
 
-- [x] `infrastructure/audio/loopback.rs`: shared-mode `eRender` endpoint loopback on separate COM-owning native thread, format negotiation/conversion and packet timestamps.
-- [x] Handle zero packets during silence as a normal state; optionally prototype silent-render keep-alive only after validating no audible output or adverse power behavior.
+- [x] `FlexSystemCapture`: flexaudio `SourceKind::SystemLoopback` with classic silent-render keepalive; separate worker from the mic stream.
+- [x] Idle silence is delivered as keepalive packets; remaining gaps still filled by the mixer from the session clock.
 - [x] Select a proven bounded SPSC queue for each source. Define timestamped packet/block representation, maximum queue latency and overflow/drop/gap accounting. Do not invent a custom lock-free queue unless necessary.
 
 ### M3.2 — Deterministic mixer and drift correction
@@ -444,7 +443,7 @@ Done when: observable milestone acceptance condition
 | --- | --- | --- | --- |
 | D-01 | M0 | GPUI Kit revision and compatible GPUI Windows lifecycle APIs | Executable window/focus/event/close/text spike |
 | D-02 | M1 | Tray hidden HWND/message-pump bridge | Explorer restart + shutdown test |
-| D-03 | M2 | Direct `windows` WASAPI vs wrapper, negotiated formats | Real mic/loopback opening spikes |
+| D-03 | M2 | flexaudio CapturePort adapters + device ids | Real mic/loopback opening spikes |
 | D-04 | M2–M3 | Bounded SPSC implementation, overflow/drop/gap semantics | Concurrent stress + synthetic timeline tests |
 | D-05 | M2 | RIFF size cap/rotation vs RF64 | Header boundary tests + long-session design |
 | D-06 | M3 | Adaptive Rubato ratio for gradual drift; sparse hole/overlap only | ±100 ppm error publication + resampler ratio tests |
