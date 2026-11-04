@@ -282,10 +282,12 @@ pub(crate) fn recordings_tab(
 
     v_flex()
         .size_full()
+        .min_h_0()
         .gap_3()
         .child(
             h_flex()
                 .gap_2()
+                .flex_shrink_0()
                 .child(
                     Button::new("refresh-library")
                         .label("Refresh")
@@ -298,18 +300,33 @@ pub(crate) fn recordings_tab(
                 ),
         )
         .child(
+            // h_flex centres on the cross axis by default; stretch so the table
+            // column gets a real height for uniform_list virtualization.
             h_flex()
                 .flex_1()
+                .min_h_0()
+                .items_stretch()
                 .gap_3()
                 .overflow_hidden()
                 .child(
                     v_flex()
                         .flex_1()
                         .min_w(px(280.))
+                        .min_h_0()
+                        .h_full()
                         .overflow_hidden()
-                        .child(list),
+                        .child(div().size_full().min_h_0().child(list)),
                 )
-                .child(v_flex().w(px(260.)).gap_2().child(detail)),
+                .child(
+                    v_flex()
+                        .w(px(260.))
+                        .flex_shrink_0()
+                        .h_full()
+                        .min_h_0()
+                        .overflow_hidden()
+                        .gap_2()
+                        .child(detail),
+                ),
         )
 }
 

@@ -12,7 +12,7 @@ use gpui_kit::component::table::{TableEvent, TableSelection, TableState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    px, App, Context, Entity, FocusHandle, IntoElement, ParentElement, Render, SharedString,
+    div, px, App, Context, Entity, FocusHandle, IntoElement, ParentElement, Render, SharedString,
     Styled, Subscription, Task, Window,
 };
 
@@ -563,6 +563,8 @@ impl MainWindow {
         let selected = self.library_selected;
         self.recordings_table.update(cx, |table, cx| {
             table.delegate_mut().set_rows(rows);
+            // Rebuild column layout after row data changes (Kit TableState contract).
+            table.refresh(cx);
             if let Some(id) = selected {
                 if let Some(index) = table.delegate().index_of(id) {
                     table.set_selection(TableSelection::Row(index), cx);
@@ -1110,7 +1112,14 @@ impl Render for MainWindow {
                         });
                     }),
             )
-            .child(v_flex().flex_1().p_4().overflow_hidden().child(body))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .p_4()
+                    .overflow_hidden()
+                    .child(div().size_full().min_h_0().child(body)),
+            )
             .child(
                 h_flex()
                     .h(px(28.))
