@@ -9,7 +9,7 @@
 
 - Implement milestones **M0 → M9** in order. Within each milestone, complete numbered work packages in order unless a dependency is noted. Each package should be an independently reviewable PR or small sequence of commits.
 - **Definition of done for every package:** code builds on pinned Windows toolchain, automated tests for testable logic, no warnings from `cargo clippy --all-targets -- -D warnings`, formatted source, typed errors at external boundaries, explicit resource ownership and shutdown, and updated documentation if the architecture changed.
-- **Release gates are empirical:** a passing unit test is not evidence that GPUI Kit, WASAPI, Windows Shell, Media Foundation, or whisper.cpp works on Windows hardware. Run manual checks at the designated gates.
+- **Release gates are empirical:** a passing unit test is not evidence that GPUI Kit, WASAPI, Windows Shell, `flac-codec`, or whisper.cpp works on Windows hardware. Run manual checks at the designated gates.
 - Use one Cargo package (`src/main.rs` and `src/lib.rs`) initially. Do not introduce a workspace, database, custom UI library, custom lock-free queue or general dependency-injection framework without demonstrated need.
 - Prefer GPUI Kit's version-matched GPUI and standard components. Verify actual APIs against the **pinned** source before writing integrations. No API signatures or library capabilities described here are presumed verified.
 - Maintain `.specs/decisions.md` (or small ADR files) for unresolved choices, outcome, tested toolchain/device and rationale. Record the exact commit/version of GPUI Kit and whisper bindings when confirmed.
@@ -21,7 +21,7 @@
 3. **Commands/events:** a single command path drives toolbar, tray and hotkey. Use discrete structured events, coalesce high-rate progress and meter snapshots and marshal all UI state changes to the GPUI executor.
 4. **Persistence:** settings and JSON sidecars are schema-versioned and written using a temporary sibling file, flush/sync as appropriate, then replace/rename; handle Windows replacement semantics and recovery errors explicitly.
 5. **Recording clock:** all audio events map to a monotonic QPC-based session timeline; absence of packets means source silence/gap, **not** elapsed-time suspension.
-6. **Safety:** do not log audio or transcript contents. Preserve the primary WAV on any transcription or M4A failure. Never delete usable partials without explicit recovery/cleanup logic.
+6. **Safety:** do not log audio or transcript contents. Preserve the primary WAV on any transcription or FLAC failure. Never delete usable partials without explicit recovery/cleanup logic.
 
 ### Proposed application-facing types (design sketches)
 
@@ -245,7 +245,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 ### M5.1 — Catalog and sidecars
 
 - [x] `domain/recording.rs`: stable recording identity, format and metadata. `infrastructure/storage/sidecar.rs`: versioned `<basename>.json` containing start/end, duration, devices, gap/errors, transcription status and links.
-- [x] `infrastructure/storage/library.rs`: scan configured directory for supported WAV/M4A, join `.json`/`.txt`, sort newest first, preserve entries with malformed/missing sidecars, skip in-progress partials except recovery presentation.
+- [x] `infrastructure/storage/library.rs`: scan configured directory for supported WAV/FLAC, join `.json`/`.txt`, sort newest first, preserve entries with malformed/missing sidecars, skip in-progress partials except recovery presentation.
 - [x] `infrastructure/storage/watcher.rs`: Windows directory events, debounce and full refresh fallback. Preserve selection by stable ID across rescans and renames.
 - [x] Test collisions, malformed metadata, external move/delete and accidental unpaired files.
 
@@ -279,7 +279,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M6.2 — Input pipeline and transcription text
 
-- [ ] `infrastructure/files/reader.rs`: validate supported decoder coverage for WAV/FLAC/MP3 and M4A (via suitable decoder/Media Foundation); errors identify unsupported codecs.
+- [ ] `infrastructure/files/reader.rs`: validate supported decoder coverage for WAV/MP3 and FLAC (via `flac-codec`); errors identify unsupported codecs.
 - [ ] Normalize streamed audio to 16 kHz mono `f32`, with channel mapping and anti-alias filtering. Unit-test duration, sine pitch/amplitude, high-frequency alias rejection.
 - [ ] `domain/chunk_plan.rs`: split long recordings into approximately 30-minute windows with overlap; apply global timestamp offsets and de-duplicate overlaps, without loading a two-hour recording into memory.
 - [ ] `domain/transcript.rs`: segment/time types and deterministic UTF-8 formatter using `[HH:MM:SS]`, paragraph breaks (~1.5 s pause or ~60 s span), conservative repeated-line cleanup. Atomically write `<basename>.txt`.
@@ -331,7 +331,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M8.1 — Settings and live configuration
 
-- [ ] Build GPUI Kit settings UI for directory, default endpoints, mic gain/AGC, optional stems, WAV/M4A retention, model, language, CPU threads, optional VAD, auto-transcribe, close-to-tray and start-hidden.
+- [ ] Build GPUI Kit settings UI for directory, default endpoints, mic gain/AGC, optional stems, WAV/FLAC retention, model, language, CPU threads, optional VAD, auto-transcribe, close-to-tray and start-hidden.
 - [ ] Validate input, atomically persist, distinguish immediate changes from those deferred until next recording/job; disable hazardous controls during active recording.
 - [ ] Add settings migration tests and missing device/model fallback behavior; maintain schema compatibility within v1.
 
@@ -344,9 +344,9 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M8.3 — Optional post-processing (feature-gated)
 
-- [ ] Only if core M0–M7 gates are green: implement `infrastructure/files/m4a.rs` with Media Foundation sink writer in background worker. Verify output by reopening/decoding before any optional WAV removal.
+- [ ] Only if core M0–M7 gates are green: implement `infrastructure/files/flac.rs` with `flac-codec` encode (`FlacSampleWriter` / byte writer) in a background worker, and decode via `flac-codec` when reading/verifying. Verify output by reopening/decoding before any optional WAV removal.
 - [ ] Optional separate source stems and VAD only after validated engine/device integration; default disabled. Treat failed post-processing as nonfatal and preserve WAV.
-- [ ] If native interop or packaging is unstable, **defer M4A/stems/VAD** and explicitly document the v1 exclusion rather than blocking essential release.
+- [ ] If `flac-codec` encode/decode or packaging is unstable, **defer FLAC/stems/VAD** and explicitly document the v1 exclusion rather than blocking essential release.
 
 ### M8 acceptance
 
@@ -449,12 +449,12 @@ Done when: observable milestone acceptance condition
 | D-06 | M3 | Adaptive Rubato ratio for gradual drift; sparse hole/overlap only | ±100 ppm error publication + resampler ratio tests |
 | D-07 | M6 | whisper.cpp binding/version, native runtime and licenses | Clean MSVC CPU build + transcription demo |
 | D-08 | M6 | Model catalog, exact trusted URLs/digests and compatibility | Verified manifest and corrupted-download test |
-| D-09 | M8 | Media Foundation M4A viability and optional feature priority | Encode/decode/packaging proof |
+| D-09 | M8 | `flac-codec` FLAC encode/decode viability and optional feature priority | Encode/decode/packaging proof |
 
 ## Scope discipline
 
 **Mandatory v1:** M0–M7 core goals, M8 essential settings/hotkey/accessibility, M9 distribution.  
-**Optional/defer if needed:** M4A, separate recording stems, VAD, advanced AGC, expanded theming and installers.  
+**Optional/defer if needed:** FLAC, separate recording stems, VAD, advanced AGC, expanded theming and installers.  
 **Outside v1:** live transcription, cloud sync, diarization, summaries, GPU transcription and cross-platform support.
 
 This plan is derived from the supplied Skrivli app design. It intentionally converts its decisions into implementation tasks and acceptance evidence without claiming untested Rust/GPUI Kit/Windows APIs already work.

@@ -185,7 +185,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 - Default microphone and system audio devices
 - Microphone gain and automatic gain
 - Optional separate source files (mic / system) — available when enabled; off by default
-- Optional compressed M4A retention alongside or instead of WAV after a successful conversion — optional; WAV is never discarded on a failed conversion
+- Optional lossless FLAC retention alongside or instead of WAV after a successful conversion — optional; WAV is never discarded on a failed conversion
 
 ### Transcription
 
@@ -248,7 +248,7 @@ A new user can: unzip → launch → record microphone and system audio → stop
 
 ### Optional / deferrable without blocking core v1
 
-- Compressed M4A post-processing
+- Lossless FLAC post-processing
 - Separate mic/system stem files
 - Voice activity detection for transcription
 - Advanced automatic gain behavior

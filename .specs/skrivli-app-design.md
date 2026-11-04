@@ -56,7 +56,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | Device format conversion | flexaudio normalizer to 48 kHz stereo `f32`, plus Rubato `Async` drift nudge | Internal 48 kHz stereo `f32`; device ids from `flexaudio::devices()` |
 | Audio mixing | Rust DSP module, bounded SPSC buffers | Timestamp alignment, drift handling, limiter, meters |
 | Recording | PCM16 stereo 48 kHz WAV first | `.wav.partial` while writing; finalize and recover on startup |
-| Optional M4A | Windows Media Foundation `IMFSinkWriter` | Post-processing worker; user opt-in |
+| Optional FLAC | `flac-codec` encode/decode | Post-processing worker; user opt-in |
 | Transcription | whisper.cpp via maintained Rust bindings or a pinned FFI adapter | Local CPU inference; explicitly controlled native build, optional acceleration later |
 | Default model | Quantized multilingual `base` model, subject to verified catalog/hash | Model isn't shipped; download only after user confirmation |
 | Persistent settings | `serde` + `serde_json` under `%APPDATA%\Skrivli\settings.json` | Atomic replacement and validation |
@@ -65,7 +65,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | Diagnostics | `tracing` + rotating file sink, or comparable maintained solution | `%LOCALAPPDATA%\Skrivli\logs\` |
 | Tests | Built-in Rust `#[test]`, integration tests in root `tests/` | No hardware for deterministic DSP tests |
 
-**Technical validation points:** (1) GPUI Kit and its pinned GPUI Windows backend and window lifecycle; (2) WASAPI loopback behavior and format negotiation on target devices; (3) whisper.cpp binding, model formats, and licensing; (4) M4A Media Foundation interop. Do not claim all of these APIs are already supported by a particular crate until proven with a small executable.
+**Technical validation points:** (1) GPUI Kit and its pinned GPUI Windows backend and window lifecycle; (2) WASAPI loopback behavior and format negotiation on target devices; (3) whisper.cpp binding, model formats, and licensing; (4) `flac-codec` encode/decode of 48 kHz stereo PCM16. Do not claim all of these APIs are already supported by a particular crate until proven with a small executable.
 
 ---
 
@@ -111,7 +111,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
  ┌──────────▼───────────────────────────▼───────────────────▼──────────────┐
  │ infrastructure/                                                      │
  │  audio: flexaudio mic + loopback → SPSC → timed mixer → peak snapshots │
- │  files: WAV writer / reader / playback / optional M4A encoder        │
+ │  files: WAV writer / reader / playback / optional FLAC encoder       │
  │  ai: decode → 16 kHz mono → whisper.cpp → transcript                  │
  │  storage: settings / library / sidecars / folder watcher             │
  │  windows: tray / hotkey / shell dialogs / autostart                   │
@@ -131,7 +131,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
 | Mixer/writer thread | Merge 10 ms blocks, disk output, meter atomics | Bounded latency; protect recording on I/O error |
 | Idle level-monitor worker(s) | Meter selected sources without recording | Stop/hand over before recording starts |
 | Transcription worker | At most one queued job at a time, decode/model infer/save | Cancellation, progress, no GPUI access |
-| Optional storage watcher/encoder | Directory notifications and M4A conversion | Debounce updates; no UI thread I/O |
+| Optional storage watcher/encoder | Directory notifications and FLAC conversion | Debounce updates; no UI thread I/O |
 
 Use bounded channels/queues for commands and discrete events (`RecordingStarted`, `RecordingStopped { path }`, `RecordingFailed`, `TranscriptProgress`, `TranscriptReady`, `DevicesChanged`). Aggregate high-rate meter data into atomic snapshots and read it from a GPUI-owned timer/task at about 30 Hz; **never send one GPUI notification per audio frame**. Route worker events back to UI through a thread-safe application bridge scheduled on the GPUI foreground executor, using the *pinned* GPUI revision's supported API. Avoid `std::thread::spawn` without a shutdown owner; retain join handles or supervised worker lifecycle.
 
@@ -226,7 +226,7 @@ skrivli/
 │   │   ├── files/
 │   │   │   ├── mod.rs
 │   │   │   ├── wav.rs
-│   │   │   ├── m4a.rs
+│   │   │   ├── flac.rs
 │   │   │   ├── reader.rs
 │   │   │   └── player.rs
 │   │   └── windows/
@@ -275,7 +275,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `infrastructure/audio/` | flexaudio capture adapters, device catalog, mixing and resampling |
 | `infrastructure/ai/` | Whisper engine integration and local model management |
 | `infrastructure/storage/` | JSON settings, recording library, sidecars and directory watching |
-| `infrastructure/files/` | WAV writer, optional M4A encoder, audio reader and player |
+| `infrastructure/files/` | WAV writer, optional FLAC encoder/reader via `flac-codec`, audio reader and player |
 | `infrastructure/windows/` | System tray, global hotkeys, startup behavior and Windows dialogs |
 | `ui/` | Reusable GPUI Kit compositions and custom GPUI elements such as level meters |
 | `views/` | GPUI screens, window composition and presentation state |
@@ -329,7 +329,7 @@ System loopback uses flexaudio’s classic silent-render keepalive so idle endpo
 - On launch, detect unfinished `.partial` WAV files, validate enough header/data to recover, repair lengths and rename as `*.recovered.wav`. Preserve originals or report an error if recovery isn't safe.
 - Check free space before start and periodically (~30 s). Below a safety threshold (initially 200 MB) stop gracefully, finalize what can be saved, and notify.
 - If the original output folder becomes inaccessible mid-recording, retain a usable partial if possible and attempt recovery to `%LOCALAPPDATA%\Skrivli\rescue\` using a documented bounded strategy; **do not promise that already-failed filesystem writes can be recovered**.
-- Optional post-recording AAC/M4A encoding with Media Foundation; only remove WAV after verifying the output and if user opted in.
+- Optional post-recording lossless FLAC encoding with the `flac-codec` crate; only remove WAV after verifying the output (reopen/decode) and if user opted in.
 - Store a sidecar `<basename>.json` containing start/end, duration, chosen device IDs, format, recording problems, transcription state, model and transcript linkage. Use a versioned schema and atomic JSON writes.
 
 ### 6.6 Recording lifecycle
@@ -361,7 +361,7 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 
 ### 7.2 Input normalization and chunking
 
-- Decode WAV/FLAC/MP3 using a validated library. For M4A/AAC, a Windows Media Foundation reader is acceptable. Do not assume any one decoder supports all target formats.
+- Decode WAV/MP3 using a validated library; decode FLAC with `flac-codec` when needed. Do not assume any one decoder supports all target formats.
 - Convert decoded input to **16 kHz mono `f32`** with explicit downmix and anti-alias resampling. Verify sample counts and timestamps.
 - Do not decode a two-hour file into a single in-memory buffer. Stream/cut long recordings into approximately **30-minute chunks** with overlap, offset segment timestamps and deduplicate content in overlap regions.
 - Keep audio source immutable during transcription. A failed job must never alter the recorded file.
@@ -454,14 +454,14 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Right pane: empty state until selected; then **Play / Stop**, file metadata, plain-text transcript in a selectable and copyable read-only text view; or **Create transcript** button if absent. Prefer a GPUI Kit read-only editor/text component, and verify selection, clipboard, keyboard scrolling and large-text performance; a plain `div().child(text)` is not an adequate substitute.
 - Actions: Play, Transcribe, Open folder, Rename, Delete, Refresh. Delete goes to the Windows Recycle Bin through a Windows Shell adapter and includes associated audio/`.txt`/`.json`; ask for confirmation and handle partial failures.
 - Double-click/Enter can start playback; selection change stops playback by design.
-- Background directory watcher debounces changes; the library scans WAV/M4A files and matches sidecars/transcripts. Preserve selected recording after refresh.
+- Background directory watcher debounces changes; the library scans WAV/FLAC files and matches sidecars/transcripts. Preserve selected recording after refresh.
 - Playback audio runs through a file/player adapter; never decode files or drive playback from GPUI rendering.
 
 ### 8.4 Model prompt and settings
 
 **Model prompt:** available installed models, browse button, explicit download action, verification/progress/cancel feedback, errors and retry.
 
-**Settings:** recording directory, default endpoints, gain/AGC, optional stems, M4A and WAV retention; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
+**Settings:** recording directory, default endpoints, gain/AGC, optional stems, FLAC and WAV retention; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
 
 ### 8.5 System tray (native Windows integration)
 
@@ -568,7 +568,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | **M5 — Recording library** | Library scan/watch, sidecars, list, playback, rename/delete/open folder | Files remain correctly paired and selected (implemented; hardware browse/playback spot-check still recommended) |
 | **M6 — Transcription** | Pinned whisper.cpp binding, decoder/resampler, model manager, FIFO worker, text formatter | Offline transcription yields correct `.txt` and supports cancel |
 | **M7 — Transcript UI** | GPUI Kit text selection/copy, transcript statuses, progress and notification | Entire recording-to-transcript flow works from UI |
-| **M8 — Settings and polish** | Settings UI, hotkey/autostart, DPI and keyboard accessibility, optional M4A | User preferences persist and critical interactions are accessible |
+| **M8 — Settings and polish** | Settings UI, hotkey/autostart, DPI and keyboard accessibility, optional FLAC | User preferences persist and critical interactions are accessible |
 | **M9 — Release** | Release build, portable ZIP, licensing/README/privacy notes, manual test pass | Clean Windows machine can run app and record/transcribe |
 
 ---
