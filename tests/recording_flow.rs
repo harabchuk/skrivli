@@ -82,6 +82,35 @@ fn start_stop_writes_header_lengths_and_stop_is_idempotent() {
 }
 
 #[test]
+fn stop_ends_a_live_capture_session() {
+    // Arrange
+    let dir = temp_dir("live-stop");
+    let harness = RecordingHarness::new(&dir);
+    harness.fail_system();
+    harness.stream_mic(480, 0.2);
+
+    // Act
+    harness.start_default();
+    harness
+        .wait_phase(RecordingHarnessPhase::Recording)
+        .expect("recording");
+    harness.stop();
+    let idle = harness
+        .wait_phase(RecordingHarnessPhase::Idle)
+        .expect("idle");
+
+    // Assert
+    assert!(idle
+        .notice
+        .unwrap_or("")
+        .contains("System audio is unavailable"));
+    assert_eq!(harness.workers(), 0);
+    assert_eq!(harness.capture_threads(), 0);
+    assert_eq!(wav_files(&dir).len(), 1);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn startup_failure_leaves_no_worker_and_no_wav() {
     // Arrange
     let dir = temp_dir("privacy");

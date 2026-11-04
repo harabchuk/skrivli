@@ -361,13 +361,24 @@ fn session_body(
     let mut limited = false;
     loop {
         let stopping = stop.load(Ordering::Acquire);
-        let mic_packet = pull_source(mic.as_mut(), &mut problems, "capture");
-        let system_packet = pull_source(system.as_mut(), &mut problems, "loopback");
-        if let Some(block) = mic_packet {
-            mixer.push_mic(block);
-        }
-        if let Some(block) = system_packet {
-            mixer.push_system(block);
+        if stopping {
+            // Live capture would keep feeding the mixer forever; close first,
+            // then drain whatever is already queued.
+            if let Some(stream) = mic.as_mut() {
+                stream.close();
+            }
+            if let Some(stream) = system.as_mut() {
+                stream.close();
+            }
+        } else {
+            let mic_packet = pull_source(mic.as_mut(), &mut problems, "capture");
+            let system_packet = pull_source(system.as_mut(), &mut problems, "loopback");
+            if let Some(block) = mic_packet {
+                mixer.push_mic(block);
+            }
+            if let Some(block) = system_packet {
+                mixer.push_system(block);
+            }
         }
         let now = frame_now(origin, engine.performance.as_ref());
         let mut wrote = false;
@@ -521,10 +532,15 @@ struct FakeState {
     error: Option<CaptureError>,
     blocks: std::collections::VecDeque<AudioBlock>,
     overruns: u64,
+    /// When set, `pull` keeps producing blocks after the queued ones so stop
+    /// must close the stream instead of waiting for silence.
+    live: Option<(usize, f32)>,
 }
 
 struct FakeStream {
     blocks: std::collections::VecDeque<AudioBlock>,
+    live: Option<(usize, f32)>,
+    next_frame: u64,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     overruns: u64,
@@ -541,6 +557,7 @@ impl CapturePort for SharedCapture {
             return Err(error);
         }
         let blocks = std::mem::take(&mut state.blocks);
+        let live_tone = state.live;
         let overruns = state.overruns;
         drop(state);
         let stop = Arc::new(AtomicBool::new(false));
@@ -555,6 +572,8 @@ impl CapturePort for SharedCapture {
         });
         Ok(Box::new(FakeStream {
             blocks,
+            live: live_tone,
+            next_frame: 0,
             stop,
             worker: Some(worker),
             overruns,
@@ -564,7 +583,27 @@ impl CapturePort for SharedCapture {
 
 impl CaptureStream for FakeStream {
     fn pull(&mut self) -> Result<Option<AudioBlock>, CaptureError> {
-        Ok(self.blocks.pop_front())
+        if self.worker.is_none() {
+            return Ok(None);
+        }
+        if let Some(block) = self.blocks.pop_front() {
+            return Ok(Some(block));
+        }
+        let Some((frames, sample)) = self.live else {
+            return Ok(None);
+        };
+        let mut samples = Vec::with_capacity(frames.saturating_mul(2));
+        for _ in 0..frames {
+            samples.push(sample);
+            samples.push(sample);
+        }
+        let timeline_frame = Some(self.next_frame);
+        self.next_frame = self.next_frame.saturating_add(frames as u64);
+        Ok(Some(AudioBlock {
+            samples,
+            timeline_frame,
+            discontinuity: false,
+        }))
     }
 
     fn close(&mut self) {
@@ -646,6 +685,7 @@ impl RecordingHarness {
                 error: None,
                 blocks: std::collections::VecDeque::new(),
                 overruns: 0,
+                live: None,
             })),
             live: Arc::new(AtomicUsize::new(0)),
         };
@@ -654,6 +694,7 @@ impl RecordingHarness {
                 error: None,
                 blocks: std::collections::VecDeque::new(),
                 overruns: 0,
+                live: None,
             })),
             live: Arc::new(AtomicUsize::new(0)),
         };
@@ -717,6 +758,11 @@ impl RecordingHarness {
 
     pub fn push_system_frames(&self, frames: usize, sample: f32) {
         push_into(&self.system, frames, sample);
+    }
+
+    pub fn stream_mic(&self, frames: usize, sample: f32) {
+        let mut state = lock_fake(&self.capture.inner);
+        state.live = Some((frames, sample));
     }
 
     pub fn fail_system(&self) {

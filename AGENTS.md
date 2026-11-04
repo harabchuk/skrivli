@@ -4,6 +4,19 @@ Windows desktop app (Win10/11, `x86_64-pc-windows-msvc`). Rust stable, one Cargo
 
 `domain/` is the core. It has no GPUI, Windows, COM, file I/O, or AI types. `services/` own use cases and depend on ports. `infrastructure/` implements adapters. `ui/` is only Kit overrides and custom controls. `views/` compose screens. Rendering never owns a WASAPI handle or calls Whisper. The GPUI thread does no blocking audio, disk, or inference work.
 
+## Specs keep pace with features
+
+When you add, change, defer, or remove user-visible behavior, update `.specs/` in the same change (or immediately after the feature lands). Do not leave product or design docs describing a different app than the code.
+
+| Spec | Update when |
+| --- | --- |
+| `.specs/skrivli-product.md` | Any user-facing capability, flow, setting, privacy promise, or v1 scope change. Describe **what the user can do**, not APIs or modules. |
+| `.specs/skrivli-app-design.md` | Architecture, contracts, or technical design that the implementation follows or diverges from. |
+| `.specs/skrivli-implementation-plan.md` | Milestone/package status (check off completed work) and acceptance evidence notes when a package finishes. |
+| `.specs/decisions.md` | Spikes, unresolved choices, pinned versions, or validated outcomes that future work must respect. |
+
+Product wording in `skrivli-product.md` is authoritative for scope conversations. If code ships a behavior the product spec omits or contradicts, fix the product spec (or revert the behavior) before considering the feature done.
+
 ## Layout
 
 Add a file only when implementing it.
