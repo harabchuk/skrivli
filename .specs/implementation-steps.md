@@ -1,8 +1,8 @@
-# MeetingBuddy — Implementation Steps
+# Skrivli — Implementation Steps
 
 Ordered build plan derived from [app-design.md](app-design.md). That document is the design source of truth. If a step and the design disagree, follow the design and update this file.
 
-Implement the milestones in order. Each one ends with a running app: `scripts\start.bat` builds Release warning-clean at `/W4` and launches `MeetingBuddy.exe`. Do not start a later milestone until the current one's checks pass.
+Implement the milestones in order. Each one ends with a running app: `scripts\start.bat` builds Release warning-clean at `/W4` and launches `Skrivli.exe`. Do not start a later milestone until the current one's checks pass.
 
 Conventions, thread rules, and the verification checklist live in `AGENTS.md`. Read the cited spec section before starting a step.
 
@@ -52,7 +52,7 @@ There is no audio, tray, settings, logging, resources, or tests yet.
 - New control, menu, resource, and `WM_APP` ids go in `Ids.hpp` / `resources/resource.h`. No magic numbers.
 - Every new `.cpp` is added to `add_executable` in `CMakeLists.txt`. DSP and file code stay free of WTL so tests can link them without the UI.
 - `#include "pch.hpp"` first in any header or source that uses ATL/WTL.
-- App data paths, and nowhere else: settings `%APPDATA%\MeetingBuddy\settings.json`; models `%LOCALAPPDATA%\MeetingBuddy\models\`; logs `%LOCALAPPDATA%\MeetingBuddy\logs\`; rescue `%LOCALAPPDATA%\MeetingBuddy\rescue\`. Default recordings folder: `%USERPROFILE%\Documents\MeetingBuddy`.
+- App data paths, and nowhere else: settings `%APPDATA%\Skrivli\settings.json`; models `%LOCALAPPDATA%\Skrivli\models\`; logs `%LOCALAPPDATA%\Skrivli\logs\`; rescue `%LOCALAPPDATA%\Skrivli\rescue\`. Default recordings folder: `%USERPROFILE%\Documents\Skrivli`.
 - The only network access in the whole app is the user-initiated model download (M6). Do not add telemetry.
 
 ---
@@ -63,7 +63,7 @@ There is no audio, tray, settings, logging, resources, or tests yet.
 
 **Spec:** §2, §10.
 
-- Set `project(MeetingBuddy LANGUAGES C CXX)` and `CMAKE_CXX_STANDARD 20`.
+- Set `project(Skrivli LANGUAGES C CXX)` and `CMAKE_CXX_STANDARD 20`.
 - MSVC options: `/W4 /permissive- /utf-8`. Keep `UNICODE`, `_UNICODE`, `WIN32_LEAN_AND_MEAN`, `_WTL_USE_CSTRING`, and `/ENTRY:mainCRTStartup`.
 - Pin WTL `GIT_TAG` to a WTL 10 release tag. Do not track `main`. Record the tag in `CMakeLists.txt`.
 - Delete `build/CMakeCache.txt` (or reconfigure) so the pin and the language change are picked up.
@@ -84,7 +84,7 @@ There is no audio, tray, settings, logging, resources, or tests yet.
 
 **Spec:** §2, §5, §10.
 
-- Add `resources/MeetingBuddy.rc`, `resources/resource.h`, and `resources/MeetingBuddy.manifest`.
+- Add `resources/Skrivli.rc`, `resources/resource.h`, and `resources/Skrivli.manifest`.
 - Manifest: Common Controls v6 dependency, Per-Monitor V2 DPI awareness.
 - Icons: `app.ico` (window), `tray_idle.ico`, `tray_recording.ico` (recording icon has a red dot). `IDR_MAINFRAME` loads the window icon.
 - `resource.h` owns resource ids. `Ids.hpp` includes it and is where `WM_APP_*` messages will go.
@@ -97,7 +97,7 @@ There is no audio, tray, settings, logging, resources, or tests yet.
 **Spec:** §5, §9.
 
 - `src/util/Paths` — resolve the settings, models, logs, rescue, and default recordings directories, and create them when needed.
-- `src/util/Log` — append to `%LOCALAPPDATA%\MeetingBuddy\logs\meetingbuddy.log`, rotate at about 1 MB, keep three files. `Info` / `Warn` / `Error`, including an `HRESULT` overload. Logging is for UI and session threads, never for the capture hot path.
+- `src/util/Log` — append to `%LOCALAPPDATA%\Skrivli\logs\skrivli.log`, rotate at about 1 MB, keep three files. `Info` / `Warn` / `Error`, including an `HRESULT` overload. Logging is for UI and session threads, never for the capture hot path.
 - `src/util/HResult` — small helper to log and return a failed `HRESULT`. No naked `Release()`.
 
 **Done when:** a startup line appears in the log, and the helpers have no WTL dependency.
@@ -106,9 +106,9 @@ There is no audio, tray, settings, logging, resources, or tests yet.
 
 **Spec:** §3, §8.7.
 
-`src/storage/Settings` reads and writes `%APPDATA%\MeetingBuddy\settings.json` with Glaze. Load on startup, save on change. Missing file means defaults. Unknown keys and `//` comments are ignored on read. Unreadable JSON is copied to `settings.json.invalid` and the in-memory settings fall back to defaults.
+`src/storage/Settings` reads and writes `%APPDATA%\Skrivli\settings.json` with Glaze. Load on startup, save on change. Missing file means defaults. Unknown keys and `//` comments are ignored on read. Unreadable JSON is copied to `settings.json.invalid` and the in-memory settings fall back to defaults.
 
-`general.window` is omitted until the user places the window. An empty `recording.folder` means `%USERPROFILE%\Documents\MeetingBuddy`. `transcription.threads` of 0 means `hardware_concurrency - 1`.
+`general.window` is omitted until the user places the window. An empty `recording.folder` means `%USERPROFILE%\Documents\Skrivli`. `transcription.threads` of 0 means `hardware_concurrency - 1`.
 
 ```json
 {
@@ -150,8 +150,8 @@ The settings dialog is M8. M0 only needs load, save, and defaults.
 
 **Spec:** §8.6.
 
-- Named mutex `Local\MeetingBuddy.SingleInstance`, created before the window.
-- If it already exists, `FindWindow` the class `MeetingBuddy.MainWindow`, send a registered "show yourself" message, and exit without starting a second message loop.
+- Named mutex `Local\Skrivli.SingleInstance`, created before the window.
+- If it already exists, `FindWindow` the class `Skrivli.MainWindow`, send a registered "show yourself" message, and exit without starting a second message loop.
 - The existing window handles that message by restoring and activating itself.
 
 **Done when:** a second launch brings the running window forward and does not open another frame.
@@ -208,9 +208,9 @@ Move UI types under `src/ui/` and update `CMakeLists.txt` includes. `MainWindow`
 
 `src/ui/TrayIcon` wraps `Shell_NotifyIconW` with `NOTIFYICON_VERSION_4`, a GUID-identified icon, and `NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP`.
 
-- Idle icon and tooltip "MeetingBuddy". The recording icon is swapped in M2.
+- Idle icon and tooltip "Skrivli". The recording icon is swapped in M2.
 - Left click toggles main-window visibility.
-- Right-click menu: **Show MeetingBuddy**, **Start recording** / **Stop recording**, **Open recordings folder**, **Settings…**, **Exit**.
+- Right-click menu: **Show Skrivli**, **Start recording** / **Stop recording**, **Open recordings folder**, **Settings…**, **Exit**.
 - Start/Stop stays disabled until M2. Settings… uses the same stub as the menu bar.
 
 **Done when:** the icon is visible, left click hides and shows the window, and Exit quits.
@@ -221,7 +221,7 @@ Move UI types under `src/ui/` and update `CMakeLists.txt` includes. `MainWindow`
 
 - `SC_MINIMIZE` hides the window instead of minimizing to the taskbar.
 - The close button hides to the tray when `CloseToTray` is on (default). Exit from the menu or tray still quits.
-- The first hide shows one balloon: "MeetingBuddy is still running in the tray." Persist that with `FirstRunTrayHintShown`.
+- The first hide shows one balloon: "Skrivli is still running in the tray." Persist that with `FirstRunTrayHintShown`.
 - On `RegisterWindowMessage(L"TaskbarCreated")`, add the icon again.
 
 **Done when:** minimize and close leave the process running with a tray icon; Exit ends it; restarting Explorer brings the icon back.
@@ -274,7 +274,7 @@ Add to `Ids.hpp`:
 - Store enough timing to support M3: QPC of the first frame in each pushed packet, plus frame count. Stereo interleaved `float` samples.
 - No allocation inside `Push` / `Pop`.
 
-**Tests:** `src/core/tests/RingBufferTests.cpp` — SPSC correctness, wraparound, overrun drops without blocking. GoogleTest via `FetchContent`, pinned tag, `MEETINGBUDDY_BUILD_TESTS` default ON, `ctest` in the Release config. Add `scripts/test.bat` (`ctest --test-dir build -C Release`) so later milestones can run it.
+**Tests:** `src/core/tests/RingBufferTests.cpp` — SPSC correctness, wraparound, overrun drops without blocking. GoogleTest via `FetchContent`, pinned tag, `SKRIVLI_BUILD_TESTS` default ON, `ctest` in the Release config. Add `scripts/test.bat` (`ctest --test-dir build -C Release`) so later milestones can run it.
 
 ### M2.4 CaptureStream (microphone)
 
@@ -298,7 +298,7 @@ When `CommunicationsProcessing` is on, set `AudioClientProperties.eCategory = Au
 `src/audio/WavWriter`:
 
 - PCM 16-bit, 48 kHz, stereo. Convert float to int16 in the writer thread (clamp to [-1, 1] before scaling).
-- Filename `<folder>\MeetingBuddy_YYYY-MM-DD_HH-MM-SS.wav` in local time. Collision suffix `-2`, `-3`, …
+- Filename `<folder>\Skrivli_YYYY-MM-DD_HH-MM-SS.wav` in local time. Collision suffix `-2`, `-3`, …
 - Write `*.wav.partial` with a RIFF header up front. Patch the RIFF and data sizes every 2 s and on close. On success, flush, close, and rename to `.wav`.
 - On failure, close and leave the partial file for M4 recovery. Do not delete the user's other files.
 
@@ -321,7 +321,7 @@ When `CommunicationsProcessing` is on, set `AudioClientProperties.eCategory = Au
 Replace the placeholder page:
 
 - Microphone combo (M2.2).
-- **Save to** path and a browse button. `IFileOpenDialog` with `FOS_PICKFOLDERS`. Reject a folder that is not writable. Default `%USERPROFILE%\Documents\MeetingBuddy`.
+- **Save to** path and a browse button. `IFileOpenDialog` with `FOS_PICKFOLDERS`. Reject a folder that is not writable. Default `%USERPROFILE%\Documents\Skrivli`.
 - A large Record button. While `Recording` it reads Stop.
 - Elapsed time from a UI `WM_TIMER` (about 4 Hz is enough for the clock). The timer reads a start QPC stored when `WM_APP_RECORDING_STARTED` arrives. It does not query the capture thread.
 - Status-bar panes show "Recording" and the elapsed time.
@@ -333,7 +333,7 @@ Replace the placeholder page:
 
 - `scripts\test.bat` passes.
 - `scripts\start.bat` launches.
-- Record about 10 seconds of microphone audio. The result is `<folder>\MeetingBuddy_….wav` (no `.partial` left behind), it plays in the default player, and the elapsed timer matches the file length within about a second.
+- Record about 10 seconds of microphone audio. The result is `<folder>\Skrivli_….wav` (no `.partial` left behind), it plays in the default player, and the elapsed timer matches the file length within about a second.
 - The window stays responsive while recording (moving and switching tabs still work).
 
 ---
@@ -431,7 +431,7 @@ Replace the placeholder page:
 **Spec:** §6.5, §9.
 
 - `GetDiskFreeSpaceExW` before start and every 30 s from the writer thread (not the capture thread). Below 200 MB, stop gracefully, finalize the WAV, and balloon "Recording stopped: low disk space".
-- If the folder disappears or the write fails mid-take, stop, write what was captured under `%LOCALAPPDATA%\MeetingBuddy\rescue\`, and tell the user the path.
+- If the folder disappears or the write fails mid-take, stop, write what was captured under `%LOCALAPPDATA%\Skrivli\rescue\`, and tell the user the path.
 - Start already fails with a clear message when the chosen folder is missing or not writable.
 
 ### M4.5 Crash recovery
@@ -555,7 +555,7 @@ No UI polish in this milestone beyond enough of a control to enqueue a job and s
 
 - `FetchContent` a pinned whisper.cpp tag (record the tag in `CMakeLists.txt`). Reconfigure so the pin is picked up.
 - Options: `WHISPER_BUILD_EXAMPLES=OFF`, `WHISPER_BUILD_TESTS=OFF`, `BUILD_SHARED_LIBS=OFF`, CPU only, `GGML_NATIVE=OFF`, AVX2 on so the binary stays portable. Do not enable Vulkan or CUDA.
-- Link the static library into `MeetingBuddy`. Confirm `LANGUAGES C` is what ggml compiles as.
+- Link the static library into `Skrivli`. Confirm `LANGUAGES C` is what ggml compiles as.
 
 **Done when:** Release links and the exe still starts. A few extra MB in the binary is expected.
 
@@ -607,7 +607,7 @@ No UI polish in this milestone beyond enough of a control to enqueue a job and s
 
 **Spec:** §7.3.
 
-`src/transcription/ModelManager` looks in `%LOCALAPPDATA%\MeetingBuddy\models\` for `ggml-*.bin`.
+`src/transcription/ModelManager` looks in `%LOCALAPPDATA%\Skrivli\models\` for `ggml-*.bin`.
 
 - The offered set is multilingual and `.en` variants of tiny, base, and small, including `ggml-base-q5_1.bin` (the default) and `ggml-small-q5_1.bin`.
 - When the user asks to transcribe and the chosen file is missing, a dialog offers **Download** or **Browse…**. Browse copies or records a path to a local `.bin` under the models directory.
@@ -763,7 +763,7 @@ A short `README.md` at the repo root:
 
 **Spec:** §10.
 
-A script (for example `scripts/package.bat`) builds Release and zips `MeetingBuddy.exe` plus any non-system DLLs that are actually required, and the README. Do not put models in the zip. An MSIX or WiX installer is out of scope unless packaging turns out to need it; the zip is the v1 artifact.
+A script (for example `scripts/package.bat`) builds Release and zips `Skrivli.exe` plus any non-system DLLs that are actually required, and the README. Do not put models in the zip. An MSIX or WiX installer is out of scope unless packaging turns out to need it; the zip is the v1 artifact.
 
 ### M9.3 Manual test pass
 

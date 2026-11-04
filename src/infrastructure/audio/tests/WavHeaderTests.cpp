@@ -14,7 +14,7 @@ std::filesystem::path TempFile(const wchar_t* name) {
     wchar_t path[MAX_PATH]{};
     const DWORD len = ::GetTempPathW(MAX_PATH, path);
     EXPECT_GT(len, 0u);
-    const auto dir = std::filesystem::path(path) / L"MeetingBuddyWavHeaderTests";
+    const auto dir = std::filesystem::path(path) / L"SkrivliWavHeaderTests";
     std::filesystem::create_directories(dir);
     return dir / name;
 }

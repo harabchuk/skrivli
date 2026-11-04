@@ -31,7 +31,7 @@ auto Join(const std::wstring& root, const wchar_t* leaf) -> std::wstring {
 namespace Paths {
 
 auto SettingsDir() -> std::wstring {
-    return Join(KnownFolder(FOLDERID_RoamingAppData), L"MeetingBuddy");
+    return Join(KnownFolder(FOLDERID_RoamingAppData), L"Skrivli");
 }
 
 auto SettingsFile() -> std::wstring {
@@ -39,19 +39,19 @@ auto SettingsFile() -> std::wstring {
 }
 
 auto ModelsDir() -> std::wstring {
-    return Join(KnownFolder(FOLDERID_LocalAppData), L"MeetingBuddy\\models");
+    return Join(KnownFolder(FOLDERID_LocalAppData), L"Skrivli\\models");
 }
 
 auto LogsDir() -> std::wstring {
-    return Join(KnownFolder(FOLDERID_LocalAppData), L"MeetingBuddy\\logs");
+    return Join(KnownFolder(FOLDERID_LocalAppData), L"Skrivli\\logs");
 }
 
 auto RescueDir() -> std::wstring {
-    return Join(KnownFolder(FOLDERID_LocalAppData), L"MeetingBuddy\\rescue");
+    return Join(KnownFolder(FOLDERID_LocalAppData), L"Skrivli\\rescue");
 }
 
 auto DefaultRecordingsDir() -> std::wstring {
-    return Join(KnownFolder(FOLDERID_Documents), L"MeetingBuddy");
+    return Join(KnownFolder(FOLDERID_Documents), L"Skrivli");
 }
 
 bool EnsureDirectory(const std::wstring& path) {

@@ -5,13 +5,13 @@ set "ROOT=%~dp0.."
 set "BUILD_DIR=%ROOT%\build"
 set "DIST_DIR=%ROOT%\dist"
 set "CONFIG=Release"
-set "EXE=%BUILD_DIR%\%CONFIG%\MeetingBuddy.exe"
+set "EXE=%BUILD_DIR%\%CONFIG%\Skrivli.exe"
 set "README=%ROOT%\README.md"
 set "VERSION=1.0.0"
-set "STAGE=%DIST_DIR%\MeetingBuddy-%VERSION%"
-set "ZIP=%DIST_DIR%\MeetingBuddy-%VERSION%.zip"
+set "STAGE=%DIST_DIR%\Skrivli-%VERSION%"
+set "ZIP=%DIST_DIR%\Skrivli-%VERSION%.zip"
 set "CMAKE="
-set "CMAKE_LIST=%TEMP%\meetingbuddy_cmake.txt"
+set "CMAKE_LIST=%TEMP%\skrivli_cmake.txt"
 
 cd /d "%ROOT%"
 
@@ -53,12 +53,12 @@ if not defined CMAKE (
 
 echo Using cmake: %CMAKE%
 
-echo Stopping MeetingBuddy if it is running...
-taskkill /IM MeetingBuddy.exe /F >nul 2>&1
+echo Stopping Skrivli if it is running...
+taskkill /IM Skrivli.exe /F >nul 2>&1
 if errorlevel 1 (
-    echo MeetingBuddy was not running.
+    echo Skrivli was not running.
 ) else (
-    echo MeetingBuddy stopped.
+    echo Skrivli stopped.
     timeout /t 1 /nobreak >nul
 )
 
@@ -71,8 +71,8 @@ if not exist "%BUILD_DIR%\CMakeCache.txt" (
     )
 )
 
-echo Building MeetingBuddy (%CONFIG%)...
-"%CMAKE%" --build "%BUILD_DIR%" --config %CONFIG% --target MeetingBuddy
+echo Building Skrivli (%CONFIG%)...
+"%CMAKE%" --build "%BUILD_DIR%" --config %CONFIG% --target Skrivli
 if errorlevel 1 (
     echo Build failed.
     exit /b 1
@@ -98,9 +98,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-copy /y "%EXE%" "%STAGE%\MeetingBuddy.exe" >nul
+copy /y "%EXE%" "%STAGE%\Skrivli.exe" >nul
 if errorlevel 1 (
-    echo Failed to copy MeetingBuddy.exe
+    echo Failed to copy Skrivli.exe
     exit /b 1
 )
 copy /y "%README%" "%STAGE%\README.md" >nul
@@ -113,7 +113,7 @@ REM Copy non-system DLLs that sit next to the exe (none expected with the static
 for %%F in ("%BUILD_DIR%\%CONFIG%\*.dll") do (
     set "NAME=%%~nxF"
     set "SKIP=0"
-    if /I "!NAME!"=="MeetingBuddyTests.exe" set "SKIP=1"
+    if /I "!NAME!"=="SkrivliTests.exe" set "SKIP=1"
     echo !NAME! | findstr /I /R "^api-ms- ^ucrtbase ^vcruntime ^msvcp ^concrt ^vccorlib" >nul
     if not errorlevel 1 set "SKIP=1"
     if "!SKIP!"=="0" (

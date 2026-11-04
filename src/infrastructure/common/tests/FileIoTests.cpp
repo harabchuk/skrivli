@@ -10,7 +10,7 @@ namespace {
 class FileIoTest : public ::testing::Test {
   protected:
     void SetUp() override {
-        m_dir = std::filesystem::temp_directory_path() / L"MeetingBuddyFileIoTests";
+        m_dir = std::filesystem::temp_directory_path() / L"SkrivliFileIoTests";
         std::filesystem::remove_all(m_dir);
         std::filesystem::create_directories(m_dir);
     }

@@ -72,7 +72,7 @@ void Write(Level level, const wchar_t* message) {
 
     std::lock_guard lock(Mutex());
     Paths::EnsureDirectory(Paths::LogsDir());
-    const auto logPath = std::filesystem::path(Paths::LogsDir()) / L"meetingbuddy.log";
+    const auto logPath = std::filesystem::path(Paths::LogsDir()) / L"skrivli.log";
     RotateIfNeeded(logPath);
 
     FILE* file = nullptr;

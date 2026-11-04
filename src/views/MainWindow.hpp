@@ -14,7 +14,7 @@
 
 class MainWindow : public WTL::CFrameWindowImpl<MainWindow> {
   public:
-    DECLARE_FRAME_WND_CLASS(L"MeetingBuddy.MainWindow", IDR_MAINFRAME)
+    DECLARE_FRAME_WND_CLASS(L"Skrivli.MainWindow", IDR_MAINFRAME)
 
     BEGIN_MSG_MAP_EX(MainWindow)
     MSG_WM_CREATE(OnCreate)

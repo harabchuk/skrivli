@@ -175,7 +175,7 @@ auto WavWriter::MakeBasePath(const std::wstring& folder) -> std::wstring {
     ::GetLocalTime(&local);
 
     wchar_t stamp[64]{};
-    std::swprintf(stamp, 64, L"MeetingBuddy_%04u-%02u-%02u_%02u-%02u-%02u", local.wYear,
+    std::swprintf(stamp, 64, L"Skrivli_%04u-%02u-%02u_%02u-%02u-%02u", local.wYear,
                   local.wMonth, local.wDay, local.wHour, local.wMinute, local.wSecond);
 
     auto isFree = [](const std::wstring& stem) {

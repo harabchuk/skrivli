@@ -4,7 +4,7 @@
 
 class RecordButton : public CWindowImpl<RecordButton, WTL::CButton> {
   public:
-    DECLARE_WND_SUPERCLASS(L"MeetingBuddy.RecordButton", CButton::GetWndClassName())
+    DECLARE_WND_SUPERCLASS(L"Skrivli.RecordButton", CButton::GetWndClassName())
 
     BEGIN_MSG_MAP_EX(RecordButton)
     MSG_WM_PAINT(OnPaint)

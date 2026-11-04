@@ -10,9 +10,9 @@
 
 namespace {
 
-constexpr wchar_t kMutexName[] = L"Local\\MeetingBuddy.SingleInstance";
-constexpr wchar_t kMainWindowClass[] = L"MeetingBuddy.MainWindow";
-constexpr wchar_t kShowYourselfMessage[] = L"MeetingBuddy.ShowYourself";
+constexpr wchar_t kMutexName[] = L"Local\\Skrivli.SingleInstance";
+constexpr wchar_t kMainWindowClass[] = L"Skrivli.MainWindow";
+constexpr wchar_t kShowYourselfMessage[] = L"Skrivli.ShowYourself";
 
 } // namespace
 
@@ -69,7 +69,7 @@ int Application::Run(HINSTANCE /*instance*/, int showCommand) {
 
     Paths::EnsureAppDataDirectories();
     Settings::Instance().Load();
-    Log::Info(L"MeetingBuddy starting");
+    Log::Info(L"Skrivli starting");
 
     // Keep the Run key in sync with saved settings (repairs path after moves).
     Autostart::Apply(Settings::Instance().Data().startWithWindows,
@@ -98,7 +98,7 @@ int Application::Run(HINSTANCE /*instance*/, int showCommand) {
     _Module.RemoveMessageLoop();
 
     Settings::Instance().Save();
-    Log::Info(L"MeetingBuddy exiting");
+    Log::Info(L"Skrivli exiting");
     ReleaseSingleInstance();
     return result;
 }

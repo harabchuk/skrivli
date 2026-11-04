@@ -62,7 +62,7 @@ struct HttpResponse {
 
 bool OpenRequest(const std::wstring& fileName, uint64_t resumeFrom, HttpResponse& response,
                  std::wstring& error) {
-    response.session.reset(::WinHttpOpen(L"MeetingBuddy/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    response.session.reset(::WinHttpOpen(L"Skrivli/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
     if (!response.session) {
         error = L"WinHttpOpen failed.";

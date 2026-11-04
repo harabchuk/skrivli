@@ -4,7 +4,7 @@
 
 class LevelMeter : public CWindowImpl<LevelMeter> {
   public:
-    DECLARE_WND_CLASS(L"MeetingBuddy.LevelMeter")
+    DECLARE_WND_CLASS(L"Skrivli.LevelMeter")
 
     BEGIN_MSG_MAP_EX(LevelMeter)
     MSG_WM_PAINT(OnPaint)

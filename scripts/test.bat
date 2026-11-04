@@ -4,7 +4,7 @@ setlocal EnableExtensions
 set "ROOT=%~dp0.."
 set "BUILD_DIR=%ROOT%\build"
 set "CMAKE="
-set "CMAKE_LIST=%TEMP%\meetingbuddy_cmake.txt"
+set "CMAKE_LIST=%TEMP%\skrivli_cmake.txt"
 set "CTEST="
 
 cd /d "%ROOT%"
@@ -46,7 +46,7 @@ if not exist "%BUILD_DIR%\CMakeCache.txt" (
 )
 
 echo Building tests...
-"%CMAKE%" --build "%BUILD_DIR%" --config Release --target MeetingBuddyTests
+"%CMAKE%" --build "%BUILD_DIR%" --config Release --target SkrivliTests
 if errorlevel 1 exit /b 1
 
 echo Running ctest...

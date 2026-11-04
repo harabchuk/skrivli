@@ -3,10 +3,10 @@ setlocal EnableExtensions
 
 set "ROOT=%~dp0.."
 set "BUILD_DIR=%ROOT%\build"
-set "EXE=%BUILD_DIR%\Release\MeetingBuddy.exe"
+set "EXE=%BUILD_DIR%\Release\Skrivli.exe"
 set "CONFIG=Release"
 set "CMAKE="
-set "CMAKE_LIST=%TEMP%\meetingbuddy_cmake.txt"
+set "CMAKE_LIST=%TEMP%\skrivli_cmake.txt"
 
 cd /d "%ROOT%"
 
@@ -50,12 +50,12 @@ if not defined CMAKE (
 
 echo Using cmake: %CMAKE%
 
-echo Stopping MeetingBuddy if it is running...
-taskkill /IM MeetingBuddy.exe /F >nul 2>&1
+echo Stopping Skrivli if it is running...
+taskkill /IM Skrivli.exe /F >nul 2>&1
 if errorlevel 1 (
-    echo MeetingBuddy was not running.
+    echo Skrivli was not running.
 ) else (
-    echo MeetingBuddy stopped.
+    echo Skrivli stopped.
     timeout /t 1 /nobreak >nul
 )
 
@@ -68,7 +68,7 @@ if not exist "%BUILD_DIR%\CMakeCache.txt" (
     )
 )
 
-echo Building MeetingBuddy (%CONFIG%)...
+echo Building Skrivli (%CONFIG%)...
 "%CMAKE%" --build "%BUILD_DIR%" --config %CONFIG%
 if errorlevel 1 (
     echo Build failed.
@@ -80,6 +80,6 @@ if not exist "%EXE%" (
     exit /b 1
 )
 
-echo Starting MeetingBuddy...
+echo Starting Skrivli...
 start "" "%EXE%"
 endlocal

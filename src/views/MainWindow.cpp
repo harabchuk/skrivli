@@ -39,9 +39,9 @@ auto FormatElapsed(uint64_t elapsedQpc, uint64_t frequency) -> std::wstring {
 
 LRESULT MainWindow::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     m_taskbarCreatedMsg = ::RegisterWindowMessageW(L"TaskbarCreated");
-    m_showYourselfMsg = ::RegisterWindowMessageW(L"MeetingBuddy.ShowYourself");
+    m_showYourselfMsg = ::RegisterWindowMessageW(L"Skrivli.ShowYourself");
 
-    SetWindowText(L"MeetingBuddy");
+    SetWindowText(L"Skrivli");
     CreateStatusBar();
     CreateTabs();
     ApplyDpiFonts(::GetDpiForWindow(m_hWnd));
@@ -85,7 +85,7 @@ void MainWindow::RecoverPartialRecordings() {
     if (!recovered.empty()) {
         Log::Info(L"Recovered " + std::to_wstring(recovered.size()) + L" partial recording(s)");
         m_tray.ShowBalloon(
-            L"MeetingBuddy",
+            L"Skrivli",
             L"Recovered an interrupted recording. Check your recordings or rescue folder.");
     }
 }
@@ -608,7 +608,7 @@ void MainWindow::HideToTray() {
 
     auto& settings = Settings::Instance().Data();
     if (!settings.firstRunTrayHintShown) {
-        m_tray.ShowBalloon(L"MeetingBuddy", L"MeetingBuddy is still running in the tray.");
+        m_tray.ShowBalloon(L"Skrivli", L"Skrivli is still running in the tray.");
         settings.firstRunTrayHintShown = true;
         Settings::Instance().Save();
     }
@@ -788,7 +788,7 @@ LRESULT MainWindow::OnM4aFailed(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, 
     const auto wav = m_pendingCompressWav;
     m_pendingCompressWav.clear();
     if (message && !message->empty()) {
-        m_tray.ShowBalloon(L"MeetingBuddy", message->c_str());
+        m_tray.ShowBalloon(L"Skrivli", message->c_str());
         ui::ShowMessage(m_hWnd, message->c_str(), MB_OK | MB_ICONWARNING);
     }
     FinishRecordingUi(wav);
@@ -819,7 +819,7 @@ LRESULT MainWindow::OnDeviceSwitched(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lPa
     handled = TRUE;
     const auto message = TakeOwned<std::wstring>(lParam);
     if (message && !message->empty()) {
-        m_tray.ShowBalloon(L"MeetingBuddy", message->c_str());
+        m_tray.ShowBalloon(L"Skrivli", message->c_str());
         m_recordView.SetWarning(*message);
         Log::Warn(*message);
     }
@@ -833,7 +833,7 @@ LRESULT MainWindow::OnLowDisk(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/
         m_session.Stop(RecordingSession::StopMode::Save);
     }
     EnterIdleUi({}, false);
-    m_tray.ShowBalloon(L"MeetingBuddy", L"Recording stopped: low disk space");
+    m_tray.ShowBalloon(L"Skrivli", L"Recording stopped: low disk space");
     RefreshRecordingsList();
     return 0;
 }
@@ -850,7 +850,7 @@ LRESULT MainWindow::OnRecordingRescued(UINT /*msg*/, WPARAM /*wParam*/, LPARAM l
     if (path && !path->empty()) {
         WriteSidecarForPath(*path);
         const auto text = L"Recording folder unavailable. Saved to:\n" + *path;
-        m_tray.ShowBalloon(L"MeetingBuddy", text.c_str());
+        m_tray.ShowBalloon(L"Skrivli", text.c_str());
         ui::ShowMessage(m_hWnd, text.c_str(), MB_OK | MB_ICONWARNING);
         Log::Warn(text);
     }
@@ -914,7 +914,7 @@ void MainWindow::OnAbout(UINT /*code*/, int /*id*/, HWND /*control*/) {
     auto text = std::wstring(kAppName) + L" " + kAppVersion + L"\n\n" +
                 L"Local meeting recorder and optional transcription.\n\n" +
                 L"Transcription is local. The only network use is a model download you start.";
-    ::MessageBoxW(m_hWnd, text.c_str(), L"About MeetingBuddy", MB_OK | MB_ICONINFORMATION);
+    ::MessageBoxW(m_hWnd, text.c_str(), L"About Skrivli", MB_OK | MB_ICONINFORMATION);
 }
 
 void MainWindow::OnTrayShow(UINT /*code*/, int /*id*/, HWND /*control*/) {
@@ -964,7 +964,7 @@ LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
     RefreshRecordingsList();
     if (notify && !notify->audioPath.empty()) {
         m_balloonAudioPath = notify->audioPath;
-        m_tray.ShowBalloon(L"MeetingBuddy", L"Transcript ready — click to open");
+        m_tray.ShowBalloon(L"Skrivli", L"Transcript ready — click to open");
         if (IsWindowVisible() && !IsIconic()) {
             if (m_tabs.IsWindow()) {
                 m_tabs.SetCurSel(1);

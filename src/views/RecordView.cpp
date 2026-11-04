@@ -622,11 +622,11 @@ void RecordView::ShowPrivacyDeniedDialog() {
     config.hwndParent = m_hWnd;
     config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
     config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
-    config.pszWindowTitle = L"MeetingBuddy";
+    config.pszWindowTitle = L"Skrivli";
     config.pszMainIcon = TD_WARNING_ICON;
     config.pszMainInstruction = L"Microphone access is turned off";
     config.pszContent = L"Windows is blocking microphone access for desktop apps.\n\n"
-                        L"Open Privacy settings to allow MeetingBuddy to record.";
+                        L"Open Privacy settings to allow Skrivli to record.";
     config.pszFooter = L"Recording was not started.";
 
     TASKDIALOG_BUTTON buttons[] = {
@@ -649,7 +649,7 @@ void RecordView::ShowErrorDialog(const std::wstring& message) {
     config.hwndParent = m_hWnd;
     config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
     config.dwCommonButtons = TDCBF_OK_BUTTON;
-    config.pszWindowTitle = L"MeetingBuddy";
+    config.pszWindowTitle = L"Skrivli";
     config.pszMainIcon = TD_ERROR_ICON;
     config.pszMainInstruction = L"Recording failed";
     config.pszContent = message.c_str();

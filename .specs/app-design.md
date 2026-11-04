@@ -1,4 +1,4 @@
-# MeetingBuddy — Implementation Plan
+# Skrivli — Implementation Plan
 
 Windows desktop app (C++ / WTL) that records microphone + system audio output via WASAPI,
 mixes them into a single file in a user-chosen folder, and optionally produces a plain-text
@@ -29,7 +29,7 @@ transcript using a local lightweight speech-to-text model. Lives in the system t
 
 ## 2. Current state of the repo
 
-- `CMakeLists.txt` — C++17, fetches WTL from `Win32-WTL/WTL@main`, builds `MeetingBuddy.exe` (WIN32 subsystem, `main()` entry).
+- `CMakeLists.txt` — C++17, fetches WTL from `Win32-WTL/WTL@main`, builds `Skrivli.exe` (WIN32 subsystem, `main()` entry).
 - `src/main.cpp`, `src/Application.*` — `CAppModule` + message loop, creates `MainWindow`.
 - `src/MainWindow.*` — `CFrameWindowImpl` with a single centred Record/Stop toggle button (no logic).
 - `src/Window.hpp` — leftover duplicate of `MainWindow` (unused) → **delete**.
@@ -56,7 +56,7 @@ Housekeeping before feature work:
 | Transcription | **whisper.cpp** (ggml, CPU), statically linked via `FetchContent` | Local, MIT, fast on CPU, quantized models |
 | Default model | `ggml-base-q5_1.bin` (~57 MB); offer `tiny`, `base`, `small` (q5) | Good speed/quality balance on laptops |
 | Transcript view | Read-only multiline edit in the Recordings detail pane | Native, selectable/copyable plain text |
-| Settings | `%APPDATA%\MeetingBuddy\settings.json` (Glaze) | Simple, human-editable |
+| Settings | `%APPDATA%\Skrivli\settings.json` (Glaze) | Simple, human-editable |
 | Tests | GoogleTest (or Catch2) via `FetchContent`, `ctest` | Unit-test DSP, file, and formatting logic |
 
 ---
@@ -128,12 +128,12 @@ src/
     MainWindow, RecordView, RecordingsView, SettingsDialog
     ModelPrompt                            # progress window and model file picker
 resources/
-  MeetingBuddy.rc, resource.h
+  Skrivli.rc, resource.h
   app.ico, tray_idle.ico, tray_recording.ico
-  MeetingBuddy.manifest
+  Skrivli.manifest
 ```
 
-GoogleTest sources sit in a `tests/` folder beside the type they cover (`src/core/tests/`, `src/infrastructure/audio/tests/`, `src/infrastructure/files/tests/`, `src/infrastructure/storage/tests/`, `src/infrastructure/common/tests/`). They are compiled only into `MeetingBuddyTests`.
+GoogleTest sources sit in a `tests/` folder beside the type they cover (`src/core/tests/`, `src/infrastructure/audio/tests/`, `src/infrastructure/files/tests/`, `src/infrastructure/storage/tests/`, `src/infrastructure/common/tests/`). They are compiled only into `SkrivliTests`.
 
 ---
 
@@ -169,7 +169,7 @@ WASAPI loopback delivers **no packets** while nothing is playing, which would ma
 - Optional setting (off by default): also save `*.mic.wav` / `*.system.wav` stems. Useful later for diarization ("You" vs. "Others").
 
 ### 6.5 Writing files
-- Filename: `<folder>\MeetingBuddy_2026-11-01_13-18-00.wav` (local time; collisions get a `-2` suffix).
+- Filename: `<folder>\Skrivli_2026-11-01_13-18-00.wav` (local time; collisions get a `-2` suffix).
 - While recording, write to `*.wav.partial`. `WavWriter` uses the miniaudio WAV encoder (float in, PCM 16-bit out; MiniAudio owns the WAV header). Size fields are rewritten every 2 s so partials stay playable; `ma_encoder_uninit` patches them again on close. On stop, flush, close, and rename to `.wav`.
 - On startup, `RecordingLibrary` finds leftover `.partial` files (from a crash), patches RIFF/`data` sizes from file length, and renames them to `*.recovered.wav`.
 - Check free disk space before start and every 30 s (`GetDiskFreeSpaceExW`); stop gracefully below 200 MB and notify.
@@ -201,7 +201,7 @@ WASAPI loopback delivers **no packets** while nothing is playing, which would ma
 - For long recordings (over 1 h), stream in 30-minute chunks with a small overlap to keep memory bounded, and offset the timestamps.
 
 ### 7.3 Models
-- `ModelManager` looks in `%LOCALAPPDATA%\MeetingBuddy\models\` for `ggml-*.bin`.
+- `ModelManager` looks in `%LOCALAPPDATA%\Skrivli\models\` for `ggml-*.bin`.
 - If none is present when the user first transcribes, a dialog offers to download the default model from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/<file>` (WinHTTP, progress, resumable, SHA-256 check against a built-in table), **or** to browse for a local `.bin` file.
 - Settings let the user pick a model (tiny / base / small, multilingual or `.en`) and a language.
 - The app makes no network calls except this explicit, user-initiated download.
@@ -244,7 +244,7 @@ Saved next to the audio as `<name>.txt`:
 │  Microphone   [ Default communications ▼ ]   │
 │  System audio [ Default output device  ▼ ]   │
 │  Output ─────────────────────────────────    │
-│  Save to      [ C:\Users\…\MeetingBuddy ] [Browse…] │
+│  Save to      [ C:\Users\…\Skrivli ] [Browse…] │
 │                                              │
 │              (  ● Start recording  )         │   owner-drawn red pill; becomes ■ Stop
 │                    00:12:34                  │   large semibold timer (red while recording)
@@ -257,7 +257,7 @@ Saved next to the audio as `<name>.txt`:
 └──────────────────────────────────────────────┘
 ```
 - The page uses a solid `COLOR_WINDOW` background. Input and Output are owner-drawn section headers: accent semibold text with a light separator line. Device combos use the flat file-dialog (`CFD`) theme with a taller selection field and drop-down rows; the Save to edit and Browse button match that height.
-- The folder picker uses `IFileOpenDialog` with `FOS_PICKFOLDERS`. The path edit is read-only; Browse… validates writability. Default folder: `%USERPROFILE%\Documents\MeetingBuddy`.
+- The folder picker uses `IFileOpenDialog` with `FOS_PICKFOLDERS`. The path edit is read-only; Browse… validates writability. Default folder: `%USERPROFILE%\Documents\Skrivli`.
 - Device combos and folder are disabled while recording. The mic gain slider and Auto checkbox stay enabled and apply immediately (including mid-take). Auto disables the slider and runs mixer AGC; the value label shows `Auto` while idle or the live effective gain while recording.
 - Level meters map linear peak to a −60…0 dB scale, use a green→amber→red segmented fill, double-buffer painting, and hold a peak tick for about 1 s. The mic meter displays post-gain level so the gain controls under it are meaningful. They run continuously: while idle, `LevelMonitor` opens the selected mic + loopback (with keep-alive) and publishes peaks to atomics; while recording, peaks come from the mixer. The monitor stops before a recording starts and restarts when it ends or when the device selection changes.
 - Inline warning label covers missing devices / unwritable folder; hard failures use `TaskDialogIndirect`.
@@ -276,14 +276,14 @@ Saved next to the audio as `<name>.txt`:
 ### 8.5 Tray
 - `TrayIcon` wraps `Shell_NotifyIconW` (`NOTIFYICON_VERSION_4`, a GUID-identified icon, `NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP`).
 - Icons: idle and recording (red dot). The tooltip shows "Recording 00:12:34" while recording.
-- Left click toggles main window visibility. Right click opens a menu: **Show MeetingBuddy**, **Start/Stop recording**, **Open recordings folder**, **Settings…**, **Exit**.
-- Minimize goes to the tray (`SC_MINIMIZE`, then hide). The close button (X) hides to the tray, configurable in settings ("Close button minimizes to tray": default on). The first time, a balloon says "MeetingBuddy is still running in the tray."
+- Left click toggles main window visibility. Right click opens a menu: **Show Skrivli**, **Start/Stop recording**, **Open recordings folder**, **Settings…**, **Exit**.
+- Minimize goes to the tray (`SC_MINIMIZE`, then hide). The close button (X) hides to the tray, configurable in settings ("Close button minimizes to tray": default on). The first time, a balloon says "Skrivli is still running in the tray."
 - Re-add the icon on `RegisterWindowMessage(L"TaskbarCreated")` so it survives an Explorer restart.
 - Balloons for "Transcript ready", "Recording stopped: low disk space", and "Device lost — recording continues on <new device>".
 - Optional setting: start with Windows (HKCU `Run` key) and start minimized (`--tray` argument).
 
 ### 8.6 Single instance
-- Named mutex `Local\MeetingBuddy.SingleInstance`. A second launch finds the existing window (`FindWindow` on the class name) and sends it a registered "show yourself" message, then exits.
+- Named mutex `Local\Skrivli.SingleInstance`. A second launch finds the existing window (`FindWindow` on the class name) and sends it a registered "show yourself" message, then exits.
 
 ### 8.7 Settings dialog
 - Recording folder, default devices, mic/system gains, mic Auto (AGC), save separate stems, compress to M4A after recording, keep WAV after compression.
@@ -297,19 +297,19 @@ Saved next to the audio as `<name>.txt`:
 - Mic privacy setting disabled (`E_ACCESSDENIED` from `Activate`/`Initialize`): show a message with a button that opens `ms-settings:privacy-microphone`.
 - Exclusive-mode apps holding a device: report a clear error and continue with the other source.
 - Device unplugged mid-recording: switch to the new default, insert silence for the gap, add a note to the sidecar JSON.
-- Folder deleted or offline (network share/USB): fail at start with a clear message. If it happens mid-recording, stop gracefully, then save to `%LOCALAPPDATA%\MeetingBuddy\rescue\` and notify.
+- Folder deleted or offline (network share/USB): fail at start with a clear message. If it happens mid-recording, stop gracefully, then save to `%LOCALAPPDATA%\Skrivli\rescue\` and notify.
 - Echo (speakers + mic): document that headphones give the best results. The communications category may enable driver AEC.
 - Transcription errors (model missing or corrupt, out of memory): set the job to Failed with the reason shown in a tooltip or message; the audio is never touched.
-- All HRESULTs get logged to `%LOCALAPPDATA%\MeetingBuddy\logs\meetingbuddy.log` (rotating, about 1 MB × 3).
+- All HRESULTs get logged to `%LOCALAPPDATA%\Skrivli\logs\skrivli.log` (rotating, about 1 MB × 3).
 
 ---
 
 ## 10. Build and packaging
 - CMake:
-  - `project(MeetingBuddy LANGUAGES C CXX)`, `CMAKE_CXX_STANDARD 20`, `/W4 /permissive- /utf-8`, static CRT optional (`CMAKE_MSVC_RUNTIME_LIBRARY`).
-  - FetchContent: WTL (pinned), whisper.cpp (pinned), GoogleTest (tests only, `MEETINGBUDDY_BUILD_TESTS` option).
+  - `project(Skrivli LANGUAGES C CXX)`, `CMAKE_CXX_STANDARD 20`, `/W4 /permissive- /utf-8`, static CRT optional (`CMAKE_MSVC_RUNTIME_LIBRARY`).
+  - FetchContent: WTL (pinned), whisper.cpp (pinned), GoogleTest (tests only, `SKRIVLI_BUILD_TESTS` option).
   - Link: `ole32 uuid avrt mfplat mfreadwrite mfuuid shlwapi comctl32 winhttp` (WASAPI objects come from `CoCreateInstance`, so no extra import lib is needed).
-  - Add `resources/MeetingBuddy.rc` and the manifest to the executable.
+  - Add `resources/Skrivli.rc` and the manifest to the executable.
 - `scripts/start.bat` keeps working; add `scripts/test.bat` (`ctest -C Release`).
 - Requirements: Visual Studio with the **C++ ATL** component (WTL depends on ATL). Windows 10 1903+ (for `AUTOCONVERTPCM` capture and modern tray APIs).
 - Distribution (later milestone): portable zip first, then an MSIX or WiX installer. Models are not bundled; they're downloaded on demand.

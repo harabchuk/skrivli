@@ -37,7 +37,7 @@ LRESULT CALLBACK DownloadWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 }
 
 auto CreateDownloadDialog(HWND owner, std::atomic_bool* cancel, HWND* bar) -> HWND {
-    const wchar_t* className = L"MeetingBuddy.DownloadDlg";
+    const wchar_t* className = L"Skrivli.DownloadDlg";
     WNDCLASSW wc{};
     if (!::GetClassInfoW(_Module.GetModuleInstance(), className, &wc)) {
         wc.lpfnWndProc = DownloadWndProc;

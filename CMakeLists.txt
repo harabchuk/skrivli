@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(MeetingBuddy LANGUAGES C CXX)
+project(Skrivli LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(MEETINGBUDDY_BUILD_TESTS "Build unit tests" ON)
+option(SKRIVLI_BUILD_TESTS "Build unit tests" ON)
 
 include(FetchContent)
 # Official WTL 10.01 release (SourceForge). Do not track the GitHub mirror main branch.
@@ -85,17 +85,17 @@ add_library(WIL_WIL INTERFACE)
 add_library(WIL::WIL ALIAS WIL_WIL)
 target_include_directories(WIL_WIL SYSTEM INTERFACE "${wil_SOURCE_DIR}/include")
 
-set(MEETINGBUDDY_CORE_SOURCES
+set(SKRIVLI_CORE_SOURCES
     src/core/TranscriptText.cpp
 )
 
-set(MEETINGBUDDY_SERVICES_SOURCES
+set(SKRIVLI_SERVICES_SOURCES
     src/services/RecordingSession.cpp
     src/services/LevelMonitor.cpp
     src/services/TranscriptionService.cpp
 )
 
-set(MEETINGBUDDY_INFRA_SOURCES
+set(SKRIVLI_INFRA_SOURCES
     src/infrastructure/audio/DeviceManager.cpp
     src/infrastructure/audio/CaptureStream.cpp
     src/infrastructure/audio/AudioResampler.cpp
@@ -124,7 +124,7 @@ set(MEETINGBUDDY_INFRA_SOURCES
     src/infrastructure/common/HResult.cpp
 )
 
-set(MEETINGBUDDY_UI_SOURCES
+set(SKRIVLI_UI_SOURCES
     src/ui/DeviceCombo.cpp
     src/ui/ShellDialogs.cpp
     src/ui/TabCtrl.cpp
@@ -133,7 +133,7 @@ set(MEETINGBUDDY_UI_SOURCES
     src/ui/RecordButton.cpp
 )
 
-set(MEETINGBUDDY_VIEWS_SOURCES
+set(SKRIVLI_VIEWS_SOURCES
     src/views/MainWindow.cpp
     src/views/RecordView.cpp
     src/views/RecordingsView.cpp
@@ -141,24 +141,24 @@ set(MEETINGBUDDY_VIEWS_SOURCES
     src/views/ModelPrompt.cpp
 )
 
-add_executable(MeetingBuddy WIN32
+add_executable(Skrivli WIN32
     src/main.cpp
     src/app/Application.cpp
-    ${MEETINGBUDDY_CORE_SOURCES}
-    ${MEETINGBUDDY_SERVICES_SOURCES}
-    ${MEETINGBUDDY_INFRA_SOURCES}
-    ${MEETINGBUDDY_UI_SOURCES}
-    ${MEETINGBUDDY_VIEWS_SOURCES}
-    resources/MeetingBuddy.rc
+    ${SKRIVLI_CORE_SOURCES}
+    ${SKRIVLI_SERVICES_SOURCES}
+    ${SKRIVLI_INFRA_SOURCES}
+    ${SKRIVLI_UI_SOURCES}
+    ${SKRIVLI_VIEWS_SOURCES}
+    resources/Skrivli.rc
 )
 
-target_include_directories(MeetingBuddy PRIVATE
+target_include_directories(Skrivli PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/resources
     ${wtl_SOURCE_DIR}/Include
 )
 
-target_compile_definitions(MeetingBuddy PRIVATE
+target_compile_definitions(Skrivli PRIVATE
     UNICODE
     _UNICODE
     WIN32_LEAN_AND_MEAN
@@ -167,7 +167,7 @@ target_compile_definitions(MeetingBuddy PRIVATE
     WIL_SUPPRESS_EXCEPTIONS
 )
 
-target_link_libraries(MeetingBuddy PRIVATE
+target_link_libraries(Skrivli PRIVATE
     WIL::WIL
     whisper
     miniaudio
@@ -193,13 +193,13 @@ target_link_libraries(MeetingBuddy PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(MeetingBuddy PRIVATE /W4 /permissive- /utf-8 /Zc:preprocessor)
+    target_compile_options(Skrivli PRIVATE /W4 /permissive- /utf-8 /Zc:preprocessor)
     # Use main() with a WIN32 subsystem executable.
-    # Manifest is embedded from resources/MeetingBuddy.rc — disable the linker default.
-    target_link_options(MeetingBuddy PRIVATE /ENTRY:mainCRTStartup /MANIFEST:NO)
+    # Manifest is embedded from resources/Skrivli.rc — disable the linker default.
+    target_link_options(Skrivli PRIVATE /ENTRY:mainCRTStartup /MANIFEST:NO)
 endif()
 
-if(MEETINGBUDDY_BUILD_TESTS)
+if(SKRIVLI_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_Declare(
         googletest
@@ -210,7 +210,7 @@ if(MEETINGBUDDY_BUILD_TESTS)
 
     enable_testing()
 
-    add_executable(MeetingBuddyTests
+    add_executable(SkrivliTests
         src/core/tests/RingBufferTests.cpp
         src/core/tests/ChunkPlanTests.cpp
         src/core/tests/TranscriptTextTests.cpp
@@ -238,11 +238,11 @@ if(MEETINGBUDDY_BUILD_TESTS)
         src/infrastructure/common/HResult.cpp
     )
 
-    target_include_directories(MeetingBuddyTests PRIVATE
+    target_include_directories(SkrivliTests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
-target_compile_definitions(MeetingBuddyTests PRIVATE
+target_compile_definitions(SkrivliTests PRIVATE
     UNICODE
     _UNICODE
     WIN32_LEAN_AND_MEAN
@@ -250,7 +250,7 @@ target_compile_definitions(MeetingBuddyTests PRIVATE
     WIL_SUPPRESS_EXCEPTIONS
 )
 
-target_link_libraries(MeetingBuddyTests PRIVATE
+target_link_libraries(SkrivliTests PRIVATE
     WIL::WIL
     GTest::gtest_main
     miniaudio
@@ -263,9 +263,9 @@ target_link_libraries(MeetingBuddyTests PRIVATE
     )
 
     if(MSVC)
-        target_compile_options(MeetingBuddyTests PRIVATE /W4 /permissive- /utf-8 /Zc:preprocessor)
+        target_compile_options(SkrivliTests PRIVATE /W4 /permissive- /utf-8 /Zc:preprocessor)
     endif()
 
     include(GoogleTest)
-    gtest_discover_tests(MeetingBuddyTests DISCOVERY_MODE PRE_TEST)
+    gtest_discover_tests(SkrivliTests DISCOVERY_MODE PRE_TEST)
 endif()

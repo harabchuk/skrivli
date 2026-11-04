@@ -6,7 +6,7 @@
 // along the bottom so the strip's baseline can run into its sides.
 class TabCtrl : public CWindowImpl<TabCtrl, WTL::CTabCtrl> {
   public:
-    DECLARE_WND_SUPERCLASS(L"MeetingBuddy.TabCtrl", WTL::CTabCtrl::GetWndClassName())
+    DECLARE_WND_SUPERCLASS(L"Skrivli.TabCtrl", WTL::CTabCtrl::GetWndClassName())
 
     BEGIN_MSG_MAP_EX(TabCtrl)
     MSG_WM_PAINT(OnPaint)

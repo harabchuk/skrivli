@@ -1,4 +1,4 @@
-# MeetingBuddy
+# Skrivli
 
 Native Windows tray app that records your microphone and system audio together,
 saves a mixed WAV (optional M4A) to a folder you choose, and can optionally
@@ -17,7 +17,7 @@ transcribe it locally with whisper.cpp to Markdown.
 scripts\start.bat
 ```
 
-This configures `build/` on first run, builds Release, stops any running instance, and launches `build\Release\MeetingBuddy.exe`.
+This configures `build/` on first run, builds Release, stops any running instance, and launches `build\Release\Skrivli.exe`.
 
 Unit tests (no audio hardware):
 
@@ -31,7 +31,7 @@ Portable zip (Release exe + this README; models are not included):
 scripts\package.bat
 ```
 
-Output lands in `dist\MeetingBuddy-<version>.zip`.
+Output lands in `dist\Skrivli-<version>.zip`.
 
 ## Privacy
 
@@ -41,9 +41,9 @@ Output lands in `dist\MeetingBuddy-<version>.zip`.
 
 ## Models
 
-Whisper models are **not** bundled. Download one from Settings (or browse to a local `ggml-*.bin`) before transcribing. The default is `ggml-base-q5_1.bin` under `%LOCALAPPDATA%\MeetingBuddy\models\`.
+Whisper models are **not** bundled. Download one from Settings (or browse to a local `ggml-*.bin`) before transcribing. The default is `ggml-base-q5_1.bin` under `%LOCALAPPDATA%\Skrivli\models\`.
 
-After each transcription, MeetingBuddy logs the real-time factor (wall time ÷ audio duration) to `%LOCALAPPDATA%\MeetingBuddy\logs\meetingbuddy.log`.
+After each transcription, Skrivli logs the real-time factor (wall time ÷ audio duration) to `%LOCALAPPDATA%\Skrivli\logs\skrivli.log`.
 
 ## Audio tips
 
@@ -53,10 +53,10 @@ Headphones are the reliable way to avoid speaker/mic echo. The communications-pr
 
 | What | Where |
 |---|---|
-| Settings | `%APPDATA%\MeetingBuddy\settings.json` |
-| Models | `%LOCALAPPDATA%\MeetingBuddy\models\` |
-| Logs | `%LOCALAPPDATA%\MeetingBuddy\logs\` |
-| Default recordings | `%USERPROFILE%\Documents\MeetingBuddy` |
+| Settings | `%APPDATA%\Skrivli\settings.json` |
+| Models | `%LOCALAPPDATA%\Skrivli\models\` |
+| Logs | `%LOCALAPPDATA%\Skrivli\logs\` |
+| Default recordings | `%USERPROFILE%\Documents\Skrivli` |
 
 ## Release notes (v1.0.0)
 

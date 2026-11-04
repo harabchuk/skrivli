@@ -21,7 +21,7 @@ class WavWriter {
     WavWriter(const WavWriter&) = delete;
     auto operator=(const WavWriter&) -> WavWriter& = delete;
 
-    // Opens `<folder>\MeetingBuddy_YYYY-MM-DD_HH-MM-SS.wav.partial`.
+    // Opens `<folder>\Skrivli_YYYY-MM-DD_HH-MM-SS.wav.partial`.
     bool Open(const std::wstring& folder);
     // Opens `<finalWavPath>.partial` (e.g. stems: `… .mic.wav.partial`).
     bool OpenFinalPath(const std::wstring& finalWavPath);

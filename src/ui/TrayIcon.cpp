@@ -120,7 +120,7 @@ void TrayIcon::Modify() {
 void TrayIcon::SetRecording(bool recording) {
     m_recording = recording;
     if (!recording) {
-        wcsncpy_s(m_tip, L"MeetingBuddy", _TRUNCATE);
+        wcsncpy_s(m_tip, L"Skrivli", _TRUNCATE);
     }
     if (!m_added) {
         return;
@@ -130,7 +130,7 @@ void TrayIcon::SetRecording(bool recording) {
 
 void TrayIcon::SetTip(const wchar_t* tip) {
     if (tip == nullptr || tip[0] == L'\0') {
-        wcsncpy_s(m_tip, L"MeetingBuddy", _TRUNCATE);
+        wcsncpy_s(m_tip, L"Skrivli", _TRUNCATE);
     } else {
         wcsncpy_s(m_tip, tip, _TRUNCATE);
     }

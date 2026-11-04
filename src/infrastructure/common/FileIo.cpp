@@ -68,7 +68,7 @@ bool IsWritableDirectory(const std::wstring& folder) {
     if (!Paths::EnsureDirectory(folder)) {
         return false;
     }
-    const auto probe = std::filesystem::path(folder) / L".meetingbuddy_write_test";
+    const auto probe = std::filesystem::path(folder) / L".skrivli_write_test";
     const wil::unique_hfile file(
         ::CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                       FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr));

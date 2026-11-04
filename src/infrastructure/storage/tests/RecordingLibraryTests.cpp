@@ -15,7 +15,7 @@ std::wstring TempDir() {
     wchar_t path[MAX_PATH]{};
     const DWORD len = ::GetTempPathW(MAX_PATH, path);
     EXPECT_GT(len, 0u);
-    const auto dir = std::filesystem::path(path) / L"MeetingBuddyLibraryTests";
+    const auto dir = std::filesystem::path(path) / L"SkrivliLibraryTests";
     std::filesystem::create_directories(dir);
     return dir.wstring();
 }
@@ -58,8 +58,8 @@ TEST(RecordingLibrary, PairsSidecarsAndSortsNewestFirst) {
     const std::wstring folder = TempDir() + L"\\Scan";
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);
-    const std::wstring older = WriteTinyWav(folder, L"MeetingBuddy_2026-01-01_10-00-00.wav");
-    const std::wstring newer = WriteTinyWav(folder, L"MeetingBuddy_2026-02-01_11-00-00.wav");
+    const std::wstring older = WriteTinyWav(folder, L"Skrivli_2026-01-01_10-00-00.wav");
+    const std::wstring newer = WriteTinyWav(folder, L"Skrivli_2026-02-01_11-00-00.wav");
     RecordingSidecar side{};
     side.startLocal = "2026-02-01T11:00:00";
     side.endLocal = "2026-02-01T11:00:10";
@@ -100,7 +100,7 @@ TEST(RecordingLibrary, LegacyMarkdownCountsAsTranscript) {
     const std::wstring folder = TempDir() + L"\\LegacyMd";
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);
-    const std::wstring wav = WriteTinyWav(folder, L"MeetingBuddy_2026-01-02_10-00-00.wav");
+    const std::wstring wav = WriteTinyWav(folder, L"Skrivli_2026-01-02_10-00-00.wav");
     {
         std::ofstream md(RecordingLibrary::LegacyMdPathForAudio(wav), std::ios::binary);
         md << "# Meeting\n\n**[00:00:01]** hi\n";
@@ -124,7 +124,7 @@ TEST(RecordingLibrary, MissingSidecarUsesFileNameTimestamp) {
     const std::wstring folder = TempDir() + L"\\NoSide";
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);
-    const std::wstring wav = WriteTinyWav(folder, L"MeetingBuddy_2026-03-15_08-30-45.wav");
+    const std::wstring wav = WriteTinyWav(folder, L"Skrivli_2026-03-15_08-30-45.wav");
 
     // Act
     const auto entries = RecordingLibrary::Scan(folder);
@@ -169,7 +169,7 @@ TEST(RecordingLibrary, RenameKeepsSidecarsTogether) {
     const std::wstring folder = TempDir() + L"\\Rename";
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);
-    const std::wstring wav = WriteTinyWav(folder, L"MeetingBuddy_2026-04-01_12-00-00.wav");
+    const std::wstring wav = WriteTinyWav(folder, L"Skrivli_2026-04-01_12-00-00.wav");
     RecordingSidecar side{};
     side.startLocal = "2026-04-01T12:00:00";
     side.durationSeconds = 1.0;

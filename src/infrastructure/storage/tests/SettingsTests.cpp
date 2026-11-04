@@ -13,7 +13,7 @@ std::wstring TempDir(const wchar_t* leaf) {
     wchar_t path[MAX_PATH]{};
     const DWORD len = ::GetTempPathW(MAX_PATH, path);
     EXPECT_GT(len, 0u);
-    const auto dir = std::filesystem::path(path) / L"MeetingBuddySettingsTests" / leaf;
+    const auto dir = std::filesystem::path(path) / L"SkrivliSettingsTests" / leaf;
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     return dir.wstring();

@@ -33,7 +33,7 @@ class TrayIcon {
     bool m_recording = false;
     HICON m_idleIcon = nullptr;
     HICON m_recordingIcon = nullptr;
-    wchar_t m_tip[128] = L"MeetingBuddy";
+    wchar_t m_tip[128] = L"Skrivli";
 
     static constexpr GUID kIconGuid = {
         0xb8e7a41c, 0x5d3f, 0x4a2e, {0x9c, 0x1b, 0x8f, 0x6e, 0x2d, 0x4a, 0x7b, 0x09}};

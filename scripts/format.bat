@@ -7,7 +7,7 @@ REM Usage: scripts\format.bat [file ...]
 REM With no files, formats every C/C++ source under src\.
 
 set "ROOT=%~dp0.."
-set "FILE_LIST=%TEMP%\meetingbuddy_format_files.txt"
+set "FILE_LIST=%TEMP%\skrivli_format_files.txt"
 if exist "%FILE_LIST%" del /q "%FILE_LIST%"
 set "HAS_FILES="
 
@@ -106,7 +106,7 @@ if /I not "%ARCH_DIR%"=="ARM64" (
 exit /b 0
 
 :find_llvm_arch
-set "LLVM_LIST=%TEMP%\meetingbuddy_llvm_%~1.txt"
+set "LLVM_LIST=%TEMP%\skrivli_llvm_%~1.txt"
 "%VSWHERE%" -all -prerelease -products * -sort -find "VC\Tools\Llvm\%~1\bin\clang-format.exe" >"%LLVM_LIST%" 2>nul
 if not exist "%LLVM_LIST%" exit /b 0
 for /f "usebackq delims=" %%I in ("%LLVM_LIST%") do (

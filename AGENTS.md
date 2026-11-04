@@ -1,4 +1,4 @@
-# AGENTS.md — MeetingBuddy
+# AGENTS.md — Skrivli
 
 Native Windows app (C++ / WTL) that records microphone + system audio via WASAPI, mixes them
 into one file in a user-chosen folder, and can optionally transcribe it locally (whisper.cpp)
@@ -35,8 +35,8 @@ Prerequisite: Visual Studio with the **Desktop C++** and **C++ ATL** components 
 scripts\start.bat
 ```
 
-It locates CMake, **kills any running** `MeetingBuddy.exe`, configures `build/` on first run,
-builds `Release`, and launches `build\Release\MeetingBuddy.exe`. Run it after every change you
+It locates CMake, **kills any running** `Skrivli.exe`, configures `build/` on first run,
+builds `Release`, and launches `build\Release\Skrivli.exe`. Run it after every change you
 want to verify. Don't launch the exe by hand, because a running instance locks the binary and
 the single-instance mutex will hand over to the old process.
 
@@ -79,7 +79,7 @@ src/
   ui/              TabCtrl, DeviceCombo, LevelMeter, RecordButton, TrayIcon,
                    ShellDialogs, Theme.hpp
   views/           MainWindow, RecordView, RecordingsView, SettingsDialog, ModelPrompt
-resources/         MeetingBuddy.rc, resource.h, icons, MeetingBuddy.manifest
+resources/         Skrivli.rc, resource.h, icons, Skrivli.manifest
 .specs/            design documents
 ```
 
@@ -91,9 +91,9 @@ Before searching `src\`, read the `folder.md` in the layer that matches the work
 
 When you add, remove, rename, or change what a production file is responsible for, update that folder's `folder.md` in the same change. A new subfolder gets its own `folder.md`. If the file moves between folders, update both indexes.
 
-Each module keeps a `tests/` folder beside its sources (for example `src/core/tests/RingBufferTests.cpp`). Includes in those files stay rooted at `src`. Add each test `.cpp` only to the `MeetingBuddyTests` target in `CMakeLists.txt`, not to a `MEETINGBUDDY_*_SOURCES` list.
+Each module keeps a `tests/` folder beside its sources (for example `src/core/tests/RingBufferTests.cpp`). Includes in those files stay rooted at `src`. Add each test `.cpp` only to the `SkrivliTests` target in `CMakeLists.txt`, not to a `SKRIVLI_*_SOURCES` list.
 
-Every new production `.cpp` must be added to the matching `MEETINGBUDDY_*_SOURCES` list in `CMakeLists.txt`.
+Every new production `.cpp` must be added to the matching `SKRIVLI_*_SOURCES` list in `CMakeLists.txt`.
 Keep DSP and file logic free of UI so it can be unit-tested.
 
 ## Source layers
@@ -228,14 +228,14 @@ soft limiter above -1 dBFS.
 
 ### Files (spec §6.5)
 
-- Name: `<folder>\MeetingBuddy_YYYY-MM-DD_HH-MM-SS.wav` (local time, `-2` suffix on collision).
+- Name: `<folder>\Skrivli_YYYY-MM-DD_HH-MM-SS.wav` (local time, `-2` suffix on collision).
 - Output is PCM 16-bit, 48 kHz, stereo. Write to `*.wav.partial`, patch the RIFF header every 2 s, and rename on
 stop. On startup, repair leftover `.partial` files to `*.recovered.wav`.
 - Sidecars next to the audio: `<name>.txt` (transcript), `<name>.json` (metadata + transcript status).
 Delete, rename, and list operations treat audio + `.txt` + `.json` as one unit (and a leftover `.md` if present). Delete goes to the Recycle Bin.
-- App data: settings `%APPDATA%\MeetingBuddy\settings.json`; models
-`%LOCALAPPDATA%\MeetingBuddy\models\`; logs `%LOCALAPPDATA%\MeetingBuddy\logs\`.
-Default recordings folder: `%USERPROFILE%\Documents\MeetingBuddy`.
+- App data: settings `%APPDATA%\Skrivli\settings.json`; models
+`%LOCALAPPDATA%\Skrivli\models\`; logs `%LOCALAPPDATA%\Skrivli\logs\`.
+Default recordings folder: `%USERPROFILE%\Documents\Skrivli`.
 
 ### Transcription (spec §7)
 
@@ -266,7 +266,7 @@ recording, Open folder, Settings, Exit. Minimize and close hide to the tray (con
 `TaskbarCreated`. Show balloons for transcript ready, low disk, and device lost. Transcript-ready balloon opens the
 Recordings tab and selects that recording.
 
-- Single instance: mutex `Local\MeetingBuddy.SingleInstance`. A second launch activates the existing window.
+- Single instance: mutex `Local\Skrivli.SingleInstance`. A second launch activates the existing window.
 - When the user exits during a recording, ask whether to stop and save. `WM_ENDSESSION` always stops and saves.
 
 ---

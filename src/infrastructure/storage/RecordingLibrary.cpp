@@ -44,7 +44,7 @@ auto StemPath(const std::filesystem::path& audioPath) -> std::wstring {
 }
 
 auto FileNameToStartLocal(const std::wstring& fileName) -> std::string {
-    const std::wstring prefix = L"MeetingBuddy_";
+    const std::wstring prefix = L"Skrivli_";
     if (fileName.size() < prefix.size() + 19 || fileName.compare(0, prefix.size(), prefix) != 0) {
         return {};
     }

@@ -79,7 +79,7 @@ TEST(TranscriptText, DropsTripleRepeats) {
 
 TEST(TranscriptText, WriteHasNoBom) {
     // Arrange
-    const auto path = std::filesystem::temp_directory_path() / "meetingbuddy_txt_test.txt";
+    const auto path = std::filesystem::temp_directory_path() / "skrivli_txt_test.txt";
 
     // Act
     ASSERT_TRUE(TranscriptText::WriteUtf8NoBom(path.wstring(), "[00:00:00] hi\n"));

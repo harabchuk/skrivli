@@ -4,7 +4,7 @@
 
 namespace Autostart {
 
-constexpr wchar_t kRunValueName[] = L"MeetingBuddy";
+constexpr wchar_t kRunValueName[] = L"Skrivli";
 
 // Creates or removes the HKCU Run entry for this executable.
 // When enabled and startMinimized is true, the command includes --tray.

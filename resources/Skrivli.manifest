@@ -3,9 +3,9 @@
   <assemblyIdentity
       version="1.0.0.0"
       processorArchitecture="*"
-      name="MeetingBuddy"
+      name="Skrivli"
       type="win32"/>
-  <description>MeetingBuddy</description>
+  <description>Skrivli</description>
   <dependency>
     <dependentAssembly>
       <assemblyIdentity

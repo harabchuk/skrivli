@@ -19,7 +19,7 @@ BEGIN
     END
     POPUP "&Help"
     BEGIN
-        MENUITEM "&About MeetingBuddy...",  ID_APP_ABOUT
+        MENUITEM "&About Skrivli...",  ID_APP_ABOUT
     END
 END
 
@@ -27,7 +27,7 @@ IDR_TRAY_MENU MENU
 BEGIN
     POPUP "Tray"
     BEGIN
-        MENUITEM "&Show MeetingBuddy",      ID_TRAY_SHOW
+        MENUITEM "&Show Skrivli",      ID_TRAY_SHOW
         MENUITEM "&Start recording",        ID_TRAY_STARTSTOP
         MENUITEM SEPARATOR
         MENUITEM "Open &recordings folder", ID_TRAY_OPENFOLDER
@@ -160,4 +160,4 @@ BEGIN
     END
 END
 
-1 24 "MeetingBuddy.manifest"
+1 24 "Skrivli.manifest"

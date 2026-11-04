@@ -6,7 +6,7 @@ Update this file when a file here is added, removed, renamed, or its responsibil
 
 | File | Purpose | Role | Domain | Features |
 |---|---|---|---|---|
-| `Log.hpp`, `Log.cpp` | Appends Info, Warn, and Error lines under `%LOCALAPPDATA%\MeetingBuddy\logs\`. | Logger | Common | Logging |
+| `Log.hpp`, `Log.cpp` | Appends Info, Warn, and Error lines under `%LOCALAPPDATA%\Skrivli\logs\`. | Logger | Common | Logging |
 | `HResult.hpp`, `HResult.cpp` | Logs a failed `HRESULT` and returns whether it succeeded. | Error helper | Common | Recording, Device selection |
 | `Paths.hpp`, `Paths.cpp` | Settings, models, logs, rescue, and default recordings directories. Creates them. | Paths | Common | Settings, Model download, Logging, Crash recovery |
 | `Text.hpp`, `Text.cpp` | UTF-8 conversion, path compare, and `hh:mm:ss` formatting. | Text | Common | Recording, Recordings library, Transcription |
