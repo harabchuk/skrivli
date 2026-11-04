@@ -188,7 +188,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 - [x] `domain/chunk_plan.rs`: pure mapping from QPC ticks to 48 kHz sample indices, with integer/rational conversion that avoids cumulative floating-point drift. Define session origin `t0` and treatment of latency, missing packets, overlaps and discontinuities.
 - [x] `infrastructure/audio/mixer.rs`: emit 480-frame (10 ms) stereo blocks; wait for input until data available or block lags real time by about 150 ms, then fill absent source with zeros.
 - [x] Implement source-specific gains (mic `1.0`, system `0.8` initially), stable summation and tested soft limiter. Capture gaps and overruns in diagnostics and sidecar metadata.
-- [x] Handle clocks that drift apart (test ±100 ppm); document initial sparse-frame correction threshold (~20 ms) and migrate to adaptive resampling if artifacts are audible.
+- [x] Handle clocks that drift apart (test ±100 ppm); gradual drift uses Rubato adaptive resample ratio on each capture stream (D-06); sudden holes/overlaps stay sparse silence/skip.
 - [x] Add synthetic tests: different start times, silent output for 30 s, 5 ms gaps, overlapping/late packets, discontinuity, queue overrun, drift, clipping, missing source, and final tail drain.
 
 ### M3.3 — Live gain, meters and idle monitoring
@@ -447,7 +447,7 @@ Done when: observable milestone acceptance condition
 | D-03 | M2 | Direct `windows` WASAPI vs wrapper, negotiated formats | Real mic/loopback opening spikes |
 | D-04 | M2–M3 | Bounded SPSC implementation, overflow/drop/gap semantics | Concurrent stress + synthetic timeline tests |
 | D-05 | M2 | RIFF size cap/rotation vs RF64 | Header boundary tests + long-session design |
-| D-06 | M3 | Clock correction (sparse adjustments vs adaptive resampler) | ±100 ppm tests and listening comparisons |
+| D-06 | M3 | Adaptive Rubato ratio for gradual drift; sparse hole/overlap only | ±100 ppm error publication + resampler ratio tests |
 | D-07 | M6 | whisper.cpp binding/version, native runtime and licenses | Clean MSVC CPU build + transcription demo |
 | D-08 | M6 | Model catalog, exact trusted URLs/digests and compatibility | Verified manifest and corrupted-download test |
 | D-09 | M8 | Media Foundation M4A viability and optional feature priority | Encode/decode/packaging proof |

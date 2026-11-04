@@ -53,7 +53,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | UI | **GPUI Kit** (`gpui-kit`), pinned Windows-tested version | Primary framework; re-exports compatible GPUI, `gpui-base`, `gpui-component`, and assets; use its styled components and app setup |
 | Windows interfaces | `windows` crate (or a compatible higher-level wrapper where justified) | Core Audio/WASAPI, COM, Shell, device notifications, dialogs, hotkeys |
 | Audio capture | WASAPI shared-mode, event-driven | Microphone input + render-endpoint loopback; dedicated native threads |
-| Device format conversion | WASAPI negotiated formats plus a tested resampler/converter | Internal 48 kHz stereo `f32`; do not assume every driver accepts requested format |
+| Device format conversion | WASAPI negotiated formats plus Rubato `Async` resampler/converter | Internal 48 kHz stereo `f32`; do not assume every driver accepts requested format |
 | Audio mixing | Rust DSP module, bounded SPSC buffers | Timestamp alignment, drift handling, limiter, meters |
 | Recording | PCM16 stereo 48 kHz WAV first | `.wav.partial` while writing; finalize and recover on startup |
 | Optional M4A | Windows Media Foundation `IMFSinkWriter` | Post-processing worker; user opt-in |
@@ -315,7 +315,7 @@ When system playback is silent, WASAPI loopback may yield no packets. The mixer 
 - Convert packet timestamps into positions on the 48 kHz sample timeline, taking timestamp-unit conversions and device latency into account.
 - Operate in **10 ms / 480-frame** output blocks. A source gap of roughly 5 ms becomes silence; duplicated/overlapping late frames are discarded according to a deterministic rule.
 - Emit when sufficient data exists or when a block is more than about **150 ms** behind real time; a stalled input contributes silence. These thresholds are initial values and should be validated by tests on actual devices.
-- Two devices have independent hardware clocks. Monitor buffer-fill trends and resynchronization needs. An initial approach uses sparse drop/duplicate frame correction beyond roughly 20 ms drift; document artifacts and prefer a tiny adaptive resample ratio if results warrant it.
+- Two devices have independent hardware clocks. Each capture stream uses Rubato asynchronous resampling (device rate → 48 kHz) with a tiny adaptive ratio driven by mixer timeline error, so ppm-level clock drift is corrected without sparse drop/duplicate splices. Sudden holes still become silence; sudden overlaps are still discarded.
 - Mix `clamp(mic_gain * mic + system_gain * system)` with initial mic gain `1.0`, system gain `0.8`, and a tested soft limiter to avoid clipped speech. Downmix/duplicate mono microphone channels explicitly.
 - Optional **mic AGC**, off by default: approximately 0.75 s RMS analysis, −18 dBFS speech target, gain limits 0.5×–4×, noise gate below −45 dBFS, smooth gain transitions. This is application-side processing only.
 - Publish per-source and mixed peak snapshots plus effective microphone gain for meters, not per-sample UI events.
@@ -581,7 +581,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | GPUI Kit / GPUI foreground thread stalls from capture/inference | Dedicated workers, bounded channels, throttled state updates |
 | COM thread/apartment misuse | Construct and dispose WASAPI objects on owning worker threads; no unchecked cross-thread interface movement |
 | Silent loopback produces no packets | QPC timeline and silence insertion; investigate silent render keep-alive |
-| Drift between independent devices | Unit-test 100 ppm deviations; adaptive correction/resampling if simple strategy is audible |
+| Drift between independent devices | Unit-test 100 ppm deviations; Rubato adaptive resample ratio on each capture stream |
 | Driver rejects requested format/conversion | Probe `IsFormatSupported`/mix format; test alternate converter path |
 | Long WAV exceeds RIFF 32-bit size | Monitor file length and stop/split or use compatible large-file format |
 | Speaker feedback/echo | Recommend headphones; AEC only when supported; optional source stems |

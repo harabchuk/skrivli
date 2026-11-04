@@ -10,10 +10,12 @@
 
 #[cfg(test)]
 use std::collections::VecDeque;
+use std::sync::atomic::AtomicI64;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 #[cfg(test)]
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 #[cfg(test)]
 use std::thread::{self, JoinHandle};
 #[cfg(test)]
@@ -41,6 +43,7 @@ impl CapturePort for WasapiLoopback {
         &mut self,
         endpoint_id: &str,
         origin: SessionOrigin,
+        drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         let endpoint = endpoint_id.to_string();
         spawn_audio_worker(move |tx, stop, overruns, ready| {
@@ -54,6 +57,7 @@ impl CapturePort for WasapiLoopback {
                 &stop,
                 &overruns,
                 &ready,
+                drift_error,
             ) {
                 let _ = ready.send(Err(error));
             }
@@ -115,6 +119,7 @@ impl CapturePort for FakeLoopback {
         &mut self,
         _endpoint_id: &str,
         _origin: SessionOrigin,
+        _drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         let mut state = self
             .inner
@@ -175,6 +180,8 @@ mod tests {
     use crate::domain::audio::SessionOrigin;
     use crate::infrastructure::audio::queue::{AudioBlock, CAPTURE_QUEUE_CAPACITY};
     use crate::services::recording::CapturePort;
+    use std::sync::atomic::AtomicI64;
+    use std::sync::Arc;
 
     #[test]
     fn fake_loopback_delivers_a_block_without_wasapi() {
@@ -188,7 +195,9 @@ mod tests {
         let origin = SessionOrigin::new(0, 48_000, 48_000).expect("origin");
 
         // Act
-        let mut stream = port.open("", origin).expect("open");
+        let mut stream = port
+            .open("", origin, Arc::new(AtomicI64::new(0)))
+            .expect("open");
         let block = stream.pull().expect("pull").expect("block");
         let live_while_open = port.live();
         stream.close();

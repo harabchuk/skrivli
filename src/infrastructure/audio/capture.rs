@@ -5,7 +5,7 @@
 //! converted on that thread and offered to a bounded channel; a full channel
 //! rejects the new packet (see `queue`).
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -35,6 +35,7 @@ use crate::domain::chunk_plan::{latency_reference_to_ticks, map_packet_frame};
 use crate::services::recording::{CaptureError, CapturePort, CaptureStream};
 
 use super::queue::{offer_block, AudioBlock, CAPTURE_QUEUE_CAPACITY};
+use super::resampler::StereoResampler;
 
 /// 200 ms in 100-nanosecond units.
 pub(crate) const PREFERRED_BUFFER_HNS: i64 = 2_000_000;
@@ -126,6 +127,7 @@ impl CapturePort for WasapiCapture {
         &mut self,
         endpoint_id: &str,
         origin: SessionOrigin,
+        drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         let endpoint = endpoint_id.to_string();
         spawn_audio_worker(move |tx, stop, overruns, ready| {
@@ -139,6 +141,7 @@ impl CapturePort for WasapiCapture {
                 &stop,
                 &overruns,
                 &ready,
+                drift_error,
             ) {
                 let _ = ready.send(Err(error));
             }
@@ -229,6 +232,7 @@ pub(crate) fn run_endpoint(
     stop: &std::sync::atomic::AtomicBool,
     overruns: &AtomicU64,
     ready: &std::sync::mpsc::Sender<Result<(), CaptureError>>,
+    drift_error: Arc<AtomicI64>,
 ) -> Result<(), CaptureError> {
     let _apartment = ComApartment::multithreaded().map_err(|_| CaptureError::Failed)?;
     let enumerator: IMMDeviceEnumerator =
@@ -254,6 +258,10 @@ pub(crate) fn run_endpoint(
         return Ok(());
     }
     let mut pending_gap = false;
+    let mut resampler = StereoResampler::new(
+        audio_format.sample_rate(),
+        AudioFormat::internal().sample_rate(),
+    );
     while !stop.load(Ordering::Acquire) {
         let status = unsafe { WaitForSingleObject(event.get(), 200) };
         if status == WAIT_TIMEOUT && stop.load(Ordering::Acquire) {
@@ -270,11 +278,24 @@ pub(crate) fn run_endpoint(
             tx,
             overruns,
             &mut pending_gap,
+            &mut resampler,
+            &drift_error,
         ) {
             tracing::error!("capture packet was not read");
             let _ = error;
             break;
         }
+    }
+    let flushed = resampler.flush();
+    if !flushed.is_empty() {
+        let _ = offer_block(
+            tx,
+            AudioBlock {
+                samples: flushed,
+                timeline_frame: None,
+                discontinuity: false,
+            },
+        );
     }
     let _ = unsafe { client.Stop() };
     Ok(())
@@ -367,6 +388,7 @@ pub(crate) fn initialize_client(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn drain(
     capture: &IAudioCaptureClient,
     format: AudioFormat,
@@ -375,6 +397,8 @@ fn drain(
     tx: &SyncSender<AudioBlock>,
     overruns: &AtomicU64,
     pending_gap: &mut bool,
+    resampler: &mut StereoResampler,
+    drift_error: &AtomicI64,
 ) -> Result<(), CaptureError> {
     let block_align = format
         .bytes_per_frame()
@@ -412,9 +436,11 @@ fn drain(
         } else {
             map_packet_frame(origin, qpc, latency_ticks)
         };
+        resampler.set_drift_error(drift_error.load(Ordering::Relaxed));
         let block = match super::queue::block_from_packet(
             &bytes,
             format,
+            resampler,
             timeline,
             parsed.silent,
             parsed.discontinuity || *pending_gap,
@@ -422,6 +448,9 @@ fn drain(
             Ok(block) => block,
             Err(_) => continue,
         };
+        if block.samples.is_empty() {
+            continue;
+        }
         if offer_block(tx, block) {
             *pending_gap = false;
         } else {

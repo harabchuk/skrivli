@@ -6,7 +6,7 @@
 //! a command.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -91,6 +91,7 @@ pub(crate) trait CapturePort: Send {
         &mut self,
         endpoint_id: &str,
         origin: SessionOrigin,
+        drift_error: Arc<std::sync::atomic::AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError>;
 }
 
@@ -300,13 +301,17 @@ fn session_body(
             return Err(NOTICE_START);
         }
     };
+    let mic_drift = Arc::new(AtomicI64::new(0));
+    let system_drift = Arc::new(AtomicI64::new(0));
     let mic_result = if request.open_microphone {
-        engine.mic.open(&request.endpoint_id, origin)
+        engine
+            .mic
+            .open(&request.endpoint_id, origin, Arc::clone(&mic_drift))
     } else {
         Err(CaptureError::Unavailable)
     };
     let system_result = match &request.system_endpoint_id {
-        Some(id) => engine.system.open(id, origin),
+        Some(id) => engine.system.open(id, origin, Arc::clone(&system_drift)),
         None => Err(CaptureError::Unavailable),
     };
     let mut degraded = request.degraded_notice;
@@ -354,6 +359,8 @@ fn session_body(
         system.is_some(),
         Arc::clone(&engine.gain),
         Arc::clone(&engine.levels),
+        mic_drift,
+        system_drift,
     );
     let mut frames = 0_u64;
     let mut problems = Vec::new();
@@ -430,7 +437,7 @@ fn session_body(
     if diagnostics.discontinuities > 0 {
         note(&mut problems, "discontinuity");
     }
-    if diagnostics.drift_drops > 0 || diagnostics.drift_duplicates > 0 {
+    if diagnostics.drift_adjustments > 0 {
         note(&mut problems, "drift");
     }
     let overruns = mic.as_ref().map(|stream| stream.overruns()).unwrap_or(0)
@@ -551,6 +558,7 @@ impl CapturePort for SharedCapture {
         &mut self,
         _endpoint_id: &str,
         _origin: SessionOrigin,
+        _drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         let mut state = lock_fake(&self.inner);
         if let Some(error) = state.error.take() {
@@ -883,6 +891,8 @@ mod tests {
     };
     use crate::domain::audio::CivilTime;
     use crate::infrastructure::audio::queue::AudioBlock;
+    use std::sync::atomic::AtomicI64;
+    use std::sync::Arc;
 
     struct OneShot {
         block: Option<AudioBlock>,
@@ -894,6 +904,7 @@ mod tests {
             &mut self,
             _: &str,
             _: crate::domain::audio::SessionOrigin,
+            _: Arc<AtomicI64>,
         ) -> Result<Box<dyn super::CaptureStream>, CaptureError> {
             self.opened
                 .store(true, std::sync::atomic::Ordering::Release);

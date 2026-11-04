@@ -7,15 +7,15 @@
 //! Packet placement:
 //! - A sudden hole of at least 1 ms (the 5 ms case included) becomes silence.
 //! - A sudden overlap is discarded from the front of the late packet.
-//! - Gradual clock error is absorbed until it passes [`DRIFT_THRESHOLD_FRAMES`]
-//!   (20 ms). Past that, frames are dropped or duplicated. Adaptive resampling
-//!   is not done here (D-06).
+//! - Gradual clock error is tracked in [`AlignState::last_error`] and fed to
+//!   each capture stream's Rubato async resampler (D-06). This module does
+//!   not drop or duplicate frames for gradual drift.
 
 use super::audio::SessionOrigin;
 
 /// One mixed block: 10 ms at 48 kHz.
 pub(crate) const MIX_BLOCK_FRAMES: u64 = 480;
-/// Sparse correction starts after about 20 ms.
+/// Diagnostics treat absolute error past about 20 ms as engaged drift feedback.
 pub(crate) const DRIFT_THRESHOLD_FRAMES: u64 = 960;
 /// A block this far behind the session clock is emitted with silence.
 pub(crate) const LATENCY_LIMIT_FRAMES: u64 = 7_200;
@@ -60,10 +60,7 @@ pub(crate) struct PacketPlan {
     pub(crate) silence_frames: u64,
     pub(crate) skip_frames: u64,
     pub(crate) take_frames: u64,
-    pub(crate) duplicate_frames: u64,
     pub(crate) gap: bool,
-    pub(crate) drift_drop: u64,
-    pub(crate) drift_duplicate: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,10 +99,7 @@ pub(crate) fn plan_packet(
             silence_frames: 0,
             skip_frames: 0,
             take_frames: 0,
-            duplicate_frames: 0,
             gap: false,
-            drift_drop: 0,
-            drift_duplicate: 0,
         };
     }
     let Some(start) = start else {
@@ -114,10 +108,7 @@ pub(crate) fn plan_packet(
             silence_frames: 0,
             skip_frames: 0,
             take_frames: frames,
-            duplicate_frames: 0,
             gap: false,
-            drift_drop: 0,
-            drift_duplicate: 0,
         };
     };
 
@@ -143,42 +134,15 @@ pub(crate) fn plan_packet(
     } else {
         error
     };
-
-    let threshold = i64::try_from(DRIFT_THRESHOLD_FRAMES).unwrap_or(i64::MAX);
-    let mut duplicate = 0_u64;
-    let mut drift_drop = 0_u64;
-    let mut drift_duplicate = 0_u64;
-    if residual > threshold {
-        let extra = u64::try_from(residual - threshold).unwrap_or(u64::MAX);
-        duplicate = extra;
-        drift_duplicate = extra;
-        state.last_error = threshold;
-    } else if residual < -threshold {
-        let extra = u64::try_from((-residual) - threshold).unwrap_or(u64::MAX);
-        let room = frames.saturating_sub(skip);
-        let drop = extra.min(room);
-        skip = skip.saturating_add(drop);
-        drift_drop = drop;
-        let applied = i64::try_from(drop).unwrap_or(i64::MAX);
-        state.last_error = residual.saturating_add(applied);
-    } else {
-        state.last_error = residual;
-    }
+    state.last_error = residual;
 
     let take = frames.saturating_sub(skip);
-    state.cursor = state
-        .cursor
-        .saturating_add(silence)
-        .saturating_add(take)
-        .saturating_add(duplicate);
+    state.cursor = state.cursor.saturating_add(silence).saturating_add(take);
     PacketPlan {
         silence_frames: silence,
         skip_frames: skip,
         take_frames: take,
-        duplicate_frames: duplicate,
         gap: silence > 0,
-        drift_drop,
-        drift_duplicate,
     }
 }
 
@@ -245,9 +209,7 @@ mod tests {
         assert_eq!(first.take_frames, 480);
         assert!(gap.gap);
         assert_eq!(gap.silence_frames, 240);
-        assert_eq!(gap.drift_duplicate, 0);
         assert_eq!(overlap.skip_frames, 200);
-        assert_eq!(overlap.drift_drop, 0);
         assert_eq!(overlap.take_frames, 280);
         let _ = HOLE_FRAMES;
     }
@@ -269,14 +231,12 @@ mod tests {
     }
 
     #[test]
-    fn fast_and_slow_clocks_correct_only_past_20ms() {
+    fn gradual_clock_drift_is_tracked_without_sparse_splices() {
         // Arrange
         let frames = 4_800_u64;
         let packets = 2_200_u64;
         let mut fast = AlignState::new();
         let mut slow = AlignState::new();
-        let mut fast_drops = 0_u64;
-        let mut slow_dups = 0_u64;
 
         // Act
         for index in 0..packets {
@@ -284,31 +244,20 @@ mod tests {
             let slow_start = index * frames * 10_001 / 10_000;
             let fast_plan = plan_packet(&mut fast, Some(fast_start), frames, false);
             let slow_plan = plan_packet(&mut slow, Some(slow_start), frames, false);
-            fast_drops = fast_drops.saturating_add(fast_plan.drift_drop);
-            slow_dups = slow_dups.saturating_add(slow_plan.drift_duplicate);
-            assert!(
-                fast_plan.drift_drop <= 8,
-                "fast correction should stay sparse, dropped {}",
-                fast_plan.drift_drop
-            );
-            assert!(
-                slow_plan.drift_duplicate <= 8,
-                "slow correction should stay sparse, duplicated {}",
-                slow_plan.drift_duplicate
-            );
+            assert_eq!(fast_plan.skip_frames, 0);
+            assert_eq!(slow_plan.silence_frames, 0);
         }
 
         // Assert
-        let produced = packets * frames;
-        assert!(fast_drops > 0);
-        assert!(slow_dups > 0);
-        let fast_qpc = produced * 10_000 / 10_001;
-        let fast_error = fast.cursor as i64 - fast_qpc as i64;
-        assert!(fast_error.abs() <= DRIFT_THRESHOLD_FRAMES as i64 + frames as i64);
-        let slow_qpc = produced * 10_001 / 10_000;
-        let slow_error = slow.cursor as i64 - slow_qpc as i64;
-        assert!(slow_error.abs() <= DRIFT_THRESHOLD_FRAMES as i64 + frames as i64);
-        assert!(fast.last_error.abs() <= DRIFT_THRESHOLD_FRAMES as i64 + 8);
-        assert!(slow.last_error.abs() <= DRIFT_THRESHOLD_FRAMES as i64 + 8);
+        assert!(
+            fast.last_error < -(DRIFT_THRESHOLD_FRAMES as i64),
+            "fast last_error={}",
+            fast.last_error
+        );
+        assert!(
+            slow.last_error > DRIFT_THRESHOLD_FRAMES as i64,
+            "slow last_error={}",
+            slow.last_error
+        );
     }
 }

@@ -94,8 +94,20 @@ fn monitor_loop(
             continue;
         }
         let (mic_id, system_id, generation) = targets.snapshot();
-        let mut mic = mic_port.open(&mic_id, origin).ok();
-        let mut system = system_port.open(&system_id, origin).ok();
+        let mut mic = mic_port
+            .open(
+                &mic_id,
+                origin,
+                Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            )
+            .ok();
+        let mut system = system_port
+            .open(
+                &system_id,
+                origin,
+                Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            )
+            .ok();
         if mic.is_none() && system.is_none() {
             lease.end_monitor();
             thread::sleep(Duration::from_millis(200));
@@ -186,6 +198,7 @@ mod tests {
             &mut self,
             _: &str,
             _: SessionOrigin,
+            _: Arc<std::sync::atomic::AtomicI64>,
         ) -> Result<Box<dyn CaptureStream>, CaptureError> {
             self.opened.fetch_add(1, Ordering::AcqRel);
             self.live.fetch_add(1, Ordering::AcqRel);

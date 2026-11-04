@@ -4,11 +4,18 @@
 //! about 150 ms behind the session clock. The missing side is silence. A
 //! quiet loopback does not stop the clock. Gains are mic (live) and system
 //! 0.8. Sums use `f64` and then the soft limiter.
+//!
+//! Gradual clock drift is published to each source's `AtomicI64` for the
+//! capture-side Rubato resampler (D-06). Sudden holes and overlaps still use
+//! silence and skip from [`plan_packet`].
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
-use crate::domain::chunk_plan::{block_is_late, plan_packet, AlignState, MIX_BLOCK_FRAMES};
+use crate::domain::chunk_plan::{
+    block_is_late, plan_packet, AlignState, DRIFT_THRESHOLD_FRAMES, MIX_BLOCK_FRAMES,
+};
 use crate::domain::gain::{soft_limit, Agc, LIMIT_KNEE, SYSTEM_GAIN};
 
 use super::levels::{GainControl, LevelSnapshot};
@@ -18,8 +25,7 @@ use super::queue::AudioBlock;
 pub(crate) struct MixDiagnostics {
     pub(crate) gaps: u64,
     pub(crate) discontinuities: u64,
-    pub(crate) drift_drops: u64,
-    pub(crate) drift_duplicates: u64,
+    pub(crate) drift_adjustments: u64,
     pub(crate) limited_samples: u64,
 }
 
@@ -34,20 +40,20 @@ struct Track {
     pending_origin: u64,
     gaps: u64,
     discontinuities: u64,
-    drift_drops: u64,
-    drift_duplicates: u64,
+    drift_adjustments: u64,
+    drift_error: Arc<AtomicI64>,
 }
 
 impl Track {
-    fn new() -> Self {
+    fn new(drift_error: Arc<AtomicI64>) -> Self {
         Self {
             align: AlignState::new(),
             pending: VecDeque::new(),
             pending_origin: 0,
             gaps: 0,
             discontinuities: 0,
-            drift_drops: 0,
-            drift_duplicates: 0,
+            drift_adjustments: 0,
+            drift_error,
         }
     }
 
@@ -69,8 +75,11 @@ impl Track {
         if plan.gap {
             self.gaps = self.gaps.saturating_add(1);
         }
-        self.drift_drops = self.drift_drops.saturating_add(plan.drift_drop);
-        self.drift_duplicates = self.drift_duplicates.saturating_add(plan.drift_duplicate);
+        self.drift_error
+            .store(self.align.last_error, Ordering::Relaxed);
+        if self.align.last_error.unsigned_abs() > DRIFT_THRESHOLD_FRAMES {
+            self.drift_adjustments = self.drift_adjustments.saturating_add(1);
+        }
         for _ in 0..plan.silence_frames {
             self.pending.push_back(0.0);
             self.pending.push_back(0.0);
@@ -81,18 +90,6 @@ impl Track {
         if skip < end {
             self.pending
                 .extend(block.samples[skip..end].iter().copied());
-        }
-        if plan.duplicate_frames > 0 {
-            let (left, right) = if self.pending.len() >= 2 {
-                let last = self.pending.len() - 2;
-                (self.pending[last], self.pending[last + 1])
-            } else {
-                (0.0, 0.0)
-            };
-            for _ in 0..plan.duplicate_frames {
-                self.pending.push_back(left);
-                self.pending.push_back(right);
-            }
         }
     }
 
@@ -112,6 +109,7 @@ impl Track {
         if self.pending_origin > self.align.cursor {
             self.align.cursor = self.pending_origin;
             self.align.last_error = 0;
+            self.drift_error.store(0, Ordering::Relaxed);
         }
         Some(out)
     }
@@ -132,11 +130,13 @@ impl Mixer {
         system_active: bool,
         gain: Arc<GainControl>,
         levels: Arc<LevelSnapshot>,
+        mic_drift: Arc<AtomicI64>,
+        system_drift: Arc<AtomicI64>,
     ) -> Self {
         let slider = gain.slider();
         Self {
-            mic: Track::new(),
-            system: system_active.then(Track::new),
+            mic: Track::new(mic_drift),
+            system: system_active.then(|| Track::new(system_drift)),
             next_frame: 0,
             agc: Agc::new(slider),
             gain,
@@ -162,21 +162,15 @@ impl Mixer {
             .as_ref()
             .map(|track| track.discontinuities)
             .unwrap_or(0);
-        let system_drop = self
+        let system_drift = self
             .system
             .as_ref()
-            .map(|track| track.drift_drops)
-            .unwrap_or(0);
-        let system_dup = self
-            .system
-            .as_ref()
-            .map(|track| track.drift_duplicates)
+            .map(|track| track.drift_adjustments)
             .unwrap_or(0);
         MixDiagnostics {
             gaps: self.mic.gaps.saturating_add(system_gaps),
             discontinuities: self.mic.discontinuities.saturating_add(system_disc),
-            drift_drops: self.mic.drift_drops.saturating_add(system_drop),
-            drift_duplicates: self.mic.drift_duplicates.saturating_add(system_dup),
+            drift_adjustments: self.mic.drift_adjustments.saturating_add(system_drift),
             limited_samples: self.limited_samples,
         }
     }
@@ -263,6 +257,7 @@ mod tests {
     use crate::domain::gain::{soft_limit, MIC_GAIN_DEFAULT, SYSTEM_GAIN};
     use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
     use crate::infrastructure::audio::queue::AudioBlock;
+    use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
 
     fn mixer(system: bool, gain: f32) -> Mixer {
@@ -270,6 +265,23 @@ mod tests {
             system,
             Arc::new(GainControl::new(gain, false)),
             Arc::new(LevelSnapshot::new()),
+            Arc::new(AtomicI64::new(0)),
+            Arc::new(AtomicI64::new(0)),
+        )
+    }
+
+    fn mixer_with_drift(
+        system: bool,
+        gain: f32,
+        mic_drift: Arc<AtomicI64>,
+        system_drift: Arc<AtomicI64>,
+    ) -> Mixer {
+        Mixer::new(
+            system,
+            Arc::new(GainControl::new(gain, false)),
+            Arc::new(LevelSnapshot::new()),
+            mic_drift,
+            system_drift,
         )
     }
 
@@ -429,14 +441,24 @@ mod tests {
     }
 
     #[test]
-    fn hundred_ppm_clocks_stay_within_about_20ms() {
+    fn hundred_ppm_publishes_drift_error_past_threshold() {
         // Arrange
         let frames = 4_800_usize;
         let packets = 2_200_u64;
-        let mut fast = mixer(false, 1.0);
-        let mut slow = mixer(false, 1.0);
-        let mut fast_frames = 0_u64;
-        let mut slow_frames = 0_u64;
+        let fast_drift = Arc::new(AtomicI64::new(0));
+        let slow_drift = Arc::new(AtomicI64::new(0));
+        let mut fast = mixer_with_drift(
+            false,
+            1.0,
+            Arc::clone(&fast_drift),
+            Arc::new(AtomicI64::new(0)),
+        );
+        let mut slow = mixer_with_drift(
+            false,
+            1.0,
+            Arc::clone(&slow_drift),
+            Arc::new(AtomicI64::new(0)),
+        );
 
         // Act
         for index in 0..packets {
@@ -444,22 +466,22 @@ mod tests {
             let slow_start = index * frames as u64 * 10_001 / 10_000;
             fast.push_mic(tone(Some(fast_start), frames, 0.1));
             slow.push_mic(tone(Some(slow_start), frames, 0.1));
-            fast_frames += collect(&mut fast, 0, false).len() as u64 / 2;
-            slow_frames += collect(&mut slow, 0, false).len() as u64 / 2;
+            let _ = collect(&mut fast, 0, false);
+            let _ = collect(&mut slow, 0, false);
         }
-        fast_frames += collect(&mut fast, 0, true).len() as u64 / 2;
-        slow_frames += collect(&mut slow, 0, true).len() as u64 / 2;
 
         // Assert
-        let produced = packets * frames as u64;
-        assert!(fast.diagnostics().drift_drops > 0);
-        assert!(slow.diagnostics().drift_duplicates > 0);
-        let fast_qpc = produced * 10_000 / 10_001;
-        let slow_qpc = produced * 10_001 / 10_000;
-        let allowance = DRIFT_THRESHOLD_FRAMES + frames as u64;
-        assert!(fast_frames.abs_diff(fast_qpc) <= allowance);
-        assert!(slow_frames.abs_diff(slow_qpc) <= allowance);
-        assert!(fast_frames < produced);
-        assert!(slow_frames > produced);
+        assert!(
+            fast_drift.load(Ordering::Relaxed) < -(DRIFT_THRESHOLD_FRAMES as i64),
+            "fast drift={}",
+            fast_drift.load(Ordering::Relaxed)
+        );
+        assert!(
+            slow_drift.load(Ordering::Relaxed) > DRIFT_THRESHOLD_FRAMES as i64,
+            "slow drift={}",
+            slow_drift.load(Ordering::Relaxed)
+        );
+        assert!(fast.diagnostics().drift_adjustments > 0);
+        assert!(slow.diagnostics().drift_adjustments > 0);
     }
 }
