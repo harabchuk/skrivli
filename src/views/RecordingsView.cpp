@@ -198,6 +198,7 @@ void RecordingsView::ApplyUiFont(HFONT font) {
 
 void RecordingsView::Refresh() {
     EnsureWatching();
+    const int topIndex = m_list.IsWindow() ? m_list.GetTopIndex() : 0;
     const auto keepPath = m_selectedAudioPath;
     m_entries = RecordingLibrary::Scan(Settings::Instance().RecordingsFolder());
     if (!m_progressPath.empty()) {
@@ -221,13 +222,15 @@ void RecordingsView::Refresh() {
     ApplySort();
     PopulateList();
     if (!keepPath.empty()) {
-        SelectByAudioPath(keepPath);
+        // Keep the user's scroll position; EnsureVisible would yank back to the selection.
+        SelectByAudioPath(keepPath, false);
     } else {
         UpdateDetailPane();
     }
+    RestoreTopIndex(topIndex);
 }
 
-bool RecordingsView::SelectByAudioPath(const std::wstring& audioPath) {
+bool RecordingsView::SelectByAudioPath(const std::wstring& audioPath, bool ensureVisible) {
     if (audioPath.empty() || !m_list.IsWindow()) {
         return false;
     }
@@ -241,7 +244,9 @@ bool RecordingsView::SelectByAudioPath(const std::wstring& audioPath) {
         }
         m_list.SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
         m_list.SetItemState(row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-        m_list.EnsureVisible(row, FALSE);
+        if (ensureVisible) {
+            m_list.EnsureVisible(row, FALSE);
+        }
         m_selectedAudioPath = m_entries[index].audioPath;
         UpdateDetailPane();
         return true;
@@ -277,6 +282,8 @@ void RecordingsView::FitColumns() {
         return;
     }
 
+    const int topIndex = m_list.GetTopIndex();
+
     static constexpr int kWeights[] = {180, 130, 70, 70, 80};
     static constexpr int kColumnCount = 5;
     static constexpr int kWeightSum = 180 + 130 + 70 + 70 + 80;
@@ -286,7 +293,7 @@ void RecordingsView::FitColumns() {
         m_list.GetClientRect(&client);
         const int width = client.right - client.left;
         if (width <= 0) {
-            return;
+            break;
         }
 
         int used = 0;
@@ -299,6 +306,37 @@ void RecordingsView::FitColumns() {
             }
             used += columnWidth;
         }
+    }
+
+    RestoreTopIndex(topIndex);
+}
+
+void RecordingsView::RestoreTopIndex(int topIndex) {
+    if (!m_list.IsWindow()) {
+        return;
+    }
+    const int count = m_list.GetItemCount();
+    if (count <= 0) {
+        return;
+    }
+    if (topIndex < 0) {
+        topIndex = 0;
+    } else if (topIndex >= count) {
+        topIndex = count - 1;
+    }
+
+    RECT itemRect{};
+    if (!m_list.GetItemRect(0, &itemRect, LVIR_BOUNDS)) {
+        return;
+    }
+    const int itemHeight = itemRect.bottom - itemRect.top;
+    if (itemHeight <= 0) {
+        return;
+    }
+
+    const int delta = topIndex - m_list.GetTopIndex();
+    if (delta != 0) {
+        m_list.Scroll(0, delta * itemHeight);
     }
 }
 

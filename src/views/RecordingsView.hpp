@@ -51,7 +51,7 @@ class RecordingsView : public CDialogImpl<RecordingsView> {
     void EnsureWatching();
     void SetTranscriptProgress(const std::wstring& audioPath, int percent);
     void ApplyUiFont(HFONT font);
-    bool SelectByAudioPath(const std::wstring& audioPath);
+    bool SelectByAudioPath(const std::wstring& audioPath, bool ensureVisible = true);
 
   private:
     BOOL OnInitDialog(CWindow focus, LPARAM initParam);
@@ -76,6 +76,7 @@ class RecordingsView : public CDialogImpl<RecordingsView> {
 
     void PopulateList();
     void FitColumns();
+    void RestoreTopIndex(int topIndex);
     void LayoutPanes(int clientWidth, int clientHeight);
     void UpdateDetailPane();
     void UpdatePlaybackButtons();
