@@ -1,5 +1,7 @@
 #include "views/RecordingsView.hpp"
 
+#include "core/TranscriptText.hpp"
+#include "infrastructure/common/FileIo.hpp"
 #include "infrastructure/common/Log.hpp"
 #include "infrastructure/common/Paths.hpp"
 #include "infrastructure/common/Text.hpp"
@@ -7,7 +9,6 @@
 #include "services/TranscriptionService.hpp"
 #include "ui/Theme.hpp"
 #include "views/ModelPrompt.hpp"
-#include "views/TranscriptWindow.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -57,15 +58,25 @@ class RenameDialog : public CDialogImpl<RenameDialog> {
     std::wstring& m_name;
 };
 
-constexpr int kSelectionActionIds[] = {
+constexpr int kMenuActionIds[] = {
     IDC_REC_PLAY, IDC_REC_TRANSCRIBE, IDC_REC_OPENFOLDER, IDC_REC_RENAME, IDC_REC_DELETE,
 };
+
+constexpr int kPaneGap = 8;
+constexpr int kListWeight = 45;
+constexpr int kDetailWeight = 55;
+constexpr int kButtonHeight = 24;
+constexpr int kButtonWidth = 56;
+constexpr int kCreateWidth = 130;
+
+auto DpiScale(HWND hwnd, int value) -> int {
+    const UINT dpi = ::GetDpiForWindow(hwnd);
+    return ::MulDiv(value, static_cast<int>(dpi), 96);
+}
 
 } // namespace
 
 BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
-    DlgResize_Init(false, false);
-
     m_list.Attach(GetDlgItem(IDC_RECORDINGS_LIST));
     m_list.SetExtendedListViewStyle(LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_INFOTIP |
                                     LVS_EX_DOUBLEBUFFER);
@@ -76,11 +87,19 @@ BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
     m_list.InsertColumn(ColSize, L"Size", LVCFMT_RIGHT, 70);
     m_list.InsertColumn(ColTranscript, L"Transcript", LVCFMT_LEFT, 80);
 
-    // Same white page color as the Record view, list included.
     m_list.SetBkColor(ui::WindowColor());
     m_list.SetTextBkColor(ui::WindowColor());
 
-    ::EnableWindow(GetDlgItem(IDC_REC_VIEW), FALSE);
+    m_emptyLabel.Attach(GetDlgItem(IDC_REC_DETAIL_EMPTY));
+    m_statusLabel.Attach(GetDlgItem(IDC_REC_DETAIL_STATUS));
+    m_playButton.Attach(GetDlgItem(IDC_REC_DETAIL_PLAY));
+    m_stopButton.Attach(GetDlgItem(IDC_REC_DETAIL_STOP));
+    m_createButton.Attach(GetDlgItem(IDC_REC_DETAIL_CREATE));
+    m_transcriptEdit.Attach(GetDlgItem(IDC_REC_DETAIL_TRANSCRIPT));
+
+    if (!m_player.Initialize(m_hWnd, WM_APP_PLAYBACK)) {
+        Log::Warn(L"Inline audio player failed to initialize");
+    }
 
     EnsureWatching();
     Refresh();
@@ -88,14 +107,13 @@ BOOL RecordingsView::OnInitDialog(CWindow /*focus*/, LPARAM /*initParam*/) {
 }
 
 void RecordingsView::OnSize(UINT type, CSize size) {
-    if (type != SIZE_MINIMIZED) {
-        DlgResize_UpdateLayout(size.cx, size.cy);
+    if (type != SIZE_MINIMIZED && size.cx > 0 && size.cy > 0) {
+        LayoutPanes(size.cx, size.cy);
         FitColumns();
     }
 }
 
 HBRUSH RecordingsView::OnCtlColorDlg(CDCHandle dc, CWindow /*wnd*/) {
-    // Match the Record page: pure window white instead of the dialog default.
     dc.SetBkColor(ui::WindowColor());
     return ui::WindowBrush();
 }
@@ -123,12 +141,35 @@ void RecordingsView::SetTranscriptProgress(const std::wstring& audioPath, int pe
         }
         break;
     }
+    if (!m_selectedAudioPath.empty() && Text::PathEquals(m_selectedAudioPath, audioPath)) {
+        UpdateDetailPane();
+    }
 }
 
 void RecordingsView::OnDestroy() {
+    StopPlayback();
+    m_player.Shutdown();
     m_watcher.Stop();
     if (m_list.IsWindow()) {
         m_list.Detach();
+    }
+    if (m_transcriptEdit.IsWindow()) {
+        m_transcriptEdit.Detach();
+    }
+    if (m_emptyLabel.IsWindow()) {
+        m_emptyLabel.Detach();
+    }
+    if (m_statusLabel.IsWindow()) {
+        m_statusLabel.Detach();
+    }
+    if (m_playButton.IsWindow()) {
+        m_playButton.Detach();
+    }
+    if (m_stopButton.IsWindow()) {
+        m_stopButton.Detach();
+    }
+    if (m_createButton.IsWindow()) {
+        m_createButton.Detach();
     }
     SetMsgHandled(FALSE);
 }
@@ -157,6 +198,7 @@ void RecordingsView::ApplyUiFont(HFONT font) {
 
 void RecordingsView::Refresh() {
     EnsureWatching();
+    const auto keepPath = m_selectedAudioPath;
     m_entries = RecordingLibrary::Scan(Settings::Instance().RecordingsFolder());
     if (!m_progressPath.empty()) {
         bool stillActive = false;
@@ -178,10 +220,37 @@ void RecordingsView::Refresh() {
     }
     ApplySort();
     PopulateList();
-    UpdateActionEnabled();
+    if (!keepPath.empty()) {
+        SelectByAudioPath(keepPath);
+    } else {
+        UpdateDetailPane();
+    }
+}
+
+bool RecordingsView::SelectByAudioPath(const std::wstring& audioPath) {
+    if (audioPath.empty() || !m_list.IsWindow()) {
+        return false;
+    }
+    for (int row = 0; row < m_list.GetItemCount(); ++row) {
+        const auto index = static_cast<size_t>(m_list.GetItemData(row));
+        if (index >= m_entries.size()) {
+            continue;
+        }
+        if (!Text::PathEquals(m_entries[index].audioPath, audioPath)) {
+            continue;
+        }
+        m_list.SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+        m_list.SetItemState(row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        m_list.EnsureVisible(row, FALSE);
+        m_selectedAudioPath = m_entries[index].audioPath;
+        UpdateDetailPane();
+        return true;
+    }
+    return false;
 }
 
 void RecordingsView::PopulateList() {
+    m_populating = true;
     m_list.SetRedraw(FALSE);
     m_list.DeleteAllItems();
     for (size_t i = 0; i < m_entries.size(); ++i) {
@@ -195,6 +264,7 @@ void RecordingsView::PopulateList() {
     }
     m_list.SetRedraw(TRUE);
     m_list.Invalidate();
+    m_populating = false;
     FitColumns();
 }
 
@@ -211,7 +281,6 @@ void RecordingsView::FitColumns() {
     static constexpr int kColumnCount = 5;
     static constexpr int kWeightSum = 180 + 130 + 70 + 70 + 80;
 
-    // A second pass picks up the vertical scrollbar appearing or disappearing.
     for (int pass = 0; pass < 2; ++pass) {
         RECT client{};
         m_list.GetClientRect(&client);
@@ -233,26 +302,166 @@ void RecordingsView::FitColumns() {
     }
 }
 
-void RecordingsView::UpdateActionEnabled() {
-    const bool hasSel = SelectedIndex() >= 0;
-    const auto* entry = SelectedEntry();
-    const bool canView = entry != nullptr && entry->hasMarkdown;
-    EnableActions(hasSel, canView);
-}
-
-void RecordingsView::EnableActions(bool hasSel, bool canView) {
-    for (const int id : kSelectionActionIds) {
-        ::EnableWindow(GetDlgItem(id), hasSel ? TRUE : FALSE);
+void RecordingsView::LayoutPanes(int clientWidth, int clientHeight) {
+    const int gap = DpiScale(m_hWnd, kPaneGap);
+    const int pad = gap;
+    const int usable = clientWidth - pad * 2 - gap;
+    if (usable <= 0 || clientHeight <= 0) {
+        return;
     }
-    ::EnableWindow(GetDlgItem(IDC_REC_VIEW), canView ? TRUE : FALSE);
+
+    const int listWidth = usable * kListWeight / (kListWeight + kDetailWeight);
+    const int detailLeft = pad + listWidth + gap;
+    const int detailWidth = clientWidth - detailLeft - pad;
+    const int top = pad;
+    const int height = clientHeight - pad * 2;
+
+    if (m_list.IsWindow()) {
+        m_list.SetWindowPos(nullptr, pad, top, listWidth, height, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    const int btnH = DpiScale(m_hWnd, kButtonHeight);
+    const int btnW = DpiScale(m_hWnd, kButtonWidth);
+    const int createW = DpiScale(m_hWnd, kCreateWidth);
+    const int btnGap = DpiScale(m_hWnd, 6);
+
+    if (m_playButton.IsWindow()) {
+        m_playButton.SetWindowPos(nullptr, detailLeft, top, btnW, btnH,
+                                  SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    if (m_stopButton.IsWindow()) {
+        m_stopButton.SetWindowPos(nullptr, detailLeft + btnW + btnGap, top, btnW, btnH,
+                                  SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    const int contentTop = top + btnH + btnGap;
+    const int contentHeight = height - btnH - btnGap;
+    if (m_transcriptEdit.IsWindow()) {
+        m_transcriptEdit.SetWindowPos(nullptr, detailLeft, contentTop, detailWidth, contentHeight,
+                                      SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    if (m_emptyLabel.IsWindow()) {
+        m_emptyLabel.SetWindowPos(nullptr, detailLeft, top + height / 3, detailWidth, btnH * 2,
+                                  SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    if (m_createButton.IsWindow()) {
+        m_createButton.SetWindowPos(nullptr, detailLeft, contentTop, createW, btnH,
+                                    SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    if (m_statusLabel.IsWindow()) {
+        m_statusLabel.SetWindowPos(nullptr, detailLeft, contentTop + btnH + btnGap, detailWidth,
+                                   btnH * 3, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 }
 
-void RecordingsView::EnableMenuActions(CMenuHandle popup, bool hasSel, bool canView) {
+void RecordingsView::UpdateDetailPane() {
+    const auto* entry = SelectedEntry();
+    const bool hasSel = entry != nullptr;
+
+    if (m_emptyLabel.IsWindow()) {
+        m_emptyLabel.ShowWindow(hasSel ? SW_HIDE : SW_SHOW);
+    }
+
+    const int showSel = hasSel ? SW_SHOW : SW_HIDE;
+    if (m_playButton.IsWindow()) {
+        m_playButton.ShowWindow(showSel);
+    }
+    if (m_stopButton.IsWindow()) {
+        m_stopButton.ShowWindow(showSel);
+    }
+
+    if (!hasSel) {
+        m_selectedAudioPath.clear();
+        if (m_transcriptEdit.IsWindow()) {
+            m_transcriptEdit.ShowWindow(SW_HIDE);
+            m_transcriptEdit.SetWindowText(L"");
+        }
+        if (m_createButton.IsWindow()) {
+            m_createButton.ShowWindow(SW_HIDE);
+        }
+        if (m_statusLabel.IsWindow()) {
+            m_statusLabel.ShowWindow(SW_HIDE);
+            m_statusLabel.SetWindowText(L"");
+        }
+        UpdatePlaybackButtons();
+        return;
+    }
+
+    m_selectedAudioPath = entry->audioPath;
+
+    const bool active = entry->transcriptStatus == TranscriptStatus::Queued ||
+                        entry->transcriptStatus == TranscriptStatus::Preparing ||
+                        entry->transcriptStatus == TranscriptStatus::Transcribing;
+    const bool failed = entry->transcriptStatus == TranscriptStatus::Failed;
+
+    if (entry->hasTranscript) {
+        if (m_transcriptEdit.IsWindow()) {
+            m_transcriptEdit.SetWindowText(LoadTranscriptDisplayText(*entry).c_str());
+            m_transcriptEdit.ShowWindow(SW_SHOW);
+        }
+        if (m_createButton.IsWindow()) {
+            m_createButton.ShowWindow(SW_HIDE);
+        }
+        if (m_statusLabel.IsWindow()) {
+            m_statusLabel.ShowWindow(SW_HIDE);
+            m_statusLabel.SetWindowText(L"");
+        }
+    } else if (active) {
+        if (m_transcriptEdit.IsWindow()) {
+            m_transcriptEdit.ShowWindow(SW_HIDE);
+            m_transcriptEdit.SetWindowText(L"");
+        }
+        if (m_createButton.IsWindow()) {
+            m_createButton.ShowWindow(SW_HIDE);
+        }
+        if (m_statusLabel.IsWindow()) {
+            m_statusLabel.SetWindowText(TranscriptLabel(*entry).c_str());
+            m_statusLabel.ShowWindow(SW_SHOW);
+        }
+    } else {
+        if (m_transcriptEdit.IsWindow()) {
+            m_transcriptEdit.ShowWindow(SW_HIDE);
+            m_transcriptEdit.SetWindowText(L"");
+        }
+        if (m_createButton.IsWindow()) {
+            m_createButton.SetWindowText(L"&Create transcript");
+            m_createButton.ShowWindow(SW_SHOW);
+        }
+        if (m_statusLabel.IsWindow()) {
+            if (failed && !entry->transcriptError.empty()) {
+                m_statusLabel.SetWindowText(entry->transcriptError.c_str());
+                m_statusLabel.ShowWindow(SW_SHOW);
+            } else {
+                m_statusLabel.ShowWindow(SW_HIDE);
+                m_statusLabel.SetWindowText(L"");
+            }
+        }
+    }
+
+    UpdatePlaybackButtons();
+}
+
+void RecordingsView::UpdatePlaybackButtons() {
+    const bool hasSel = SelectedEntry() != nullptr;
+    const bool playing = m_player.IsPlaying();
+    if (m_playButton.IsWindow()) {
+        m_playButton.EnableWindow(hasSel && !playing ? TRUE : FALSE);
+    }
+    if (m_stopButton.IsWindow()) {
+        m_stopButton.EnableWindow(playing ? TRUE : FALSE);
+    }
+}
+
+void RecordingsView::EnableMenuActions(CMenuHandle popup, bool hasSel) {
     const UINT selFlag = MF_BYCOMMAND | (hasSel ? MF_ENABLED : MF_GRAYED);
-    for (const int id : kSelectionActionIds) {
+    for (const int id : kMenuActionIds) {
         popup.EnableMenuItem(id, selFlag);
     }
-    popup.EnableMenuItem(IDC_REC_VIEW, MF_BYCOMMAND | (canView ? MF_ENABLED : MF_GRAYED));
+}
+
+void RecordingsView::StopPlayback() {
+    m_player.Stop();
+    UpdatePlaybackButtons();
 }
 
 int RecordingsView::SelectedIndex() const {
@@ -326,11 +535,23 @@ auto RecordingsView::TranscriptLabel(const RecordingEntry& entry) -> std::wstrin
         return L"Cancelled";
     case TranscriptStatus::None:
     default:
-        if (entry.hasMarkdown) {
+        if (entry.hasTranscript) {
             return L"Ready";
         }
         return L"—";
     }
+}
+
+auto RecordingsView::LoadTranscriptDisplayText(const RecordingEntry& entry) -> std::wstring {
+    auto bytes = FileIo::ReadFileBytes(entry.transcriptPath, FileIo::StripBom::Yes);
+    if (!bytes) {
+        return {};
+    }
+    std::string utf8 = std::move(*bytes);
+    if (entry.transcriptIsLegacyMarkdown) {
+        utf8 = TranscriptText::StripLegacyMarkdown(utf8);
+    }
+    return Text::Utf8ToWide(utf8);
 }
 
 void RecordingsView::ToggleSort(Column column) {
@@ -380,7 +601,15 @@ void RecordingsView::OnPlay(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (entry == nullptr) {
         return;
     }
-    ::ShellExecuteW(m_hWnd, L"open", entry->audioPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (!m_player.Play(entry->audioPath)) {
+        ui::ShowMessage(m_hWnd, L"Could not play this recording.", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    UpdatePlaybackButtons();
+}
+
+void RecordingsView::OnStop(UINT /*code*/, int /*id*/, HWND /*control*/) {
+    StopPlayback();
 }
 
 void RecordingsView::OnTranscribe(UINT /*code*/, int /*id*/, HWND /*control*/) {
@@ -403,14 +632,6 @@ void RecordingsView::OnTranscribe(UINT /*code*/, int /*id*/, HWND /*control*/) {
     Refresh();
 }
 
-void RecordingsView::OnView(UINT /*code*/, int /*id*/, HWND /*control*/) {
-    const auto* entry = SelectedEntry();
-    if (entry == nullptr || !entry->hasMarkdown) {
-        return;
-    }
-    TranscriptWindow::OpenOrActivate(entry->mdPath);
-}
-
 void RecordingsView::OnOpenFolder(UINT /*code*/, int /*id*/, HWND /*control*/) {
     const auto* entry = SelectedEntry();
     if (entry == nullptr) {
@@ -429,6 +650,7 @@ void RecordingsView::OnRename(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (!PromptRename(stem)) {
         return;
     }
+    StopPlayback();
     std::wstring error;
     if (!RecordingLibrary::Rename(*entry, stem, error)) {
         ui::ShowMessage(m_hWnd, error.c_str(), MB_OK | MB_ICONWARNING);
@@ -448,11 +670,13 @@ void RecordingsView::OnDelete(UINT /*code*/, int /*id*/, HWND /*control*/) {
     if (answer != IDYES) {
         return;
     }
+    StopPlayback();
     std::wstring error;
     if (!RecordingLibrary::DeleteToRecycleBin(*entry, error)) {
         ui::ShowMessage(m_hWnd, error.c_str(), MB_OK | MB_ICONWARNING);
         return;
     }
+    m_selectedAudioPath.clear();
     Refresh();
 }
 
@@ -463,19 +687,18 @@ void RecordingsView::OnRefresh(UINT /*code*/, int /*id*/, HWND /*control*/) {
 LRESULT RecordingsView::OnColumnClick(LPNMHDR header) {
     const auto* listHeader = reinterpret_cast<LPNMLISTVIEW>(header);
     if (listHeader != nullptr) {
+        const auto keepPath = m_selectedAudioPath;
         ToggleSort(static_cast<Column>(listHeader->iSubItem));
         PopulateList();
+        if (!keepPath.empty()) {
+            SelectByAudioPath(keepPath);
+        }
     }
     return 0;
 }
 
 LRESULT RecordingsView::OnDoubleClick(LPNMHDR /*header*/) {
-    const auto* entry = SelectedEntry();
-    if (entry != nullptr && entry->hasMarkdown) {
-        OnView(0, 0, nullptr);
-    } else {
-        OnPlay(0, 0, nullptr);
-    }
+    OnPlay(0, 0, nullptr);
     return 0;
 }
 
@@ -503,8 +726,7 @@ LRESULT RecordingsView::OnRightClick(LPNMHDR /*header*/) {
         return 0;
     }
 
-    const auto* entry = SelectedEntry();
-    EnableMenuActions(popup, entry != nullptr, entry != nullptr && entry->hasMarkdown);
+    EnableMenuActions(popup, SelectedEntry() != nullptr);
 
     POINT cursor{};
     ::GetCursorPos(&cursor);
@@ -512,8 +734,25 @@ LRESULT RecordingsView::OnRightClick(LPNMHDR /*header*/) {
     return 0;
 }
 
-LRESULT RecordingsView::OnItemChanged(LPNMHDR /*header*/) {
-    UpdateActionEnabled();
+LRESULT RecordingsView::OnItemChanged(LPNMHDR header) {
+    if (m_populating) {
+        return 0;
+    }
+    const auto* info = reinterpret_cast<LPNMLISTVIEW>(header);
+    if (info == nullptr || (info->uChanged & LVIF_STATE) == 0) {
+        return 0;
+    }
+    if ((info->uNewState & LVIS_SELECTED) == 0 && (info->uOldState & LVIS_SELECTED) == 0) {
+        return 0;
+    }
+
+    const auto* entry = SelectedEntry();
+    const std::wstring nextPath = entry != nullptr ? entry->audioPath : std::wstring{};
+    if (m_player.IsPlaying() &&
+        (nextPath.empty() || !Text::PathEquals(nextPath, m_player.Path()))) {
+        StopPlayback();
+    }
+    UpdateDetailPane();
     return 0;
 }
 
@@ -521,5 +760,12 @@ LRESULT RecordingsView::OnLibraryChanged(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
                                          BOOL& handled) {
     handled = TRUE;
     Refresh();
+    return 0;
+}
+
+LRESULT RecordingsView::OnPlayback(UINT /*msg*/, WPARAM /*wParam*/, LPARAM /*lParam*/,
+                                   BOOL& handled) {
+    handled = TRUE;
+    UpdatePlaybackButtons();
     return 0;
 }

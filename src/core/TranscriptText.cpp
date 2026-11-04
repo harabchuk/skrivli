@@ -1,11 +1,8 @@
-#include "core/MarkdownFormatter.hpp"
+#include "core/TranscriptText.hpp"
 
 #include "infrastructure/common/FileIo.hpp"
 #include "infrastructure/common/Text.hpp"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
 #include <sstream>
 
 namespace {
@@ -28,13 +25,6 @@ auto FormatTimestamp(int64_t tenthsOfMs) -> std::string {
         tenthsOfMs = 0;
     }
     return Text::FormatHms<std::string>(static_cast<uint64_t>(tenthsOfMs / 100));
-}
-
-auto FormatDuration(double seconds) -> std::string {
-    if (seconds < 0.0) {
-        seconds = 0.0;
-    }
-    return Text::FormatHms<std::string>(static_cast<uint64_t>(std::llround(seconds)));
 }
 
 auto DedupAndTrim(const std::vector<TranscriptSegment>& segments)
@@ -64,25 +54,34 @@ auto DedupAndTrim(const std::vector<TranscriptSegment>& segments)
     return out;
 }
 
+auto StripInlineMarkdown(std::string line) -> std::string {
+    // Remove **bold** markers and a leading AT heading prefix.
+    while (!line.empty() && line.front() == '#') {
+        line.erase(line.begin());
+    }
+    line = Trim(line);
+    std::string out;
+    out.reserve(line.size());
+    for (size_t i = 0; i < line.size();) {
+        if (i + 1 < line.size() && line[i] == '*' && line[i + 1] == '*') {
+            i += 2;
+            continue;
+        }
+        out.push_back(line[i]);
+        ++i;
+    }
+    return Trim(out);
+}
+
 } // namespace
 
-auto MarkdownFormatter::Format(const TranscriptMeta& meta,
-                               const std::vector<TranscriptSegment>& segments) -> std::string {
+auto TranscriptText::Format(const TranscriptMeta& /*meta*/,
+                            const std::vector<TranscriptSegment>& segments) -> std::string {
     const auto cleaned = DedupAndTrim(segments);
 
     std::ostringstream ss;
-    ss << "# Meeting — " << meta.titleDateTime << "\n\n";
-    ss << "- **Duration:** " << FormatDuration(meta.durationSeconds) << "\n";
-    ss << "- **Recorded:** " << meta.recordedRange << "\n";
-    ss << "- **Model:** " << meta.modelFile << " (language: " << meta.languageConfigured;
-    if (!meta.languageDetected.empty() && meta.languageDetected != meta.languageConfigured) {
-        ss << " → " << meta.languageDetected;
-    }
-    ss << ")\n\n";
-    ss << "## Transcript\n\n";
-
     if (cleaned.empty()) {
-        ss << "_No speech detected._\n";
+        ss << "No speech detected.\n";
         return ss.str();
     }
 
@@ -110,12 +109,45 @@ auto MarkdownFormatter::Format(const TranscriptMeta& meta,
             ++i;
         }
 
-        ss << "**[" << FormatTimestamp(paraStart) << "]** " << Trim(paragraph) << "\n\n";
+        ss << '[' << FormatTimestamp(paraStart) << "] " << Trim(paragraph) << "\n\n";
     }
 
     return ss.str();
 }
 
-bool MarkdownFormatter::WriteUtf8NoBom(const std::wstring& path, const std::string& utf8) {
+bool TranscriptText::WriteUtf8NoBom(const std::wstring& path, const std::string& utf8) {
     return FileIo::WriteFileBytes(path, utf8, FileIo::WriteMode::Direct);
+}
+
+auto TranscriptText::StripLegacyMarkdown(const std::string& markdown) -> std::string {
+    std::istringstream in(markdown);
+    std::ostringstream out;
+    std::string line;
+    bool wrote = false;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        const auto trimmed = Trim(line);
+        if (trimmed.empty()) {
+            continue;
+        }
+        // Drop metadata bullets and section headings.
+        if (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("#")) {
+            continue;
+        }
+        const auto plain = StripInlineMarkdown(trimmed);
+        if (plain.empty()) {
+            continue;
+        }
+        if (wrote) {
+            out << "\n\n";
+        }
+        out << plain;
+        wrote = true;
+    }
+    if (wrote) {
+        out << '\n';
+    }
+    return out.str();
 }

@@ -2,7 +2,7 @@
 
 Native Windows app (C++ / WTL) that records microphone + system audio via WASAPI, mixes them
 into one file in a user-chosen folder, and can optionally transcribe it locally (whisper.cpp)
-to Markdown. Lives in the system tray. Two tabs: **Record** and **Recordings**.
+to plain text. Lives in the system tray. Two tabs: **Record** and **Recordings**.
 
 Full design: `[.specs/app-design.md]`.  
 Read the relevant section of the spec before implementing a feature. If you change the design, update the spec as well.
@@ -14,7 +14,7 @@ Read the relevant section of the spec before implementing a feature. If you chan
 | Area | Technology |
 |---|---|
 | Language | C++23 (MSVC, `/W4 /permissive- /utf-8 /Zc:preprocessor`), Unicode only (`UNICODE`, `_UNICODE`) |
-| UI | WTL 10 on ATL/Win32, Common Controls v6, RichEdit 4.1 (`MSFTEDIT_CLASS`) |
+| UI | WTL 10 on ATL/Win32, Common Controls v6 |
 | Audio | WASAPI shared mode, event-driven; mic = `eCapture`, system = loopback on `eRender` |
 | Media | miniaudio 0.11 (WAV encode/decode, resample, mix); Media Foundation for M4A encode/decode |
 | Transcription | whisper.cpp (ggml, CPU, static) — default model `ggml-base-q5_1.bin` |
@@ -65,7 +65,7 @@ reconfigure) so `start.bat` picks them up.
 src/
   main.cpp, pch.hpp, Ids.hpp, Version.hpp
   app/             Application
-  core/            AudioFormat, RingBuffer, ChunkPlan, MarkdownFormatter,
+  core/            AudioFormat, RingBuffer, ChunkPlan, TranscriptText,
                    Recording, Transcript
   services/        RecordingSession, LevelMonitor, TranscriptionService
   infrastructure/
@@ -73,13 +73,12 @@ src/
                    AudioResampler, MaConverter, MiniAudio.hpp, WavHeader, Resampler
     ai/            WhisperEngine, ModelManager
     storage/       Settings, RecordingLibrary, RecordingSidecar, DirectoryWatcher
-    files/         WavWriter, M4aEncoder, AudioFileReader
+    files/         WavWriter, M4aEncoder, AudioFileReader, AudioPlayer
     system/        Autostart, Hotkey, Clipboard
     common/        Log, HResult, Paths, Text, FileIo, Scoped.hpp, PostOwned.hpp
   ui/              TabCtrl, DeviceCombo, LevelMeter, RecordButton, TrayIcon,
                    ShellDialogs, Theme.hpp
-  views/           MainWindow, RecordView, RecordingsView, TranscriptWindow,
-                   SettingsDialog, ModelPrompt
+  views/           MainWindow, RecordView, RecordingsView, SettingsDialog, ModelPrompt
 resources/         MeetingBuddy.rc, resource.h, icons, MeetingBuddy.manifest
 .specs/            design documents
 ```
@@ -132,7 +131,7 @@ flowchart TD
 **`app/`** — process lifetime only: COM and common-controls init, the WTL module, the message loop, the single-instance mutex. Today that is `Application`. Do not put windows, recording, or transcription here.
 
 **`core/`** — domain types and in-process logic with no windows, devices, files, network, or third-party SDK headers.
-- Put here: value types (`RecordingEntry`, `RecordingSidecar` fields, `TranscriptSegment`, `TranscriptStatus`), constants (`AudioFormat`, `kDefaultWhisperModel`), pure algorithms (`ChunkPlan`, `MarkdownFormatter`, `RingBuffer`).
+- Put here: value types (`RecordingEntry`, `RecordingSidecar` fields, `TranscriptSegment`, `TranscriptStatus`), constants (`AudioFormat`, `kDefaultWhisperModel`), pure algorithms (`ChunkPlan`, `TranscriptText`, `RingBuffer`).
 - Do not put here: WASAPI capture, WinHTTP, Glaze I/O, whisper.cpp, miniaudio, Media Foundation, or any `HWND`.
 - `AudioFormat.hpp` stays in `core`: it only describes the internal 48 kHz layout, even though that description uses the Windows wave-format headers.
 - `Mixer` and `Resampler` stay out of `core` because they include miniaudio.
@@ -147,7 +146,7 @@ flowchart TD
 - **`infrastructure/audio/`** — capture devices and DSP that talks to WASAPI or miniaudio: `DeviceManager`, `CaptureStream`, `SilentRenderKeepAlive`, `Mixer`, `AudioResampler`, `MaConverter`, `MiniAudio.hpp`, `WavHeader`, `Resampler`.
 - **`infrastructure/ai/`** — whisper.cpp and model files on disk: `WhisperEngine`, `ModelManager` (catalog, paths, SHA-256, download with no `HWND`).
 - **`infrastructure/storage/`** — settings and recording metadata on disk: `Settings`, `RecordingLibrary`, `RecordingSidecar` (Glaze load/save), `DirectoryWatcher`.
-- **`infrastructure/files/`** — audio file encode and decode: `WavWriter`, `M4aEncoder`, `AudioFileReader`.
+- **`infrastructure/files/`** — audio file encode, decode, and playback: `WavWriter`, `M4aEncoder`, `AudioFileReader`, `AudioPlayer`.
 - **`infrastructure/system/`** — Windows shell features that are not audio or files: `Autostart`, `Hotkey`, `Clipboard`.
 - **`infrastructure/common/`** — small helpers any layer may use: `Log`, `HResult`, `Paths`, `Text`, `FileIo`, `Scoped.hpp`, `PostOwned.hpp`.
 
@@ -158,7 +157,7 @@ Do not put WTL windows or tab pages in `infrastructure`. Do not put domain struc
 - Do not put here: `MainWindow`, tab pages, settings or transcript windows, or any class that names a recording or a transcription job.
 
 **`views/`** — windows, tab pages, and dialogs that compose `ui/` controls and call `services/`.
-- Put here: `MainWindow`, `RecordView`, `RecordingsView`, `TranscriptWindow`, `SettingsDialog`, and dialog-only helpers such as `ModelPrompt`.
+- Put here: `MainWindow`, `RecordView`, `RecordingsView`, `SettingsDialog`, and dialog-only helpers such as `ModelPrompt`.
 - A view may include `ui`, `services`, `infrastructure`, and `core`. It must not own WASAPI or whisper.cpp handles.
 
 ### Split when mixed
@@ -232,8 +231,8 @@ soft limiter above -1 dBFS.
 - Name: `<folder>\MeetingBuddy_YYYY-MM-DD_HH-MM-SS.wav` (local time, `-2` suffix on collision).
 - Output is PCM 16-bit, 48 kHz, stereo. Write to `*.wav.partial`, patch the RIFF header every 2 s, and rename on
 stop. On startup, repair leftover `.partial` files to `*.recovered.wav`.
-- Sidecars next to the audio: `<name>.md` (transcript), `<name>.json` (metadata + transcript status).
-Delete, rename, and list operations treat audio + `.md` + `.json` as one unit. Delete goes to the Recycle Bin.
+- Sidecars next to the audio: `<name>.txt` (transcript), `<name>.json` (metadata + transcript status).
+Delete, rename, and list operations treat audio + `.txt` + `.json` as one unit (and a leftover `.md` if present). Delete goes to the Recycle Bin.
 - App data: settings `%APPDATA%\MeetingBuddy\settings.json`; models
 `%LOCALAPPDATA%\MeetingBuddy\models\`; logs `%LOCALAPPDATA%\MeetingBuddy\logs\`.
 Default recordings folder: `%USERPROFILE%\Documents\MeetingBuddy`.
@@ -249,9 +248,8 @@ longer than 1 h into 30 min pieces and offset the timestamps.
 `whisper_full_get_segment_t0/t1` (10 ms units).
 - The **only** network access in the app is the user-initiated model download (WinHTTP, SHA-256 verified).
 Never add telemetry or cloud calls.
-- Markdown output: `# Meeting — <date time>`, a metadata bullet list, `## Transcript`, then paragraphs
-prefixed with `**[hh:mm:ss]**`. Start a new paragraph after a pause over 1.5 s or every ~60 s. Remove repeated
-hallucinated lines. Save as UTF-8 without BOM.
+- Plain-text transcript: paragraphs prefixed with `[hh:mm:ss]`. Start a new paragraph after a pause over 1.5 s
+or every ~60 s. Remove repeated hallucinated lines. Save as UTF-8 without BOM next to the audio as `<name>.txt`.
 
 ### UI (spec §8)
 
@@ -260,13 +258,14 @@ status bar. Per-monitor DPI aware.
 - **Record tab**: INPUT/OUTPUT sections, mic and system device combos, a read-only "Save to" path with Browse…
 (`IFileOpenDialog` + `FOS_PICKFOLDERS`), an owner-drawn Record/Stop pill button, a large elapsed timer with blinking
 REC indicator, and dB-scaled level meters (segmented fill + peak hold). Inputs are disabled while recording.
-- **Recordings tab**: report-view `CListViewCtrl` with columns Name | Date | Duration | Size | Transcript, newest first. Actions:
-Play, Transcribe, View transcript, Open folder, Rename, Delete, Refresh. Kept in sync via `ReadDirectoryChangesW`.
-- **Transcript window**: read-only RichEdit showing the Markdown **source** with light styling. Toolbar has Copy all
-(`CF_UNICODETEXT`), Save as, Open in editor, and Find. Copied text must stay plain Markdown.
+- **Recordings tab**: split pane. Left: report-view `CListViewCtrl` with columns Name | Date | Duration | Size | Transcript,
+newest first. Right: empty state until a row is selected; then Play/Stop, a read-only transcript edit (or Create transcript).
+Context menu: Play, Transcribe, Open folder, Rename, Delete, Refresh. Kept in sync via `ReadDirectoryChangesW`.
 - **Tray**: `Shell_NotifyIconW` v4. Icons for idle and recording. Left click toggles the window. Menu: Show, Start/Stop
 recording, Open folder, Settings, Exit. Minimize and close hide to the tray (configurable). Re-add the icon on
-`TaskbarCreated`. Show balloons for transcript ready, low disk, and device lost.
+`TaskbarCreated`. Show balloons for transcript ready, low disk, and device lost. Transcript-ready balloon opens the
+Recordings tab and selects that recording.
+
 - Single instance: mutex `Local\MeetingBuddy.SingleInstance`. A second launch activates the existing window.
 - When the user exits during a recording, ask whether to stop and save. `WM_ENDSESSION` always stops and saves.
 
@@ -280,8 +279,8 @@ recording, Open folder, Settings, Exit. Minimize and close hide to the tray (con
 4. Loopback + keep-alive + ring buffers + mixer + meters (+ unit tests).
 5. Robustness: device changes, low disk, crash recovery, privacy denied, exit while recording.
 6. Recordings tab + `RecordingLibrary` + sidecar JSON.
-7. whisper.cpp integration, resampler, model manager, transcription queue, Markdown formatter.
-8. Transcript window, transcript status column, completion balloon.
+7. whisper.cpp integration, resampler, model manager, transcription queue, plain-text transcript formatter.
+8. Recordings detail pane with transcript text, transcript status column, completion balloon.
 9. Settings dialog, hotkey (`Ctrl+Alt+R`), start with Windows, DPI, optional M4A.
 10. Release packaging and manual test pass (spec §11).
 
@@ -293,7 +292,7 @@ recording, Open folder, Settings, Exit. Minimize and close hide to the tray (con
 - Run `scripts\format.bat` after the task (whole `src\` or only the files you changed).
 - The build is warning-clean at `/W4`, and `scripts\start.bat` builds and launches successfully.
 - Unit tests pass for any touched DSP, file, or formatting code (`RingBuffer`, `Mixer`, `WavWriter`, `Resampler`,
-`MarkdownFormatter`, `RecordingLibrary`).
+`TranscriptText`, `RecordingLibrary`).
 - For audio changes, record about 1 min while toggling playback and talking. Check that both sources are audible and
 in sync and that the file plays in the default player.
 - The UI stays responsive during recording and transcription (no work on the UI thread).

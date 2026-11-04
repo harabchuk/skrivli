@@ -2,7 +2,7 @@
 
 #include "Ids.hpp"
 #include "core/ChunkPlan.hpp"
-#include "core/MarkdownFormatter.hpp"
+#include "core/TranscriptText.hpp"
 #include "infrastructure/ai/ModelManager.hpp"
 #include "infrastructure/audio/Resampler.hpp"
 #include "infrastructure/common/Log.hpp"
@@ -334,10 +334,10 @@ void TranscriptionService::ProcessJob(Job job) {
     meta.languageConfigured = job.language;
     meta.languageDetected = detectedLanguage;
 
-    const auto markdown = MarkdownFormatter::Format(meta, allSegments);
-    const auto mdPath = RecordingLibrary::MdPathForAudio(job.audioPath);
-    if (!MarkdownFormatter::WriteUtf8NoBom(mdPath, markdown)) {
-        FailJob(job, TranscriptStatus::Failed, L"Failed to write markdown");
+    const auto text = TranscriptText::Format(meta, allSegments);
+    const auto txtPath = RecordingLibrary::TranscriptPathForAudio(job.audioPath);
+    if (!TranscriptText::WriteUtf8NoBom(txtPath, text)) {
+        FailJob(job, TranscriptStatus::Failed, L"Failed to write transcript");
         return;
     }
 
@@ -349,5 +349,5 @@ void TranscriptionService::ProcessJob(Job job) {
                         Text::WideToUtf8(job.modelFileName), langOut);
 
     Notify(WM_APP_TRANSCRIBE_FINISHED, job.audioPath, 100);
-    Log::Info(L"Transcript ready: " + mdPath);
+    Log::Info(L"Transcript ready: " + txtPath);
 }

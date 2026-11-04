@@ -109,7 +109,11 @@ auto RecordingLibrary::JsonPathForAudio(const std::wstring& audioPath) -> std::w
     return StemPath(audioPath) + L".json";
 }
 
-auto RecordingLibrary::MdPathForAudio(const std::wstring& audioPath) -> std::wstring {
+auto RecordingLibrary::TranscriptPathForAudio(const std::wstring& audioPath) -> std::wstring {
+    return StemPath(audioPath) + L".txt";
+}
+
+auto RecordingLibrary::LegacyMdPathForAudio(const std::wstring& audioPath) -> std::wstring {
     return StemPath(audioPath) + L".md";
 }
 
@@ -165,9 +169,18 @@ auto RecordingLibrary::Scan(const std::wstring& folder) -> std::vector<Recording
         entry.displayName = entry.fileName;
         entry.stem = StemPath(path);
         entry.jsonPath = entry.stem + L".json";
-        entry.mdPath = entry.stem + L".md";
+        const auto txtPath = entry.stem + L".txt";
+        const auto mdPath = entry.stem + L".md";
         entry.sizeBytes = FileIo::FileSize(entry.audioPath);
-        entry.hasMarkdown = std::filesystem::exists(entry.mdPath);
+        if (std::filesystem::exists(txtPath)) {
+            entry.transcriptPath = txtPath;
+            entry.hasTranscript = true;
+            entry.transcriptIsLegacyMarkdown = false;
+        } else if (std::filesystem::exists(mdPath)) {
+            entry.transcriptPath = mdPath;
+            entry.hasTranscript = true;
+            entry.transcriptIsLegacyMarkdown = true;
+        }
 
         RecordingSidecar side{};
         if (Sidecar::Load(entry.jsonPath, side)) {
@@ -175,7 +188,7 @@ auto RecordingLibrary::Scan(const std::wstring& folder) -> std::vector<Recording
             entry.durationSeconds = side.durationSeconds;
             entry.transcriptStatus = side.transcriptStatus;
             entry.transcriptError = Text::Utf8ToWide(side.transcriptError);
-            if (entry.hasMarkdown && entry.transcriptStatus == TranscriptStatus::None) {
+            if (entry.hasTranscript && entry.transcriptStatus == TranscriptStatus::None) {
                 entry.transcriptStatus = TranscriptStatus::Ready;
             }
         } else {
@@ -188,7 +201,7 @@ auto RecordingLibrary::Scan(const std::wstring& folder) -> std::vector<Recording
             if (_wcsicmp(ext.c_str(), L".wav") == 0) {
                 entry.durationSeconds = ReadWavDurationSeconds(entry.audioPath);
             }
-            if (entry.hasMarkdown) {
+            if (entry.hasTranscript) {
                 entry.transcriptStatus = TranscriptStatus::Ready;
             }
         }
@@ -217,13 +230,18 @@ bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& n
     const auto oldExt = std::filesystem::path(entry.audioPath).extension().wstring();
     const auto newAudio = (dir / (newStemName + oldExt)).wstring();
     const auto newJson = (dir / (newStemName + L".json")).wstring();
+    const auto oldTxt = entry.stem + L".txt";
+    const auto oldMd = entry.stem + L".md";
+    const auto newTxt = (dir / (newStemName + L".txt")).wstring();
     const auto newMd = (dir / (newStemName + L".md")).wstring();
 
     if (Text::PathEquals(newAudio, entry.audioPath)) {
         return true;
     }
+    const bool hasTxt = std::filesystem::exists(oldTxt);
+    const bool hasMd = std::filesystem::exists(oldMd);
     if (std::filesystem::exists(newAudio) || std::filesystem::exists(newJson) ||
-        std::filesystem::exists(newMd)) {
+        (hasTxt && std::filesystem::exists(newTxt)) || (hasMd && std::filesystem::exists(newMd))) {
         error = L"A recording with that name already exists.";
         return false;
     }
@@ -251,14 +269,26 @@ bool RecordingLibrary::Rename(const RecordingEntry& entry, const std::wstring& n
             return false;
         }
     }
-    if (std::filesystem::exists(entry.mdPath)) {
-        if (!::MoveFileW(entry.mdPath.c_str(), newMd.c_str())) {
-            // Best-effort rollback of audio/json
+    if (hasTxt) {
+        if (!::MoveFileW(oldTxt.c_str(), newTxt.c_str())) {
             ::MoveFileW(newAudio.c_str(), entry.audioPath.c_str());
             if (std::filesystem::exists(newJson)) {
                 ::MoveFileW(newJson.c_str(), entry.jsonPath.c_str());
             }
-            error = L"Could not rename the transcript Markdown.";
+            error = L"Could not rename the transcript.";
+            return false;
+        }
+    }
+    if (hasMd) {
+        if (!::MoveFileW(oldMd.c_str(), newMd.c_str())) {
+            ::MoveFileW(newAudio.c_str(), entry.audioPath.c_str());
+            if (std::filesystem::exists(newJson)) {
+                ::MoveFileW(newJson.c_str(), entry.jsonPath.c_str());
+            }
+            if (hasTxt && std::filesystem::exists(newTxt)) {
+                ::MoveFileW(newTxt.c_str(), oldTxt.c_str());
+            }
+            error = L"Could not rename the transcript.";
             return false;
         }
     }
@@ -278,8 +308,13 @@ bool RecordingLibrary::DeleteToRecycleBin(const RecordingEntry& entry, std::wstr
     if (std::filesystem::exists(entry.jsonPath)) {
         paths.push_back(entry.jsonPath);
     }
-    if (std::filesystem::exists(entry.mdPath)) {
-        paths.push_back(entry.mdPath);
+    const auto txtPath = entry.stem + L".txt";
+    const auto mdPath = entry.stem + L".md";
+    if (std::filesystem::exists(txtPath)) {
+        paths.push_back(txtPath);
+    }
+    if (std::filesystem::exists(mdPath)) {
+        paths.push_back(mdPath);
     }
     const auto micStem = StemAudioPath(entry.stem, L".mic.wav");
     const auto sysStem = StemAudioPath(entry.stem, L".system.wav");

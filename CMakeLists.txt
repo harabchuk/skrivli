@@ -85,7 +85,7 @@ add_library(WIL::WIL ALIAS WIL_WIL)
 target_include_directories(WIL_WIL SYSTEM INTERFACE "${wil_SOURCE_DIR}/include")
 
 set(MEETINGBUDDY_CORE_SOURCES
-    src/core/MarkdownFormatter.cpp
+    src/core/TranscriptText.cpp
 )
 
 set(MEETINGBUDDY_SERVICES_SOURCES
@@ -112,6 +112,7 @@ set(MEETINGBUDDY_INFRA_SOURCES
     src/infrastructure/files/WavWriter.cpp
     src/infrastructure/files/M4aEncoder.cpp
     src/infrastructure/files/AudioFileReader.cpp
+    src/infrastructure/files/AudioPlayer.cpp
     src/infrastructure/system/Autostart.cpp
     src/infrastructure/system/Hotkey.cpp
     src/infrastructure/system/Clipboard.cpp
@@ -136,7 +137,6 @@ set(MEETINGBUDDY_VIEWS_SOURCES
     src/views/RecordView.cpp
     src/views/RecordingsView.cpp
     src/views/SettingsDialog.cpp
-    src/views/TranscriptWindow.cpp
     src/views/ModelPrompt.cpp
 )
 
@@ -182,6 +182,7 @@ target_link_libraries(MeetingBuddy PRIVATE
     winmm
     mfplat
     mf
+    mfplay
     mfreadwrite
     mfuuid
     wmcodecdspuuid
@@ -212,7 +213,7 @@ if(MEETINGBUDDY_BUILD_TESTS)
     add_executable(MeetingBuddyTests
         src/core/tests/RingBufferTests.cpp
         src/core/tests/ChunkPlanTests.cpp
-        src/core/tests/MarkdownFormatterTests.cpp
+        src/core/tests/TranscriptTextTests.cpp
         src/infrastructure/audio/tests/MixerTests.cpp
         src/infrastructure/audio/tests/ResamplerTests.cpp
         src/infrastructure/audio/tests/WavHeaderTests.cpp
@@ -229,7 +230,7 @@ if(MEETINGBUDDY_BUILD_TESTS)
         src/infrastructure/storage/RecordingSidecar.cpp
         src/infrastructure/storage/RecordingLibrary.cpp
         src/infrastructure/audio/Resampler.cpp
-        src/core/MarkdownFormatter.cpp
+        src/core/TranscriptText.cpp
         src/infrastructure/common/Paths.cpp
         src/infrastructure/common/Text.cpp
         src/infrastructure/common/FileIo.cpp

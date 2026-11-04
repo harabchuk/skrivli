@@ -15,7 +15,6 @@
 #include "ui/Theme.hpp"
 #include "views/ModelPrompt.hpp"
 #include "views/SettingsDialog.hpp"
-#include "views/TranscriptWindow.hpp"
 
 #include <cstdio>
 #include <iterator>
@@ -481,7 +480,6 @@ void MainWindow::OnDestroy() {
         m_session.Stop(RecordingSession::StopMode::Save);
     }
     TranscriptionService::Instance().Stop();
-    TranscriptWindow::CloseAll();
     m_devices.Shutdown();
     m_tray.Remove();
     PostQuitMessage(0);
@@ -711,11 +709,17 @@ LRESULT MainWindow::OnTrayIcon(UINT /*msg*/, WPARAM /*wParam*/, LPARAM lParam, B
         }
         break;
     case NIN_BALLOONUSERCLICK:
-        if (!m_balloonTranscriptPath.empty()) {
-            TranscriptWindow::OpenOrActivate(m_balloonTranscriptPath);
-            m_balloonTranscriptPath.clear();
-        } else {
-            ShowFromTray();
+        ShowFromTray();
+        if (!m_balloonAudioPath.empty()) {
+            if (m_tabs.IsWindow()) {
+                m_tabs.SetCurSel(1);
+                ShowSelectedTab();
+                LayoutChildren();
+            }
+            if (m_recordingsView.IsWindow()) {
+                m_recordingsView.SelectByAudioPath(m_balloonAudioPath);
+            }
+            m_balloonAudioPath.clear();
         }
         break;
     case WM_CONTEXTMENU:
@@ -959,11 +963,17 @@ LRESULT MainWindow::OnTranscribeFinished(UINT /*msg*/, WPARAM /*wParam*/, LPARAM
     SetTranscribeStatusText(L"Ready");
     RefreshRecordingsList();
     if (notify && !notify->audioPath.empty()) {
-        const auto mdPath = RecordingLibrary::MdPathForAudio(notify->audioPath);
-        m_balloonTranscriptPath = mdPath;
+        m_balloonAudioPath = notify->audioPath;
         m_tray.ShowBalloon(L"MeetingBuddy", L"Transcript ready — click to open");
         if (IsWindowVisible() && !IsIconic()) {
-            TranscriptWindow::OpenOrActivate(mdPath);
+            if (m_tabs.IsWindow()) {
+                m_tabs.SetCurSel(1);
+                ShowSelectedTab();
+                LayoutChildren();
+            }
+            if (m_recordingsView.IsWindow()) {
+                m_recordingsView.SelectByAudioPath(notify->audioPath);
+            }
         }
     }
     return 0;

@@ -18,5 +18,6 @@ class RecordingLibrary {
 
     static double ReadWavDurationSeconds(const std::wstring& wavPath);
     static auto JsonPathForAudio(const std::wstring& audioPath) -> std::wstring;
-    static auto MdPathForAudio(const std::wstring& audioPath) -> std::wstring;
+    static auto TranscriptPathForAudio(const std::wstring& audioPath) -> std::wstring;
+    static auto LegacyMdPathForAudio(const std::wstring& audioPath) -> std::wstring;
 };

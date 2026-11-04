@@ -155,6 +155,6 @@ class MainWindow : public WTL::CFrameWindowImpl<MainWindow> {
     UINT m_taskbarCreatedMsg = 0;
     UINT m_showYourselfMsg = 0;
     DWORD m_lastTrayToggleTick = 0;
-    std::wstring m_balloonTranscriptPath;
+    std::wstring m_balloonAudioPath;
     std::wstring m_pendingCompressWav;
 };

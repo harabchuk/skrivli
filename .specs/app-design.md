@@ -1,7 +1,7 @@
 # MeetingBuddy — Implementation Plan
 
 Windows desktop app (C++ / WTL) that records microphone + system audio output via WASAPI,
-mixes them into a single file in a user-chosen folder, and optionally produces a Markdown
+mixes them into a single file in a user-chosen folder, and optionally produces a plain-text
 transcript using a local lightweight speech-to-text model. Lives in the system tray.
 
 ---
@@ -13,7 +13,7 @@ transcript using a local lightweight speech-to-text model. Lives in the system t
 - **Mix** both streams into one time-aligned audio file.
 - Save recordings into a **user-defined folder** (persisted setting).
 - After a recording finishes, **optionally** transcribe it with a **local** model (no cloud).
-- Show the transcript as **Markdown** in a window with easy **copy** (all / selection).
+- Show the transcript as **plain text** in the Recordings detail pane (selectable/copyable).
 - **Tray** integration: minimize/close to tray, tray menu, start/stop recording from tray.
 - Main window with **tabs**:
   1. **Record** — record button and live status.
@@ -55,7 +55,7 @@ Housekeeping before feature work:
 | Container | WAV (PCM 16-bit, 48 kHz, stereo) while recording; optional post-encode to M4A/AAC via Media Foundation `IMFSinkWriter` | WAV is simple and crash-tolerant; M4A is ~10× smaller |
 | Transcription | **whisper.cpp** (ggml, CPU), statically linked via `FetchContent` | Local, MIT, fast on CPU, quantized models |
 | Default model | `ggml-base-q5_1.bin` (~57 MB); offer `tiny`, `base`, `small` (q5) | Good speed/quality balance on laptops |
-| Markdown view | RichEdit 4.1 (`MSFTEDIT_CLASS`) showing Markdown source with light syntax styling | Native, selectable/copyable, no WebView dependency |
+| Transcript view | Read-only multiline edit in the Recordings detail pane | Native, selectable/copyable plain text |
 | Settings | `%APPDATA%\MeetingBuddy\settings.json` (Glaze) | Simple, human-editable |
 | Tests | GoogleTest (or Catch2) via `FetchContent`, `ctest` | Unit-test DSP, file, and formatting logic |
 
@@ -68,16 +68,15 @@ Housekeeping before feature work:
                  │ MainWindow (frame)                                                     │
                  │  ├─ CTabCtrl                                                           │
                  │  │   ├─ RecordView      (button, timer, level meters, device pickers)  │
-                 │  │   └─ RecordingsView  (list view + actions)                          │
-                 │  ├─ TrayIcon            (Shell_NotifyIcon, context menu)               │
-                 │  └─ TranscriptWindow(s) (RichEdit, Copy / Save / Open folder)          │
+                 │  │   └─ RecordingsView  (list + detail pane: player / transcript)     │
+                 │  └─ TrayIcon            (Shell_NotifyIcon, context menu)               │
                  └───────▲───────────────────────────────▲────────────────────────────────┘
                          │ PostMessage(WM_APP_*)         │ PostMessage(WM_APP_TRANSCRIBE_*)
 ┌────────────────────────┴───────────────┐     ┌─────────┴─────────────────────────┐
 │ RecordingSession                        │     │ TranscriptionService (worker)     │
 │  ├─ CaptureStream (mic)     ── thread ─┐│     │  ├─ AudioFileReader → 16k mono    │
 │  ├─ CaptureStream (loopback)── thread ─┤│     │  ├─ WhisperEngine (whisper.cpp)   │
-│  ├─ SilentRenderKeepAlive              ││     │  └─ MarkdownFormatter → .md       │
+│  ├─ SilentRenderKeepAlive              ││     │  └─ TranscriptText → .txt         │
 │  ├─ Mixer + drift control  ── thread ◄─┘│     └───────────────────────────────────┘
 │  └─ WavWriter (→ optional M4A encode)   │
 └─────────────────────────────────────────┘
@@ -108,7 +107,7 @@ src/
   core/
     AudioFormat.hpp, RingBuffer.hpp        # format constants; SPSC lock-free float ring
     ChunkPlan.hpp
-    MarkdownFormatter.{hpp,cpp}
+    TranscriptText.{hpp,cpp}
     Recording.hpp                          # RecordingEntry, RecordingSidecar fields
     Transcript.hpp                         # TranscriptSegment, TranscriptMeta, TranscriptStatus
   services/
@@ -120,13 +119,13 @@ src/
               AudioResampler, MaConverter, MiniAudio.hpp, WavHeader, Resampler
     ai/       WhisperEngine, ModelManager  # whisper.cpp, model catalog, download (no HWND)
     storage/  Settings, RecordingLibrary, RecordingSidecar, DirectoryWatcher
-    files/    WavWriter, M4aEncoder, AudioFileReader
+    files/    WavWriter, M4aEncoder, AudioFileReader, AudioPlayer
     system/   Autostart, Hotkey, Clipboard
     common/   wil::com_ptr_nothrow, Log, HResult, Paths, Text, FileIo, Scoped.hpp, PostOwned.hpp
   ui/                                      # reusable controls, no screen knowledge
     TabCtrl, DeviceCombo, LevelMeter, RecordButton, TrayIcon, ShellDialogs, Theme.hpp
   views/                                   # windows, tab pages, dialogs
-    MainWindow, RecordView, RecordingsView, TranscriptWindow, SettingsDialog
+    MainWindow, RecordView, RecordingsView, SettingsDialog
     ModelPrompt                            # progress window and model file picker
 resources/
   MeetingBuddy.rc, resource.h
@@ -207,31 +206,24 @@ WASAPI loopback delivers **no packets** while nothing is playing, which would ma
 - Settings let the user pick a model (tiny / base / small, multilingual or `.en`) and a language.
 - The app makes no network calls except this explicit, user-initiated download.
 
-### 7.4 Markdown output
-Saved next to the audio as `<name>.md`:
+### 7.4 Plain-text transcript
+Saved next to the audio as `<name>.txt`:
 
-```markdown
-# Meeting — 2026-11-01 13:18
+```text
+[00:00:03] Okay, let's get started with the weekly sync.
 
-- **Duration:** 00:42:17
-- **Recorded:** 2026-11-01 13:18 – 14:00
-- **Model:** ggml-base-q5_1 (language: auto → en)
-
-## Transcript
-
-**[00:00:03]** Okay, let's get started with the weekly sync.
-
-**[00:00:09]** First item is the release schedule...
+[00:00:09] First item is the release schedule...
 ```
 
 - Adjacent short segments get merged into paragraphs (a new paragraph after a pause over 1.5 s or every ~60 s) for readability.
 - Whitespace is trimmed, and repeated hallucinated lines (e.g. identical text repeated 3+ times) are removed.
 - The file is UTF-8 without BOM.
+- Legacy `<name>.md` files are still detected and shown with Markdown markers stripped for display.
 
 ### 7.5 TranscriptionService
 - FIFO job queue; one job runs at a time. Job states: `Queued → Preparing → Transcribing (n%) → Done | Failed | Cancelled`.
 - The state is reflected in the Recordings list and in the sidecar JSON.
-- When a job finishes, show a tray balloon ("Transcript ready — click to open") and open the TranscriptWindow automatically if the main window is visible.
+- When a job finishes, show a tray balloon ("Transcript ready — click to open"). Clicking the balloon (or finishing while the main window is visible) switches to the Recordings tab and selects that recording.
 - **Optional by design**: nothing transcribes automatically unless the user enables "Transcribe automatically after recording" in settings (off by default). Otherwise the user starts transcription from the Recordings tab.
 
 ---
@@ -272,18 +264,14 @@ Saved next to the audio as `<name>.md`:
 - Hotkey: global `Ctrl+Alt+R` (`RegisterHotKey`, configurable or disableable) toggles recording.
 
 ### 8.3 Tab 2 — Recordings
-- `CListViewCtrl` in report view with full-row select, columns **Name | Date | Duration | Size | Transcript**. The Transcript column shows `—`, `Queued`, `42 %`, `Ready`, or `Failed`.
-- Toolbar/buttons: **Play** (`ShellExecute` default player), **Transcribe**, **View transcript**, **Open folder**, **Rename**, **Delete** (to the Recycle Bin via `IFileOperation`, deleting audio + `.md` + `.json` together), **Refresh**.
-- Double-click: open the transcript if it exists, otherwise play. Right-click shows a context menu with the same actions.
-- Data comes from `RecordingLibrary`, which scans the folder for `*.wav`/`*.m4a` and pairs them with `.md`/`.json`. `ReadDirectoryChangesW` on a background thread (debounced) keeps the list in sync with external changes.
+- Split pane laid out in `OnSize`.
+- **Left:** `CListViewCtrl` in report view with full-row select, columns **Name | Date | Duration | Size | Transcript**. The Transcript column shows `—`, `Queued`, `42 %`, `Ready`, or `Failed`.
+- **Right:** empty state ("Select a recording") until a row is selected. Then **Play** / **Stop** (in-app MFPlay via `AudioPlayer`), and below either a read-only multiline edit with the transcript text, or a **Create transcript** button (status text while a job is active; error + button again on failure).
+- Context menu: **Play**, **Transcribe**, **Open folder**, **Rename**, **Delete** (to the Recycle Bin via `IFileOperation`, deleting audio + `.txt` + `.json` together, and a leftover `.md` if present), **Refresh**.
+- Double-click plays the selected recording. Selecting another row stops playback.
+- Data comes from `RecordingLibrary`, which scans the folder for `*.wav`/`*.m4a` and pairs them with `.txt`/`.json` (or legacy `.md`). `ReadDirectoryChangesW` on a background thread (debounced) keeps the list in sync with external changes.
 - Sorted newest first by default; clicking a column header sorts by it.
-
-### 8.4 Transcript window
-- A separate top-level `CFrameWindowImpl` (one per transcript; reuse an existing one if it's already open).
-- Body: read-only RichEdit (`MSFTEDIT_CLASS`, `ES_MULTILINE | ES_READONLY | WS_VSCROLL`, `EM_AUTOURLDETECT`) showing the **Markdown source**, with light styling applied via `CHARFORMAT2`: `#` headings larger and bold, `**[hh:mm:ss]**` timestamps grey. The text the user selects and copies stays plain Markdown.
-- Toolbar: **Copy all** (`CF_UNICODETEXT` to the clipboard), **Save as…**, **Open in editor** (`ShellExecute` on `.md`), **Find** (`Ctrl+F` via `FINDMSGSTRING` dialog).
-- `Ctrl+A` / `Ctrl+C` work natively. The status bar shows word count.
-- Later: a "Rendered / Source" toggle that converts Markdown to RTF with md4c, or shows HTML via WebView2.
+- After each refresh, the previously selected audio path is reselected so the detail pane stays put while a job runs.
 
 ### 8.5 Tray
 - `TrayIcon` wraps `Shell_NotifyIconW` (`NOTIFYICON_VERSION_4`, a GUID-identified icon, `NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP`).
@@ -334,8 +322,8 @@ Saved next to the audio as `<name>.md`:
   - `Mixer`: alignment with synthetic QPC timestamps, gap filling, drift correction (simulate a 100 ppm clock difference), soft limiter.
   - `WavWriter`: header correctness, periodic header patching, recovery of truncated files.
   - `Resampler`: a 1 kHz sine at 48k → 16k keeps frequency and amplitude; aliasing of a 10 kHz tone is attenuated.
-  - `MarkdownFormatter`: paragraph merging, timestamps, de-duplication of repeated lines.
-  - `RecordingLibrary`: pairing of audio/`.md`/`.json`, sorting, partial-file recovery.
+  - `TranscriptText`: paragraph merging, timestamps, de-duplication of repeated lines.
+  - `RecordingLibrary`: pairing of audio/`.txt`/`.json` (and legacy `.md`), sorting, partial-file recovery.
 - **Integration tests** (manual or optional CI on a machine with audio):
   - Record 10 min with intermittent playback (YouTube on/off) and talking; check sync by clapping near the mic while a click track plays.
   - Unplug a USB headset mid-recording; change the default device mid-recording.
@@ -362,9 +350,9 @@ Each milestone ends with a working, runnable app.
 6. **M5 — Recordings tab** (≈2 days)
    `RecordingLibrary`, list view with columns/sorting/context menu, play/open/rename/delete, directory watcher, sidecar JSON.
 7. **M6 — Transcription engine** (≈3 days)
-   whisper.cpp integration in CMake, `AudioFileReader`, `Resampler`, `WhisperEngine`, `ModelManager` (download + browse), `TranscriptionService` queue with progress/cancel, `MarkdownFormatter`.
+   whisper.cpp integration in CMake, `AudioFileReader`, `Resampler`, `WhisperEngine`, `ModelManager` (download + browse), `TranscriptionService` queue with progress/cancel, `TranscriptText`.
 8. **M7 — Transcript UI** (≈2 days)
-   `TranscriptWindow` with styled RichEdit, Copy all / Save as / Open in editor / Find. Transcript column states, tray balloon on completion.
+   Recordings detail pane with Play/Stop and transcript text (or Create transcript). Transcript column states, tray balloon on completion.
 9. **M8 — Settings and polish** (≈2 days)
    Settings dialog, global hotkey, start with Windows, DPI polish, optional M4A compression, keyboard accessibility (tab order, mnemonics), About dialog.
 10. **M9 — Release** (≈1–2 days)
@@ -390,7 +378,7 @@ Each milestone ends with a working, runnable app.
 ## 14. Future work
 - Speaker separation using the mic/system stems ("You" vs. "Remote") and/or a diarization model.
 - Live transcription while recording (streaming whisper on 5–10 s windows).
-- Summaries and action items with a local LLM (llama.cpp) appended to the Markdown.
-- Rendered Markdown view (md4c → RTF, or WebView2).
+- Summaries and action items with a local LLM (llama.cpp) appended to the transcript.
+
 - Search across all transcripts in the Recordings tab.
 - GPU acceleration (Vulkan/CUDA backends of ggml) as an optional build.

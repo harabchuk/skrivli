@@ -68,8 +68,8 @@ TEST(RecordingLibrary, PairsSidecarsAndSortsNewestFirst) {
     side.transcriptStatus = TranscriptStatus::None;
     ASSERT_TRUE(RecordingLibrary::WriteSidecarForAudio(newer, side));
     {
-        std::ofstream md(RecordingLibrary::MdPathForAudio(older), std::ios::binary);
-        md << "# Meeting\n"; // sidecar → Ready
+        std::ofstream txt(RecordingLibrary::TranscriptPathForAudio(older), std::ios::binary);
+        txt << "[00:00:00] hello\n"; // sidecar → Ready
     }
 
     // Act
@@ -84,11 +84,36 @@ TEST(RecordingLibrary, PairsSidecarsAndSortsNewestFirst) {
     for (const auto& e : entries) {
         if (e.audioPath == older) {
             foundOlder = true;
-            EXPECT_TRUE(e.hasMarkdown);
+            EXPECT_TRUE(e.hasTranscript);
+            EXPECT_FALSE(e.transcriptIsLegacyMarkdown);
             EXPECT_EQ(e.transcriptStatus, TranscriptStatus::Ready);
         }
     }
     EXPECT_TRUE(foundOlder);
+
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+}
+
+TEST(RecordingLibrary, LegacyMarkdownCountsAsTranscript) {
+    // Arrange
+    const std::wstring folder = TempDir() + L"\\LegacyMd";
+    std::filesystem::remove_all(folder);
+    std::filesystem::create_directories(folder);
+    const std::wstring wav = WriteTinyWav(folder, L"MeetingBuddy_2026-01-02_10-00-00.wav");
+    {
+        std::ofstream md(RecordingLibrary::LegacyMdPathForAudio(wav), std::ios::binary);
+        md << "# Meeting\n\n**[00:00:01]** hi\n";
+    }
+
+    // Act
+    const auto entries = RecordingLibrary::Scan(folder);
+
+    // Assert
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_TRUE(entries[0].hasTranscript);
+    EXPECT_TRUE(entries[0].transcriptIsLegacyMarkdown);
+    EXPECT_EQ(entries[0].transcriptStatus, TranscriptStatus::Ready);
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
@@ -150,8 +175,12 @@ TEST(RecordingLibrary, RenameKeepsSidecarsTogether) {
     side.durationSeconds = 1.0;
     ASSERT_TRUE(RecordingLibrary::WriteSidecarForAudio(wav, side));
     {
-        std::ofstream md(RecordingLibrary::MdPathForAudio(wav), std::ios::binary);
-        md << "hi";
+        std::ofstream txt(RecordingLibrary::TranscriptPathForAudio(wav), std::ios::binary);
+        txt << "hi";
+    }
+    {
+        std::ofstream md(RecordingLibrary::LegacyMdPathForAudio(wav), std::ios::binary);
+        md << "legacy";
     }
     auto entries = RecordingLibrary::Scan(folder);
     ASSERT_EQ(entries.size(), 1u);
@@ -165,6 +194,8 @@ TEST(RecordingLibrary, RenameKeepsSidecarsTogether) {
         std::filesystem::exists((std::filesystem::path(folder) / L"RenamedMeeting.wav").wstring()));
     EXPECT_TRUE(std::filesystem::exists(
         (std::filesystem::path(folder) / L"RenamedMeeting.json").wstring()));
+    EXPECT_TRUE(
+        std::filesystem::exists((std::filesystem::path(folder) / L"RenamedMeeting.txt").wstring()));
     EXPECT_TRUE(
         std::filesystem::exists((std::filesystem::path(folder) / L"RenamedMeeting.md").wstring()));
 

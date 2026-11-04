@@ -20,6 +20,7 @@ enum : UINT {
     WM_APP_TRANSCRIBE_FAILED = WM_APP + 13,
     WM_APP_M4A_FINISHED = WM_APP + 14,
     WM_APP_M4A_FAILED = WM_APP + 15,
+    WM_APP_PLAYBACK = WM_APP + 16,
 };
 
 enum {
