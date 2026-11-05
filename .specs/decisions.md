@@ -11,7 +11,7 @@
 1. `gpui_kit::application().with_assets(gpui_kit::assets::Assets)`
 2. `.run(|cx| { ... })`
 3. `gpui_kit::init(cx)` before any styled widget
-4. `Theme::change(ThemeMode, None, cx)` (`gpui_kit::component`)
+4. Theme preference: `ThemePreference` in settings (`system` / `light` / `dark`). Kit `ThemeMode` is only Light/Dark; System maps through `Theme::sync_system_appearance`. Explicit modes use `Theme::change`. Applied at startup from `ui::theme::apply_theme` and again when the tab-bar control cycles or (for System) when `observe_window_appearance` fires.
 5. `gpui_kit::open_window(WindowOptions, cx, |window, cx| ...)` which mounts `gpui_kit::base::Root`
 6. `window.set_window_title("Skrivli")` inside the builder
 

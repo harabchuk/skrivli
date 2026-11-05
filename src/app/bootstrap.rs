@@ -7,7 +7,6 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{
     point, px, size, App, AppContext as _, Bounds, Pixels, WindowBounds, WindowOptions,
 };
@@ -22,7 +21,7 @@ use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::audio::system::{QpcCounter, SystemClock, WindowsDisk};
 use crate::infrastructure::files::player::PlayerHost;
 use crate::infrastructure::files::wav::recover_partials;
-use crate::infrastructure::storage::settings::{Settings, ThemePreference};
+use crate::infrastructure::storage::settings::Settings;
 use crate::infrastructure::windows::single_instance::{
     signal_primary_instance, InstanceGuardError, SingleInstance, ACTIVATE_EVENT_NAME,
     SINGLE_INSTANCE_MUTEX,
@@ -34,6 +33,7 @@ use crate::services::library::LibraryHost;
 use crate::services::recording::{
     spawn_recording_host, RecordingEngine, RecordingHost, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED,
 };
+use crate::ui::theme::apply_theme;
 use crate::views::main_window::MainWindow;
 
 use super::actions::{command_from_tray, AppCommand, BridgeMessage};
@@ -325,7 +325,7 @@ fn open_shell(
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            apply_theme(theme, cx);
+            apply_theme(theme, None, cx);
             register(cx);
             let options = shell_window_options(&settings, cx);
             let mut presentation = Presentation::new(
@@ -444,15 +444,6 @@ fn recovery_notice(directory: &std::path::Path) -> Option<&'static str> {
     } else {
         None
     }
-}
-
-fn apply_theme(preference: ThemePreference, cx: &mut App) {
-    let mode = match preference {
-        ThemePreference::Light => ThemeMode::Light,
-        ThemePreference::Dark => ThemeMode::Dark,
-        ThemePreference::System => ThemeMode::from(cx.window_appearance()),
-    };
-    Theme::change(mode, None, cx);
 }
 
 fn prepare_local_dirs(paths: &AppPaths) -> Result<(), AppError> {

@@ -411,7 +411,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Resizable GPUI Kit application window, minimum target roughly **560 × 420 logical pixels**, with remembered dimensions and monitor-safe restore.
 - Two top tabs: **Record** and **Recordings**. Use GPUI Kit navigation/tab components where they meet requirements, **not** Win32 `CTabCtrl`/`CDialogImpl` child windows.
 - Adopt **GPUI Kit themes, design tokens, typography, buttons, inputs, selectors, tabs, menus, dialogs, tooltips, and other styled controls** as defaults. Use GPUI layout primitives (`div`, flex/grid) to compose screens; avoid duplicating GPUI Kit widgets in custom code.
-- No in-window File/Help menu bar. Settings opens from a gear button on `TabBar::suffix` (`IconName::Settings`); About is linked from the Settings dialog. Open recordings folder and Exit stay on the Recordings tab and tray.
+- No in-window File/Help menu bar. `TabBar::suffix` holds a theme-cycle button (left) and Settings gear (`IconName::Settings`). The theme button uses Kit component icons for Light (`Sun`) and Dark (`Moon`). System uses `Icon::data` with a sun–moon SVG (working moon crescent plus sun rays) because bundled `icons/sun-moon.svg` does not paint under GPUI. Tooltip names the current preference (Light / Dark / System); preference persists via `Settings::theme`. System mode calls `Theme::sync_system_appearance` and re-syncs on `window.observe_window_appearance`; Light and Dark call `Theme::change`. About is linked from the Settings dialog. Open recordings folder and Exit stay on the Recordings tab and tray.
 - A compact status strip shows recording state, duration and transcription progress.
 - Use logical-pixel layout, Windows DPI-aware assets and explicit keyboard focus/shortcuts. Test per-monitor scaling on real Windows devices.
 - Keep views declarative: update model/entity state when a service event arrives, notify GPUI to rerender, and never allocate an audio device during `Render::render`.
@@ -437,7 +437,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 └──────────────────────────────────────────────────┘
 ```
 
-- Compose **GPUI Kit** select/combo, button, input, slider, checkbox, status, and dialog components for the recording form. Implement custom `level_meter` (and specialized recording indicator only if needed) using GPUI primitives and GPUI Kit theme tokens. Do **not** create a parallel theme system; use GPUI Kit tokens and component styling.
+- Compose **GPUI Kit** select/combo, button, input, slider, checkbox, status, and dialog components for the recording form. Implement custom `level_meter` (and specialized recording indicator only if needed) using GPUI primitives and GPUI Kit theme tokens: band fills from `success` / `warning` / `danger`, track from the same color at low opacity (Kit Progress pattern), labels from `foreground` / `muted_foreground`. Do **not** create a parallel theme system; use GPUI Kit tokens and component styling.
 - Choose a folder with a Windows folder-picker adapter; show it in a read-only path field. Default `%USERPROFILE%\Documents\Skrivli\` where writable.
 - Disable source selection and destination changes while recording. Gain and Auto (AGC) remain live, with the slider disabled when Auto is active.
 - A red recording state, elapsed timer and status text; ensure information is accessible without relying on red color or a blinking indicator alone.

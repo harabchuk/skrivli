@@ -30,7 +30,9 @@ use crate::infrastructure::audio::devices::DeviceCatalog;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::files::player::{PlayerHost, PlayerPhase, PlayerSnapshot};
 use crate::infrastructure::storage::library::LibraryCatalog;
-use crate::infrastructure::storage::settings::{Settings, StoredEndpoint, StoredWindowBounds};
+use crate::infrastructure::storage::settings::{
+    Settings, StoredEndpoint, StoredWindowBounds, ThemePreference,
+};
 use crate::infrastructure::windows::dialogs::pick_recordings_folder;
 use crate::infrastructure::windows::recordings_folder::open_recordings_folder;
 use crate::infrastructure::windows::shell_window;
@@ -40,6 +42,7 @@ use crate::services::recording::{
     RecordPhase as ServicePhase, RecordSnapshot, RecordingHost, StartRequest, NOTICE_FALLBACK,
     NOTICE_MIC, NOTICE_MIC_MISSING, NOTICE_SYSTEM_FALLBACK, NOTICE_SYSTEM_MISSING,
 };
+use crate::ui::theme::{apply_theme, theme_icon};
 
 use super::recording::record_tab;
 use super::recordings::{
@@ -89,6 +92,7 @@ pub(crate) struct MainWindow {
     last_saved: Option<LogicalRect>,
     pending_bounds: Option<(LogicalRect, Instant)>,
     _bridge: Task<()>,
+    _appearance: Subscription,
 }
 
 impl MainWindow {
@@ -210,6 +214,18 @@ impl MainWindow {
         window.on_window_should_close(cx, move |window, cx| {
             session.update(cx, |view, cx| view.on_close_requested(window, cx))
         });
+        let appearance_entity = cx.weak_entity();
+        let appearance = window.observe_window_appearance(move |window, cx| {
+            let Some(entity) = appearance_entity.upgrade() else {
+                return;
+            };
+            entity.update(cx, |view, cx| {
+                if view.settings.theme() == ThemePreference::System {
+                    apply_theme(ThemePreference::System, Some(window), cx);
+                    cx.notify();
+                }
+            });
+        });
         Self {
             focus,
             presentation,
@@ -251,6 +267,7 @@ impl MainWindow {
             last_saved: None,
             pending_bounds: None,
             _bridge: bridge,
+            _appearance: appearance,
         }
     }
 
@@ -262,6 +279,14 @@ impl MainWindow {
         self.settings.set_close_to_tray(close_to_tray);
         self.presentation.set_close_to_tray(close_to_tray);
         self.writer.save(self.settings.clone());
+        cx.notify();
+    }
+
+    pub(crate) fn cycle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let next = self.settings.theme().next();
+        self.settings.set_theme(next);
+        self.writer.save(self.settings.clone());
+        apply_theme(next, Some(window), cx);
         cx.notify();
     }
 
@@ -1080,6 +1105,9 @@ impl Render for MainWindow {
         };
         let status = SharedString::from(self.presentation.status_line());
         let settings_entity = entity.clone();
+        let theme_entity = entity.clone();
+        let theme = self.settings.theme();
+        let theme_label = theme.tooltip();
         v_flex()
             .id("skrivli-shell")
             .track_focus(&self.focus)
@@ -1093,15 +1121,32 @@ impl Render for MainWindow {
                     .child(Tab::new().label("Record"))
                     .child(Tab::new().label("Recordings"))
                     .suffix(
-                        Button::new("open-settings")
-                            .ghost()
-                            .icon(IconName::Settings)
-                            .accessibility_label("Settings")
-                            .on_click(move |_event, window, cx| {
-                                settings_entity.update(cx, |view, cx| {
-                                    view.handle(AppCommand::OpenSettings, window, cx);
-                                });
-                            }),
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                Button::new("cycle-theme")
+                                    .ghost()
+                                    .icon(theme_icon(theme))
+                                    .tooltip(theme_label)
+                                    .accessibility_label(theme_label)
+                                    .on_click(move |_event, window, cx| {
+                                        theme_entity.update(cx, |view, cx| {
+                                            view.cycle_theme(window, cx);
+                                        });
+                                    }),
+                            )
+                            .child(
+                                Button::new("open-settings")
+                                    .ghost()
+                                    .icon(IconName::Settings)
+                                    .accessibility_label("Settings")
+                                    .on_click(move |_event, window, cx| {
+                                        settings_entity.update(cx, |view, cx| {
+                                            view.handle(AppCommand::OpenSettings, window, cx);
+                                        });
+                                    }),
+                            ),
                     )
                     .on_click(move |index, window, cx| {
                         let tab = if *index == 0 {

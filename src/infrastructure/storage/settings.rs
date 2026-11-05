@@ -23,6 +23,24 @@ pub(crate) enum ThemePreference {
     Dark,
 }
 
+impl ThemePreference {
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Self::System => Self::Light,
+            Self::Light => Self::Dark,
+            Self::Dark => Self::System,
+        }
+    }
+
+    pub(crate) fn tooltip(self) -> &'static str {
+        match self {
+            Self::System => "System theme",
+            Self::Light => "Light theme",
+            Self::Dark => "Dark theme",
+        }
+    }
+}
+
 /// Logical-pixel window placement. Zero or negative sizes are rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StoredWindowBounds {
@@ -138,6 +156,10 @@ impl Settings {
 
     pub(crate) fn theme(&self) -> ThemePreference {
         self.theme
+    }
+
+    pub(crate) fn set_theme(&mut self, theme: ThemePreference) {
+        self.theme = theme;
     }
 
     pub(crate) fn window_bounds(&self) -> Option<StoredWindowBounds> {
@@ -339,6 +361,44 @@ mod tests {
 
     fn sample(dir: &std::path::Path) -> Settings {
         Settings::defaults(dir.join("Recordings")).expect("defaults")
+    }
+
+    #[test]
+    fn theme_preference_cycles_system_light_dark() {
+        // Arrange
+        let start = ThemePreference::System;
+
+        // Act
+        let light = start.next();
+        let dark = light.next();
+        let system = dark.next();
+
+        // Assert
+        assert_eq!(light, ThemePreference::Light);
+        assert_eq!(dark, ThemePreference::Dark);
+        assert_eq!(system, ThemePreference::System);
+    }
+
+    #[test]
+    fn theme_preference_tooltips_name_current_state() {
+        // Arrange / Act / Assert
+        assert_eq!(ThemePreference::System.tooltip(), "System theme");
+        assert_eq!(ThemePreference::Light.tooltip(), "Light theme");
+        assert_eq!(ThemePreference::Dark.tooltip(), "Dark theme");
+    }
+
+    #[test]
+    fn set_theme_updates_preference() {
+        // Arrange
+        let dir = temp_dir("theme-set");
+        let mut settings = sample(&dir);
+
+        // Act
+        settings.set_theme(ThemePreference::Dark);
+
+        // Assert
+        assert_eq!(settings.theme(), ThemePreference::Dark);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
