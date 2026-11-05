@@ -17,27 +17,28 @@ use crate::common::paths::AppPaths;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
 use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-use crate::infrastructure::files::player::PlayerHost;
 use crate::infrastructure::files::wav::recover_partials;
 use crate::infrastructure::platform::{self, PlatformHost};
 use crate::infrastructure::storage::settings::Settings;
 use crate::services::lease::EndpointLease;
 use crate::services::level_monitor::{spawn_level_monitor, MonitorTargets};
 use crate::services::library::LibraryHost;
+use crate::services::playback::PlayerHost;
 use crate::services::ports::{ActivationWatch, HostCommand, InstanceAcquire};
 use crate::services::recording::{
     spawn_recording_host, RecordingEngine, RecordingHost, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED,
 };
 use crate::ui::theme::apply_theme;
+use crate::views::actions::{AppCommand, BridgeMessage};
+use crate::views::hooks::ShellHooks;
 use crate::views::main_window::MainWindow;
+use crate::views::state::Presentation;
 
-use super::actions::{AppCommand, BridgeMessage};
 use super::bridge::{spawn_shell_producer, SHELL_PULSE_INTERVAL};
 use super::menus::register;
 use super::runtime::ShellGlobal;
 use super::settings_writer::SettingsWriter;
 use super::shutdown::ShutdownController;
-use super::state::Presentation;
 
 pub(crate) fn run() -> i32 {
     let host = platform::host();
@@ -333,8 +334,6 @@ fn open_shell(
                 !settings.start_hidden(),
             );
             presentation.set_notice(recovery_notice);
-            let window_shutdown = shutdown.clone();
-            let window_writer = writer;
             let window_recording = workers.recording;
             let window_library = workers.library;
             let window_player = workers.player;
@@ -342,15 +341,27 @@ fn open_shell(
             let window_gain = gain;
             let window_targets = targets;
             let window_shell = shell;
+            let hooks = ShellHooks::new(
+                {
+                    let writer = writer;
+                    Arc::new(move |settings| writer.save(settings))
+                },
+                {
+                    let shutdown = shutdown.clone();
+                    Arc::new(move || {
+                        let _ = shutdown.request();
+                    })
+                },
+                shutdown.flag(),
+            );
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 window.set_window_title("Skrivli");
                 cx.new(|cx| {
                     MainWindow::new(
                         presentation,
                         settings,
-                        window_writer,
+                        hooks,
                         commands,
-                        window_shutdown,
                         window_shell,
                         window_recording,
                         window_library,

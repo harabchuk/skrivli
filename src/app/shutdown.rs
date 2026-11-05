@@ -48,6 +48,7 @@ impl ShutdownController {
         true
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn is_requested(&self) -> bool {
         self.inner.requested.load(Ordering::Acquire)
     }

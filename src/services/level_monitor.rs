@@ -176,9 +176,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{spawn_level_monitor, MonitorTargets};
+    use crate::domain::audio::AudioBlock;
     use crate::domain::audio::SessionOrigin;
     use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-    use crate::infrastructure::audio::queue::AudioBlock;
     use crate::services::lease::EndpointLease;
     use crate::services::recording::{CaptureError, CapturePort, CaptureStream};
 

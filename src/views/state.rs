@@ -1,4 +1,6 @@
-//! Presentation snapshots owned by the GPUI shell. Services are not running yet.
+//! Presentation snapshots owned by the GPUI shell.
+
+pub(crate) use crate::domain::recording::RecordPhase;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppTab {
@@ -16,15 +18,6 @@ pub(crate) struct Presentation {
     notice: Option<&'static str>,
     pending_show: bool,
     record_phase: RecordPhase,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RecordPhase {
-    Idle,
-    Starting,
-    Recording,
-    Stopping,
-    Error,
 }
 
 impl Presentation {

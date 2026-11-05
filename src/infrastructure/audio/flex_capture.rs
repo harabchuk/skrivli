@@ -15,10 +15,10 @@ use flexaudio::{
     SourceKind, Stream, StreamConfig,
 };
 
-use crate::domain::audio::{SessionOrigin, INTERNAL_CHANNELS, INTERNAL_SAMPLE_RATE};
+use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_CHANNELS, INTERNAL_SAMPLE_RATE};
 use crate::services::ports::{CaptureError, CapturePort, CaptureStream, PerformanceCounter};
 
-use super::queue::{AudioBlock, CAPTURE_QUEUE_CAPACITY};
+use super::queue::CAPTURE_QUEUE_CAPACITY;
 use super::resampler::StereoResampler;
 
 /// Microphone capture through flexaudio (`SourceKind::Mic`).
@@ -329,8 +329,8 @@ impl Drop for FlexCaptureStream {
 
 #[cfg(test)]
 mod tests {
-    use super::{chunk_discontinuity, map_flex_error, map_timeline, AudioBlock};
-    use crate::domain::audio::{SessionOrigin, INTERNAL_SAMPLE_RATE};
+    use super::{chunk_discontinuity, map_flex_error, map_timeline};
+    use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_SAMPLE_RATE};
     use crate::infrastructure::audio::resampler::StereoResampler;
     use crate::services::ports::{CaptureError, PerformanceCounter};
     use flexaudio::{AudioChunk, ChunkFlags, Error, ErrorKind, Permission};

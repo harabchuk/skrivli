@@ -7,21 +7,20 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::common::error::AppError;
-use crate::domain::audio::{CivilTime, SessionOrigin, INTERNAL_SAMPLE_RATE};
+use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_SAMPLE_RATE};
 use crate::domain::ids::RecordingId;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::audio::mixer::Mixer;
-use crate::infrastructure::audio::queue::AudioBlock;
 use crate::infrastructure::files::rescue::rescue_partial;
-use crate::infrastructure::files::sidecar::{write_sidecar, Sidecar};
 use crate::infrastructure::files::wav::{WavWrite, WavWriter};
+use crate::infrastructure::files::writable::ensure_writable;
+use crate::infrastructure::storage::sidecar::{write_sidecar, Sidecar};
 
 use super::lease::EndpointLease;
 
@@ -64,14 +63,7 @@ pub(crate) const NOTICE_PARTIAL_KEPT: &str =
 pub(crate) const NOTICE_WORKER: &str = "Recording stopped because a capture worker failed.";
 pub(crate) const NOTICE_STALL: &str = "Audio capture appears stalled.";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RecordPhase {
-    Idle,
-    Starting,
-    Recording,
-    Stopping,
-    Error,
-}
+pub(crate) use crate::domain::recording::RecordPhase;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RecordSnapshot {
@@ -99,6 +91,94 @@ pub(crate) struct StartRequest {
     pub(crate) open_microphone: bool,
     /// Shown instead of the saved notice when a chosen device was substituted.
     pub(crate) degraded_notice: Option<&'static str>,
+}
+
+/// Outcome of turning settings and a device catalog into a start request.
+pub(crate) enum StartRequestBuild {
+    Ready(StartRequest),
+    Refused { notice: &'static str },
+}
+
+/// Resolve microphone and system endpoints through the domain picker.
+pub(crate) fn build_start_request(
+    directory: PathBuf,
+    microphone: &crate::infrastructure::storage::settings::StoredEndpoint,
+    system_audio: &crate::infrastructure::storage::settings::StoredEndpoint,
+    catalog: &crate::infrastructure::audio::devices::DeviceCatalog,
+) -> StartRequestBuild {
+    use crate::domain::audio::{resolve_endpoint, EndpointChoice, EndpointFlow};
+
+    let mic_choice = EndpointChoice::from(microphone);
+    let system_choice = EndpointChoice::from(system_audio);
+    let mic = resolve_endpoint(
+        &mic_choice,
+        EndpointFlow::Capture,
+        &catalog.capture,
+        catalog.default_capture.as_ref(),
+    );
+    let system = resolve_endpoint(
+        &system_choice,
+        EndpointFlow::Render,
+        &catalog.render,
+        catalog.default_render.as_ref(),
+    );
+
+    let (open_microphone, endpoint_id, microphone_id, mut notice) = match mic {
+        Ok(resolved) => {
+            tracing::debug!(endpoint = resolved.name(), "microphone resolved");
+            let id = resolved.id().as_str().to_string();
+            let label = if id.is_empty() {
+                "default".to_string()
+            } else {
+                id.clone()
+            };
+            let notice = resolved.fell_back().then_some(NOTICE_FALLBACK);
+            (true, id, label, notice)
+        }
+        Err(_) => (
+            false,
+            String::new(),
+            "unavailable".to_string(),
+            Some(NOTICE_MIC_MISSING),
+        ),
+    };
+    let (system_endpoint_id, system_audio_id) = match system {
+        Ok(resolved) => {
+            tracing::debug!(endpoint = resolved.name(), "system audio resolved");
+            if resolved.fell_back() && notice.is_none() {
+                notice = Some(NOTICE_SYSTEM_FALLBACK);
+            }
+            let id = resolved.id().as_str().to_string();
+            let label = if id.is_empty() {
+                "default".to_string()
+            } else {
+                id.clone()
+            };
+            (Some(id), label)
+        }
+        Err(_) => {
+            if notice.is_none() || !open_microphone {
+                notice = Some(if open_microphone {
+                    NOTICE_SYSTEM_MISSING
+                } else {
+                    NOTICE_MIC
+                });
+            }
+            (None, "unavailable".to_string())
+        }
+    };
+    if !open_microphone && system_endpoint_id.is_none() {
+        return StartRequestBuild::Refused { notice: NOTICE_MIC };
+    }
+    StartRequestBuild::Ready(StartRequest {
+        directory,
+        endpoint_id,
+        microphone_id,
+        system_endpoint_id,
+        system_audio_id,
+        open_microphone,
+        degraded_notice: notice,
+    })
 }
 
 pub(crate) struct RecordingEngine {
@@ -873,485 +953,6 @@ fn note(problems: &mut Vec<String>, code: &str) {
     problems.push(code.to_string());
 }
 
-pub(crate) fn ensure_writable(directory: &Path) -> Result<(), AppError> {
-    std::fs::create_dir_all(directory)
-        .map_err(|source| AppError::io("recordings folder", source))?;
-    let probe = directory.join(".skrivli-write-probe");
-    std::fs::write(&probe, b"ok").map_err(|source| AppError::io("recordings folder", source))?;
-    let _ = std::fs::remove_file(&probe);
-    Ok(())
-}
-
-/// Shared fake capture. `open` takes the queued blocks and a stand-in thread
-/// that `close` joins, so a failed start cannot leak that thread.
-#[derive(Clone)]
-struct SharedCapture {
-    inner: Arc<Mutex<FakeState>>,
-    live: Arc<AtomicUsize>,
-}
-
-struct FakeState {
-    error: Option<CaptureError>,
-    blocks: std::collections::VecDeque<AudioBlock>,
-    overruns: u64,
-    /// When set, `pull` keeps producing blocks after the queued ones so stop
-    /// must close the stream instead of waiting for silence.
-    live: Option<(usize, f32)>,
-    pull_error: Option<CaptureError>,
-    panic_on_pull: bool,
-    silent: bool,
-}
-
-struct FakeStream {
-    shared: Arc<Mutex<FakeState>>,
-    blocks: std::collections::VecDeque<AudioBlock>,
-    live: Option<(usize, f32)>,
-    next_frame: u64,
-    stop: Arc<AtomicBool>,
-    worker: Option<JoinHandle<()>>,
-    overruns: u64,
-}
-
-impl CapturePort for SharedCapture {
-    fn open(
-        &mut self,
-        _endpoint_id: &str,
-        _origin: SessionOrigin,
-        _drift_error: Arc<AtomicI64>,
-    ) -> Result<Box<dyn CaptureStream>, CaptureError> {
-        let mut state = lock_fake(&self.inner);
-        if let Some(error) = state.error.take() {
-            return Err(error);
-        }
-        let blocks = std::mem::take(&mut state.blocks);
-        let live_tone = state.live;
-        let overruns = state.overruns;
-        drop(state);
-        let stop = Arc::new(AtomicBool::new(false));
-        let live = Arc::clone(&self.live);
-        live.fetch_add(1, Ordering::AcqRel);
-        let stop_thread = Arc::clone(&stop);
-        let worker = thread::spawn(move || {
-            while !stop_thread.load(Ordering::Acquire) {
-                thread::sleep(Duration::from_millis(5));
-            }
-            live.fetch_sub(1, Ordering::AcqRel);
-        });
-        Ok(Box::new(FakeStream {
-            shared: Arc::clone(&self.inner),
-            blocks,
-            live: live_tone,
-            next_frame: 0,
-            stop,
-            worker: Some(worker),
-            overruns,
-        }))
-    }
-}
-
-impl CaptureStream for FakeStream {
-    fn pull(&mut self) -> Result<Option<AudioBlock>, CaptureError> {
-        if self.worker.is_none() {
-            return Ok(None);
-        }
-        {
-            let mut state = lock_fake(&self.shared);
-            if state.panic_on_pull {
-                state.panic_on_pull = false;
-                drop(state);
-                panic!("injected capture worker panic");
-            }
-            if let Some(error) = state.pull_error.take() {
-                return Err(error);
-            }
-            if state.silent {
-                return Ok(None);
-            }
-            if self.live.is_none() {
-                self.live = state.live;
-            }
-            while let Some(block) = state.blocks.pop_front() {
-                self.blocks.push_back(block);
-            }
-        }
-        if let Some(block) = self.blocks.pop_front() {
-            return Ok(Some(block));
-        }
-        let Some((frames, sample)) = self.live else {
-            return Ok(None);
-        };
-        let mut samples = Vec::with_capacity(frames.saturating_mul(2));
-        for _ in 0..frames {
-            samples.push(sample);
-            samples.push(sample);
-        }
-        let timeline_frame = Some(self.next_frame);
-        self.next_frame = self.next_frame.saturating_add(frames as u64);
-        Ok(Some(AudioBlock {
-            samples,
-            timeline_frame,
-            discontinuity: false,
-        }))
-    }
-
-    fn close(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-
-    fn overruns(&self) -> u64 {
-        self.overruns
-    }
-}
-
-impl Drop for FakeStream {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
-
-struct SharedClock {
-    unix_ms: u64,
-    local: CivilTime,
-}
-
-impl RecordingClock for SharedClock {
-    fn unix_millis(&self) -> u64 {
-        self.unix_ms
-    }
-
-    fn local(&self) -> CivilTime {
-        self.local
-    }
-}
-
-struct SharedSpace {
-    bytes: Arc<AtomicU64>,
-}
-
-impl FreeSpace for SharedSpace {
-    fn available_bytes(&self, _directory: &Path) -> Result<u64, AppError> {
-        Ok(self.bytes.load(Ordering::Acquire))
-    }
-}
-
-fn lock_fake(mutex: &Mutex<FakeState>) -> std::sync::MutexGuard<'_, FakeState> {
-    mutex.lock().unwrap_or_else(|poison| poison.into_inner())
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecordingHarnessPhase {
-    Idle,
-    Starting,
-    Recording,
-    Stopping,
-    Error,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HarnessNotice {
-    pub phase: RecordingHarnessPhase,
-    pub notice: Option<&'static str>,
-}
-
-pub struct RecordingHarness {
-    host: RecordingHost,
-    join: Option<JoinHandle<()>>,
-    capture: SharedCapture,
-    system: SharedCapture,
-    space: Arc<AtomicU64>,
-    write_fault: Arc<AtomicBool>,
-    folder_fault: Arc<AtomicBool>,
-    events: Receiver<RecordSnapshot>,
-    directory: PathBuf,
-    rescue_dir: PathBuf,
-}
-
-impl RecordingHarness {
-    pub fn new(directory: &Path) -> Self {
-        let rescue_dir = directory.join("rescue");
-        let _ = std::fs::create_dir_all(&rescue_dir);
-        let capture = SharedCapture {
-            inner: Arc::new(Mutex::new(FakeState {
-                error: None,
-                blocks: std::collections::VecDeque::new(),
-                overruns: 0,
-                live: None,
-                pull_error: None,
-                panic_on_pull: false,
-                silent: false,
-            })),
-            live: Arc::new(AtomicUsize::new(0)),
-        };
-        let system = SharedCapture {
-            inner: Arc::new(Mutex::new(FakeState {
-                error: None,
-                blocks: std::collections::VecDeque::new(),
-                overruns: 0,
-                live: None,
-                pull_error: None,
-                panic_on_pull: false,
-                silent: false,
-            })),
-            live: Arc::new(AtomicUsize::new(0)),
-        };
-        let space = Arc::new(AtomicU64::new(u64::MAX));
-        let write_fault = Arc::new(AtomicBool::new(false));
-        let folder_fault = Arc::new(AtomicBool::new(false));
-        let device_wake = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = mpsc::channel();
-        let (host, join) = spawn_recording_host(
-            RecordingEngine {
-                mic: Box::new(capture.clone()),
-                system: Box::new(system.clone()),
-                clock: Box::new(SharedClock {
-                    unix_ms: 1_700_000_000_000,
-                    local: CivilTime {
-                        year: 2026,
-                        month: 11,
-                        day: 4,
-                        hour: 13,
-                        minute: 5,
-                        second: 6,
-                    },
-                }),
-                space: Box::new(SharedSpace {
-                    bytes: Arc::clone(&space),
-                }),
-                performance: Box::new(FixedCounter),
-                levels: Arc::new(LevelSnapshot::new()),
-                gain: Arc::new(GainControl::new(1.0, false)),
-                lease: Arc::new(EndpointLease::new()),
-                rescue_dir: rescue_dir.clone(),
-                space_check_every: Duration::ZERO,
-                write_fault: Arc::clone(&write_fault),
-                folder_fault: Arc::clone(&folder_fault),
-                device_wake,
-                stall_after: Duration::from_millis(80),
-            },
-            Box::new(move |snapshot| {
-                let _ = tx.send(snapshot);
-            }),
-            Arc::new(AtomicBool::new(false)),
-        );
-        Self {
-            host,
-            join: Some(join),
-            capture,
-            system,
-            space,
-            write_fault,
-            folder_fault,
-            events: rx,
-            directory: directory.to_path_buf(),
-            rescue_dir,
-        }
-    }
-
-    pub fn set_free_bytes(&self, bytes: u64) {
-        self.space.store(bytes, Ordering::Release);
-    }
-
-    pub fn inject_write_fault(&self) {
-        self.write_fault.store(true, Ordering::Release);
-    }
-
-    pub fn inject_folder_fault(&self) {
-        self.folder_fault.store(true, Ordering::Release);
-    }
-
-    pub fn signal_devices_changed(&self) {
-        self.host.devices_changed();
-    }
-
-    pub fn fail_open(&self, privacy_denied: bool) {
-        let mut state = lock_fake(&self.capture.inner);
-        state.error = Some(if privacy_denied {
-            CaptureError::PrivacyDenied
-        } else {
-            CaptureError::Unavailable
-        });
-    }
-
-    pub fn push_frames(&self, frames: usize, sample: f32) {
-        push_into(&self.capture, frames, sample);
-    }
-
-    pub fn push_system_frames(&self, frames: usize, sample: f32) {
-        push_into(&self.system, frames, sample);
-    }
-
-    pub fn stream_mic(&self, frames: usize, sample: f32) {
-        let mut state = lock_fake(&self.capture.inner);
-        state.live = Some((frames, sample));
-    }
-
-    pub fn stream_system(&self, frames: usize, sample: f32) {
-        let mut state = lock_fake(&self.system.inner);
-        state.live = Some((frames, sample));
-    }
-
-    pub fn fail_system(&self) {
-        let mut state = lock_fake(&self.system.inner);
-        state.error = Some(CaptureError::Unavailable);
-    }
-
-    pub fn fail_mic_pull(&self) {
-        let mut state = lock_fake(&self.capture.inner);
-        state.pull_error = Some(CaptureError::Unavailable);
-    }
-
-    pub fn fail_next_mic_open(&self) {
-        let mut state = lock_fake(&self.capture.inner);
-        state.error = Some(CaptureError::Unavailable);
-    }
-
-    pub fn panic_mic_pull(&self) {
-        let mut state = lock_fake(&self.capture.inner);
-        state.panic_on_pull = true;
-    }
-
-    pub fn silent_mic(&self) {
-        let mut state = lock_fake(&self.capture.inner);
-        state.silent = true;
-        state.live = None;
-    }
-
-    pub fn set_overruns(&self, count: u64) {
-        let mut state = lock_fake(&self.capture.inner);
-        state.overruns = count;
-    }
-
-    pub fn start_default(&self) {
-        self.host.start(StartRequest {
-            directory: self.directory.clone(),
-            endpoint_id: String::new(),
-            microphone_id: "default".to_string(),
-            system_endpoint_id: Some(String::new()),
-            system_audio_id: "system".to_string(),
-            open_microphone: true,
-            degraded_notice: None,
-        });
-    }
-
-    pub fn stop(&self) {
-        self.host.stop();
-    }
-
-    pub fn workers(&self) -> usize {
-        self.host.workers()
-    }
-
-    pub fn capture_threads(&self) -> usize {
-        self.capture
-            .live
-            .load(Ordering::Acquire)
-            .saturating_add(self.system.live.load(Ordering::Acquire))
-    }
-
-    pub fn directory(&self) -> &Path {
-        &self.directory
-    }
-
-    pub fn rescue_dir(&self) -> &Path {
-        &self.rescue_dir
-    }
-
-    pub fn wait_phase(&self, phase: RecordingHarnessPhase) -> Result<HarnessNotice, &'static str> {
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err("timed out waiting for recording state");
-            }
-            match self.events.recv_timeout(remaining) {
-                Ok(snapshot) if map_phase(snapshot.phase) == phase => {
-                    return Ok(HarnessNotice {
-                        phase,
-                        notice: snapshot.notice,
-                    });
-                }
-                Ok(_) => {}
-                Err(RecvTimeoutError::Timeout) => {
-                    return Err("timed out waiting for recording state");
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err("recording host stopped");
-                }
-            }
-        }
-    }
-
-    pub fn wait_notice_contains(&self, text: &str) -> Result<HarnessNotice, &'static str> {
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err("timed out waiting for notice");
-            }
-            match self.events.recv_timeout(remaining) {
-                Ok(snapshot) => {
-                    if snapshot.notice.is_some_and(|notice| notice.contains(text)) {
-                        return Ok(HarnessNotice {
-                            phase: map_phase(snapshot.phase),
-                            notice: snapshot.notice,
-                        });
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    return Err("timed out waiting for notice");
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err("recording host stopped");
-                }
-            }
-        }
-    }
-}
-
-impl Drop for RecordingHarness {
-    fn drop(&mut self) {
-        self.host.shutdown();
-        if let Some(handle) = self.join.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
-fn push_into(port: &SharedCapture, frames: usize, sample: f32) {
-    let mut samples = Vec::with_capacity(frames.saturating_mul(2));
-    for _ in 0..frames {
-        samples.push(sample);
-        samples.push(sample);
-    }
-    let mut state = lock_fake(&port.inner);
-    state.blocks.push_back(AudioBlock {
-        samples,
-        timeline_frame: None,
-        discontinuity: false,
-    });
-}
-
-struct FixedCounter;
-
-impl PerformanceCounter for FixedCounter {
-    fn sample(&self) -> (u64, u64) {
-        (0, 48_000)
-    }
-}
-
-fn map_phase(phase: RecordPhase) -> RecordingHarnessPhase {
-    match phase {
-        RecordPhase::Idle => RecordingHarnessPhase::Idle,
-        RecordPhase::Starting => RecordingHarnessPhase::Starting,
-        RecordPhase::Recording => RecordingHarnessPhase::Recording,
-        RecordPhase::Stopping => RecordingHarnessPhase::Stopping,
-        RecordPhase::Error => RecordingHarnessPhase::Error,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicBool, AtomicI64};
@@ -1359,11 +960,11 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        capture_notice, ensure_writable, run_session, CaptureError, FreeSpace, RecordPhase,
-        RecordingClock, StartRequest, NOTICE_DISK,
+        capture_notice, run_session, CaptureError, FreeSpace, RecordPhase, RecordingClock,
+        StartRequest, NOTICE_DISK,
     };
-    use crate::domain::audio::CivilTime;
-    use crate::infrastructure::audio::queue::AudioBlock;
+    use crate::domain::audio::AudioBlock;
+    use crate::infrastructure::files::writable::ensure_writable;
 
     struct OneShot {
         block: Option<AudioBlock>,
@@ -1413,8 +1014,16 @@ mod tests {
             50
         }
 
-        fn local(&self) -> CivilTime {
-            CivilTime::new(2026, 1, 2, 3, 4, 5).expect("time")
+        fn local(&self) -> crate::domain::audio::CivilTime {
+            crate::domain::audio::CivilTime::new(2026, 1, 2, 3, 4, 5).expect("time")
+        }
+    }
+
+    struct FixedCounter;
+
+    impl super::PerformanceCounter for FixedCounter {
+        fn sample(&self) -> (u64, u64) {
+            (0, 48_000)
         }
     }
 
@@ -1460,7 +1069,7 @@ mod tests {
             system: Box::new(system),
             clock: Box::new(Clock),
             space: Box::new(Space(1024)),
-            performance: Box::new(super::FixedCounter),
+            performance: Box::new(FixedCounter),
             levels: std::sync::Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
             gain: std::sync::Arc::new(crate::infrastructure::audio::levels::GainControl::new(
                 1.0, false,
@@ -1485,5 +1094,172 @@ mod tests {
         assert!(capture_notice(CaptureError::PrivacyDenied).contains("privacy"));
         assert!(ensure_writable(&dir).is_ok());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn capture(id: &str) -> crate::domain::audio::EndpointDescriptor {
+        crate::domain::audio::EndpointDescriptor::new(
+            crate::domain::audio::EndpointId::new(id).expect("id"),
+            id,
+            crate::domain::audio::EndpointFlow::Capture,
+            crate::domain::audio::EndpointAvailability::Active,
+        )
+    }
+
+    fn render(id: &str) -> crate::domain::audio::EndpointDescriptor {
+        crate::domain::audio::EndpointDescriptor::new(
+            crate::domain::audio::EndpointId::new(id).expect("id"),
+            id,
+            crate::domain::audio::EndpointFlow::Render,
+            crate::domain::audio::EndpointAvailability::Active,
+        )
+    }
+
+    fn catalog_with(
+        capture: Vec<crate::domain::audio::EndpointDescriptor>,
+        render: Vec<crate::domain::audio::EndpointDescriptor>,
+        default_capture: Option<&str>,
+        default_render: Option<&str>,
+    ) -> crate::infrastructure::audio::devices::DeviceCatalog {
+        crate::infrastructure::audio::devices::DeviceCatalog {
+            capture,
+            render,
+            default_capture: default_capture
+                .map(|id| crate::domain::audio::EndpointId::new(id).expect("id")),
+            default_render: default_render
+                .map(|id| crate::domain::audio::EndpointId::new(id).expect("id")),
+        }
+    }
+
+    #[test]
+    fn start_request_uses_defaults_without_fallback_notice() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(
+            vec![capture("mic-a")],
+            vec![render("spk-a")],
+            Some("mic-a"),
+            Some("spk-a"),
+        );
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::Default,
+            &StoredEndpoint::Default,
+            &catalog,
+        );
+
+        // Assert
+        let StartRequestBuild::Ready(request) = built else {
+            panic!("expected ready");
+        };
+        assert!(request.open_microphone);
+        assert_eq!(request.endpoint_id, "mic-a");
+        assert_eq!(request.system_endpoint_id.as_deref(), Some("spk-a"));
+        assert_eq!(request.degraded_notice, None);
+    }
+
+    #[test]
+    fn start_request_reports_mic_fallback_when_explicit_is_missing() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild, NOTICE_FALLBACK};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(
+            vec![capture("mic-a")],
+            vec![render("spk-a")],
+            Some("mic-a"),
+            Some("spk-a"),
+        );
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::explicit("gone"),
+            &StoredEndpoint::Default,
+            &catalog,
+        );
+
+        // Assert
+        let StartRequestBuild::Ready(request) = built else {
+            panic!("expected ready");
+        };
+        assert_eq!(request.endpoint_id, "mic-a");
+        assert_eq!(request.degraded_notice, Some(NOTICE_FALLBACK));
+    }
+
+    #[test]
+    fn start_request_default_falls_through_to_first_active_device() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild, NOTICE_FALLBACK};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(vec![capture("mic-a")], vec![render("spk-a")], None, None);
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::Default,
+            &StoredEndpoint::Default,
+            &catalog,
+        );
+
+        // Assert
+        let StartRequestBuild::Ready(request) = built else {
+            panic!("expected ready");
+        };
+        assert_eq!(request.endpoint_id, "mic-a");
+        assert_eq!(request.system_endpoint_id.as_deref(), Some("spk-a"));
+        assert_eq!(request.degraded_notice, Some(NOTICE_FALLBACK));
+    }
+
+    #[test]
+    fn start_request_continues_with_system_when_mic_is_missing() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild, NOTICE_MIC_MISSING};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(Vec::new(), vec![render("spk-a")], None, Some("spk-a"));
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::Default,
+            &StoredEndpoint::Default,
+            &catalog,
+        );
+
+        // Assert
+        let StartRequestBuild::Ready(request) = built else {
+            panic!("expected ready");
+        };
+        assert!(!request.open_microphone);
+        assert_eq!(request.system_endpoint_id.as_deref(), Some("spk-a"));
+        assert_eq!(request.degraded_notice, Some(NOTICE_MIC_MISSING));
+    }
+
+    #[test]
+    fn start_request_refuses_when_both_sources_are_missing() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild, NOTICE_MIC};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(Vec::new(), Vec::new(), None, None);
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::Default,
+            &StoredEndpoint::Default,
+            &catalog,
+        );
+
+        // Assert
+        match built {
+            StartRequestBuild::Refused { notice } => assert_eq!(notice, NOTICE_MIC),
+            StartRequestBuild::Ready(_) => panic!("expected refuse"),
+        }
     }
 }

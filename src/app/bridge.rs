@@ -5,7 +5,7 @@ use std::sync::mpsc::Sender;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use super::actions::BridgeMessage;
+use crate::views::actions::BridgeMessage;
 
 pub(crate) const SHELL_PULSE_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -47,7 +47,7 @@ mod tests {
     use std::time::Duration;
 
     use super::spawn_shell_producer;
-    use crate::app::actions::BridgeMessage;
+    use crate::views::actions::BridgeMessage;
 
     #[test]
     fn producer_emits_a_pulse_then_stops() {

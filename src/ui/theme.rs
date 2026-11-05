@@ -7,7 +7,7 @@
 use gpui_kit::component::{Icon, IconName, Theme, ThemeMode};
 use gpui_kit::{App, Window};
 
-use crate::infrastructure::storage::settings::ThemePreference;
+use crate::domain::theme::ThemePreference;
 
 pub(crate) fn theme_icon(preference: ThemePreference) -> Icon {
     match preference {

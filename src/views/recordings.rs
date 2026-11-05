@@ -15,8 +15,8 @@ use gpui_kit::{
 
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::{format_duration_ms, format_size, RecordingInfo, SidecarState};
-use crate::infrastructure::files::player::PlayerPhase;
 use crate::infrastructure::storage::library::LibraryCatalog;
+use crate::services::playback::PlayerPhase;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RecordingRow {

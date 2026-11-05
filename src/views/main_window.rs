@@ -16,31 +16,28 @@ use gpui_kit::{
     Styled, Subscription, Task, Window,
 };
 
-use crate::app::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
-use crate::app::settings_writer::SettingsWriter;
-use crate::app::shutdown::ShutdownController;
-use crate::app::state::{AppTab, Presentation, RecordPhase};
-use crate::domain::audio::{
-    format_elapsed, resolve_endpoint, EndpointChoice, EndpointFlow, EndpointId,
-};
+use crate::domain::audio::format_elapsed;
 use crate::domain::gain::{db_fs, format_gain};
 use crate::domain::ids::RecordingId;
+use crate::domain::recording::RecordPhase;
+use crate::domain::theme::ThemePreference;
 use crate::domain::window_frame::LogicalRect;
 use crate::infrastructure::audio::devices::DeviceCatalog;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-use crate::infrastructure::files::player::{PlayerHost, PlayerPhase, PlayerSnapshot};
 use crate::infrastructure::storage::library::LibraryCatalog;
-use crate::infrastructure::storage::settings::{
-    Settings, StoredEndpoint, StoredWindowBounds, ThemePreference,
-};
+use crate::infrastructure::storage::settings::{Settings, StoredEndpoint, StoredWindowBounds};
 use crate::services::level_monitor::MonitorTargets;
 use crate::services::library::{LibraryHost, LibrarySnapshot};
+use crate::services::playback::{PlayerHost, PlayerPhase, PlayerSnapshot};
 use crate::services::ports::DesktopShell;
 use crate::services::recording::{
-    RecordPhase as ServicePhase, RecordSnapshot, RecordingHost, StartRequest, NOTICE_FALLBACK,
-    NOTICE_MIC, NOTICE_MIC_MISSING, NOTICE_SYSTEM_FALLBACK, NOTICE_SYSTEM_MISSING,
+    build_start_request, RecordSnapshot, RecordingHost, StartRequestBuild, NOTICE_FALLBACK,
+    NOTICE_SYSTEM_FALLBACK,
 };
 use crate::ui::theme::{apply_theme, theme_icon};
+use crate::views::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
+use crate::views::hooks::ShellHooks;
+use crate::views::state::{AppTab, Presentation};
 
 use super::recording::record_tab;
 use super::recordings::{
@@ -57,9 +54,8 @@ pub(crate) struct MainWindow {
     focus: FocusHandle,
     presentation: Presentation,
     settings: Settings,
-    writer: SettingsWriter,
+    hooks: ShellHooks,
     commands: Receiver<BridgeMessage>,
-    shutdown: ShutdownController,
     shell: Arc<dyn DesktopShell>,
     recording: RecordingHost,
     library: LibraryHost,
@@ -99,9 +95,8 @@ impl MainWindow {
     pub(crate) fn new(
         presentation: Presentation,
         settings: Settings,
-        writer: SettingsWriter,
+        hooks: ShellHooks,
         commands: Receiver<BridgeMessage>,
-        shutdown: ShutdownController,
         shell: Arc<dyn DesktopShell>,
         recording: RecordingHost,
         library: LibraryHost,
@@ -194,7 +189,7 @@ impl MainWindow {
         let meters = cx.spawn_in(window, async move |this, async_cx| loop {
             meter_executor.timer(Duration::from_millis(33)).await;
             let step = this.update_in(async_cx, |view, _window, cx| {
-                if view.shutdown.is_requested() {
+                if view.hooks.exit_requested() {
                     return false;
                 }
                 if view.sample_meters() {
@@ -230,9 +225,8 @@ impl MainWindow {
             focus,
             presentation,
             settings,
-            writer,
+            hooks,
             commands,
-            shutdown,
             shell,
             recording,
             library,
@@ -279,7 +273,7 @@ impl MainWindow {
     pub(crate) fn set_close_to_tray(&mut self, close_to_tray: bool, cx: &mut Context<Self>) {
         self.settings.set_close_to_tray(close_to_tray);
         self.presentation.set_close_to_tray(close_to_tray);
-        self.writer.save(self.settings.clone());
+        self.hooks.save_settings(self.settings.clone());
         cx.notify();
     }
 
@@ -290,7 +284,7 @@ impl MainWindow {
         );
         let next = self.settings.theme().next(system_is_dark);
         self.settings.set_theme(next);
-        self.writer.save(self.settings.clone());
+        self.hooks.save_settings(self.settings.clone());
         apply_theme(next, Some(window), cx);
         cx.notify();
     }
@@ -304,7 +298,7 @@ impl MainWindow {
         if let AppCommand::SelectMicrophone(choice) = command {
             if !self.presentation.inputs_locked() {
                 self.settings.set_microphone(choice);
-                self.writer.save(self.settings.clone());
+                self.hooks.save_settings(self.settings.clone());
                 self.publish_targets();
             }
             cx.notify();
@@ -313,7 +307,7 @@ impl MainWindow {
         if let AppCommand::SelectSystem(choice) = command {
             if !self.presentation.inputs_locked() {
                 self.settings.set_system_audio(choice);
-                self.writer.save(self.settings.clone());
+                self.hooks.save_settings(self.settings.clone());
                 self.publish_targets();
             }
             cx.notify();
@@ -330,14 +324,14 @@ impl MainWindow {
             self.perform(effect, window, cx);
             false
         } else {
-            self.writer.save(self.settings.clone());
-            self.shutdown.request();
+            self.hooks.save_settings(self.settings.clone());
+            self.hooks.request_exit();
             true
         }
     }
 
     fn on_tick(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.shutdown.is_requested() {
+        if self.hooks.exit_requested() {
             return false;
         }
         let batch = drain_bridge(&self.commands, &mut self.presentation);
@@ -380,7 +374,7 @@ impl MainWindow {
         if changed {
             cx.notify();
         }
-        !self.shutdown.is_requested()
+        !self.hooks.exit_requested()
     }
 
     fn perform(&mut self, effect: Effect, window: &mut Window, cx: &mut Context<Self>) {
@@ -392,7 +386,7 @@ impl MainWindow {
                 let _ = self.shell.set_window_visible(false);
                 if explain {
                     self.settings.set_tray_explanation_seen(true);
-                    self.writer.save(self.settings.clone());
+                    self.hooks.save_settings(self.settings.clone());
                     open_tray_explanation(window, cx);
                 }
             }
@@ -482,7 +476,7 @@ impl MainWindow {
             return;
         };
         self.settings.set_window_bounds(Some(stored));
-        self.writer.save(self.settings.clone());
+        self.hooks.save_settings(self.settings.clone());
         self.last_saved = Some(rect);
         self.pending_bounds = None;
     }
@@ -521,14 +515,14 @@ impl MainWindow {
     fn set_slider_gain(&mut self, gain: f32, cx: &mut Context<Self>) {
         self.gain_control.set_slider(gain);
         self.settings.set_mic_gain(self.gain_control.slider());
-        self.writer.save(self.settings.clone());
+        self.hooks.save_settings(self.settings.clone());
         cx.notify();
     }
 
     fn set_agc(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.gain_control.set_agc_enabled(enabled);
         self.settings.set_agc_enabled(enabled);
-        self.writer.save(self.settings.clone());
+        self.hooks.save_settings(self.settings.clone());
         cx.notify();
     }
 
@@ -547,18 +541,10 @@ impl MainWindow {
     }
 
     fn apply_snapshot(&mut self, snapshot: RecordSnapshot, window: &mut Window) {
-        let phase = match snapshot.phase {
-            ServicePhase::Idle => RecordPhase::Idle,
-            ServicePhase::Starting => RecordPhase::Starting,
-            ServicePhase::Recording => {
-                if self.started.is_none() {
-                    self.started = Some(Instant::now());
-                }
-                RecordPhase::Recording
-            }
-            ServicePhase::Stopping => RecordPhase::Stopping,
-            ServicePhase::Error => RecordPhase::Error,
-        };
+        let phase = snapshot.phase;
+        if phase == RecordPhase::Recording && self.started.is_none() {
+            self.started = Some(Instant::now());
+        }
         let became_idle = matches!(phase, RecordPhase::Idle | RecordPhase::Error)
             && self.presentation.record_phase() != phase;
         if matches!(phase, RecordPhase::Idle | RecordPhase::Error) {
@@ -699,7 +685,7 @@ impl MainWindow {
         if selected == 0 && !matches!(self.settings.microphone(), StoredEndpoint::Default) {
             self.presentation.set_notice(Some(NOTICE_FALLBACK));
             self.settings.set_microphone(StoredEndpoint::Default);
-            self.writer.save(self.settings.clone());
+            self.hooks.save_settings(self.settings.clone());
         }
         self.install_mics(labels, choices, selected, window, cx);
         let mut system_labels = vec![SharedString::from("Default output device")];
@@ -726,7 +712,7 @@ impl MainWindow {
         {
             self.presentation.set_notice(Some(NOTICE_SYSTEM_FALLBACK));
             self.settings.set_system_audio(StoredEndpoint::Default);
-            self.writer.save(self.settings.clone());
+            self.hooks.save_settings(self.settings.clone());
         }
         self.install_system(system_labels, system_choices, system_selected, window, cx);
         self.publish_targets();
@@ -793,79 +779,24 @@ impl MainWindow {
     }
 
     fn begin_recording(&mut self) {
-        let mic = resolve_choice(
+        match build_start_request(
+            self.settings.recordings_directory().to_path_buf(),
             self.settings.microphone(),
-            EndpointFlow::Capture,
-            &self.catalog.capture,
-            self.catalog.default_capture.as_ref(),
-        );
-        let system = resolve_choice(
             self.settings.system_audio(),
-            EndpointFlow::Render,
-            &self.catalog.render,
-            self.catalog.default_render.as_ref(),
-        );
-        let (open_microphone, endpoint_id, microphone_id, mut notice) = match mic {
-            Ok(resolved) => {
-                let id = resolved.id;
-                let label = if id.is_empty() {
-                    "default".to_string()
-                } else {
-                    id.clone()
-                };
-                let notice = resolved.fell_back.then_some(NOTICE_FALLBACK);
-                (true, id, label, notice)
+            &self.catalog,
+        ) {
+            StartRequestBuild::Ready(request) => self.recording.start(request),
+            StartRequestBuild::Refused { notice } => {
+                self.presentation.set_notice(Some(notice));
             }
-            Err(()) => (
-                false,
-                String::new(),
-                "unavailable".to_string(),
-                Some(NOTICE_MIC_MISSING),
-            ),
-        };
-        let (system_endpoint_id, system_audio_id) = match system {
-            Ok(resolved) => {
-                if resolved.fell_back && notice.is_none() {
-                    notice = Some(NOTICE_SYSTEM_FALLBACK);
-                }
-                let label = if resolved.id.is_empty() {
-                    "default".to_string()
-                } else {
-                    resolved.id.clone()
-                };
-                (Some(resolved.id), label)
-            }
-            Err(()) => {
-                if notice.is_none() || !open_microphone {
-                    notice = Some(if open_microphone {
-                        NOTICE_SYSTEM_MISSING
-                    } else {
-                        NOTICE_MIC
-                    });
-                }
-                (None, "unavailable".to_string())
-            }
-        };
-        if !open_microphone && system_endpoint_id.is_none() {
-            self.presentation.set_notice(Some(NOTICE_MIC));
-            return;
         }
-        self.recording.start(StartRequest {
-            directory: self.settings.recordings_directory().to_path_buf(),
-            endpoint_id,
-            microphone_id,
-            system_endpoint_id,
-            system_audio_id,
-            open_microphone,
-            degraded_notice: notice,
-        });
     }
 
     fn browse_folder(&mut self) {
         match self.shell.pick_recordings_folder() {
             Ok(Some(path)) => {
                 if self.settings.set_recordings_directory(path.clone()).is_ok() {
-                    self.writer.save(self.settings.clone());
+                    self.hooks.save_settings(self.settings.clone());
                     self.library.set_directory(path);
                     self.player.stop();
                     self.presentation.set_notice(None);
@@ -881,53 +812,14 @@ impl MainWindow {
 
     fn quit_now(&mut self, window: &mut Window) {
         self.flush_bounds(window);
-        self.writer.save(self.settings.clone());
-        self.shutdown.request();
+        self.hooks.save_settings(self.settings.clone());
+        self.hooks.request_exit();
         window.remove_window();
     }
 }
 
 fn apply(state: &mut Presentation, command: AppCommand) -> Effect {
-    crate::app::actions::apply_command(state, command)
-}
-
-struct ResolvedChoice {
-    id: String,
-    fell_back: bool,
-}
-
-fn resolve_choice(
-    choice: &StoredEndpoint,
-    flow: EndpointFlow,
-    devices: &[crate::domain::audio::EndpointDescriptor],
-    default_id: Option<&EndpointId>,
-) -> Result<ResolvedChoice, ()> {
-    let endpoint_choice = match choice {
-        StoredEndpoint::Default => {
-            return Ok(ResolvedChoice {
-                id: default_id
-                    .map(|id| id.as_str().to_string())
-                    .unwrap_or_default(),
-                fell_back: false,
-            });
-        }
-        StoredEndpoint::Explicit(id) => {
-            let Some(endpoint) = EndpointId::new(id) else {
-                return Err(());
-            };
-            EndpointChoice::Explicit(endpoint)
-        }
-    };
-    match resolve_endpoint(&endpoint_choice, flow, devices, default_id) {
-        Ok(resolved) => {
-            tracing::debug!(endpoint = resolved.name(), "endpoint resolved");
-            Ok(ResolvedChoice {
-                id: resolved.id().as_str().to_string(),
-                fell_back: resolved.fell_back(),
-            })
-        }
-        Err(_) => Err(()),
-    }
+    crate::views::actions::apply_command(state, command)
 }
 
 fn endpoint_token(choice: &StoredEndpoint) -> String {

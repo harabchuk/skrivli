@@ -5,6 +5,16 @@
 
 use crate::domain::ids::RecordingId;
 
+/// Lifecycle phase shared by the recording service and the shell snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecordPhase {
+    Idle,
+    Starting,
+    Recording,
+    Stopping,
+    Error,
+}
+
 /// On-disk audio container the library can list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecordingContainer {

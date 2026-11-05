@@ -4,7 +4,7 @@ use gpui_kit::{AnyWindowHandle, App, Entity, Global, Subscription};
 
 use crate::views::main_window::MainWindow;
 
-use super::actions::AppCommand;
+use crate::views::actions::AppCommand;
 
 pub(crate) struct ShellGlobal {
     session: Entity<MainWindow>,

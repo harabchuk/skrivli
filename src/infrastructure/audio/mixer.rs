@@ -19,7 +19,7 @@ use crate::domain::chunk_plan::{
 use crate::domain::gain::{soft_limit, Agc, LIMIT_KNEE, SYSTEM_GAIN};
 
 use super::levels::{GainControl, LevelSnapshot};
-use super::queue::AudioBlock;
+use crate::domain::audio::AudioBlock;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct MixDiagnostics {
@@ -251,12 +251,12 @@ impl Mixer {
 #[cfg(test)]
 mod tests {
     use super::Mixer;
+    use crate::domain::audio::AudioBlock;
     use crate::domain::chunk_plan::{
         DRIFT_THRESHOLD_FRAMES, LATENCY_LIMIT_FRAMES, MIX_BLOCK_FRAMES,
     };
     use crate::domain::gain::{soft_limit, MIC_GAIN_DEFAULT, SYSTEM_GAIN};
     use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-    use crate::infrastructure::audio::queue::AudioBlock;
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
 

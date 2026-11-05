@@ -4,9 +4,9 @@ use std::sync::mpsc::Receiver;
 
 use crate::domain::ids::{JobId, RecordingId};
 use crate::infrastructure::audio::devices::DeviceCatalog;
-use crate::infrastructure::files::player::PlayerSnapshot;
 use crate::infrastructure::storage::settings::StoredEndpoint;
 use crate::services::library::LibrarySnapshot;
+use crate::services::playback::PlayerSnapshot;
 use crate::services::ports::HostCommand;
 use crate::services::recording::RecordSnapshot;
 
@@ -198,9 +198,10 @@ mod tests {
     use std::thread;
 
     use super::{apply_command, drain_bridge, AppCommand, BridgeMessage, Effect, NOT_AVAILABLE};
-    use crate::app::state::{AppTab, Presentation};
     use crate::domain::ids::{JobId, RecordingId};
+    use crate::domain::recording::RecordPhase;
     use crate::services::ports::HostCommand;
+    use crate::views::state::{AppTab, Presentation};
 
     fn presentation() -> Presentation {
         Presentation::new(true, false, true)
@@ -214,7 +215,7 @@ mod tests {
         // Act
         let start = apply_command(&mut state, AppCommand::StartRecording);
         let stop = apply_command(&mut state, AppCommand::StopRecording);
-        state.set_record_phase(crate::app::state::RecordPhase::Recording);
+        state.set_record_phase(RecordPhase::Recording);
         let ignored = apply_command(&mut state, AppCommand::StartRecording);
         let browse = apply_command(&mut state, AppCommand::BrowseRecordings);
         let transcribe = apply_command(
@@ -253,7 +254,7 @@ mod tests {
         let folder = apply_command(&mut state, AppCommand::OpenRecordingsFolder);
         let about = apply_command(&mut state, AppCommand::About);
         let exit = apply_command(&mut state, AppCommand::Exit);
-        state.set_record_phase(crate::app::state::RecordPhase::Recording);
+        state.set_record_phase(RecordPhase::Recording);
         let exit_while_recording = apply_command(&mut state, AppCommand::Exit);
         let session_ending = apply_command(&mut state, AppCommand::SessionEnding);
 

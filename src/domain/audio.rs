@@ -10,6 +10,15 @@ pub(crate) const INTERNAL_SAMPLE_RATE: u32 = 48_000;
 /// Internal channel count. Mono sources are duplicated onto both channels.
 pub(crate) const INTERNAL_CHANNELS: u16 = 2;
 
+/// One capture packet on the session timeline.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AudioBlock {
+    pub(crate) samples: Vec<f32>,
+    /// First output frame on the session timeline. `None` appends.
+    pub(crate) timeline_frame: Option<u64>,
+    pub(crate) discontinuity: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) enum SampleEncoding {

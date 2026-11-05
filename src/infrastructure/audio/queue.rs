@@ -15,17 +15,11 @@
 
 use std::sync::mpsc::{SyncSender, TrySendError};
 
+use crate::domain::audio::AudioBlock;
+
 /// About 64 packets. At a 10 ms device period this is a few hundred
 /// milliseconds of audio, not an unbounded buffer.
 pub(crate) const CAPTURE_QUEUE_CAPACITY: usize = 64;
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct AudioBlock {
-    pub(crate) samples: Vec<f32>,
-    /// First output frame on the session timeline. `None` appends.
-    pub(crate) timeline_frame: Option<u64>,
-    pub(crate) discontinuity: bool,
-}
 
 /// `true` when the packet was queued. `false` when it was rejected or the
 /// writer is gone.
@@ -41,7 +35,8 @@ pub(crate) fn offer_block(tx: &SyncSender<AudioBlock>, block: AudioBlock) -> boo
 mod tests {
     use std::sync::mpsc::sync_channel;
 
-    use super::{offer_block, AudioBlock};
+    use super::offer_block;
+    use crate::domain::audio::AudioBlock;
 
     fn block(mark: f32) -> AudioBlock {
         AudioBlock {

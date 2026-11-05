@@ -94,32 +94,34 @@ This is a firm framework decision, **not** an optional later UI improvement.
 ```text
  Windows application process
  ┌──────────────────────── GPUI Kit / GPUI foreground thread ─────────────────────────┐
- │ app/bootstrap + app/state                                             │
- │ views/main_window                                                     │
- │  ├─ views/recording     ← ui/components/{record_button,level_meter,...}│
- │  ├─ views/recordings    ← library, player + transcript                 │
+ │ app/bootstrap + shutdown + settings_writer + bridge + menus           │
+ │   (composition root: depends on views; views do not import app)       │
+ │ views/main_window + views/{actions,state,hooks}                       │
+ │  ├─ views/recording     ← ui/components/{level_meter,...}             │
+ │  ├─ views/recordings    ← library, playback + transcript              │
  │  ├─ views/settings      ← preferences                                  │
  │  └─ views/model_prompt  ← choose/download model                        │
- │ app/actions → service commands; service events → observable UI state   │
+ │ shell commands → service hosts; service events → presentation snapshots│
  └─────────────────────▲──────────────────────────┬───────────────────────┘
                        │ structured events         │ commands
  ┌─────────────────────┴──────────────────────────▼───────────────────────┐
- │ services/recording      services/level_monitor   services/transcription│
- │    recording lifecycle      idle meters            queued jobs          │
+ │ services/recording  services/playback  services/level_monitor  …       │
+ │    session lifecycle   PlayerHost        idle meters                   │
  └──────────┬───────────────────────────┬───────────────────┬──────────────┘
             │                           │                   │
  ┌──────────▼───────────────────────────▼───────────────────▼──────────────┐
  │ infrastructure/                                                      │
  │  audio: flexaudio mic + loopback → SPSC → timed mixer → peak snapshots │
- │  files: WAV writer / reader / playback / optional FLAC encoder       │
+ │  files: WAV writer / reader / cpal output / writability probe / FLAC │
  │  ai: decode → 16 kHz mono → whisper.cpp → transcript                  │
  │  storage: settings / library / sidecars (no OS APIs)                 │
  │  platform/: shell, tray, trash, watch, replace, clocks, disk, wake   │
  └───────────────────────────────────────────────────────────────────────┘
-                        domain/: pure models, timestamp rules, text
+                        domain/: AudioBlock, RecordPhase, ThemePreference,
+                                 formats, timeline, recording metadata
 ```
 
-`domain/` contains no GPUI, Windows, COM, file I/O or AI dependency. `services/` express use cases and depend on small ports where implementation interchangeability or testing warrants them. `infrastructure/` implements adapters. OS calls are forbidden outside `infrastructure/platform/<os>/`. `app/` wires the platform host into views. UI rendering must never own a capture handle or call Whisper.
+`domain/` contains no GPUI, Windows, COM, file I/O or AI dependency. Shared pure types such as `AudioBlock`, `RecordPhase`, and `ThemePreference` live there. `services/` express use cases and depend on small ports where implementation interchangeability or testing warrants them. `infrastructure/` implements adapters (including the recordings-folder writability probe under `files/`). OS calls are forbidden outside `infrastructure/platform/<os>/`. `app/` is the process composition root: it wires the platform host, workers, and hooks into `views/`. Views own the shell reducer (`Presentation`, `AppCommand`, bridge drain) and call injected save/exit hooks; they do not import `app/`. UI rendering must never own a capture handle or call Whisper.
 
 ### 4.2 Threads and communication
 
@@ -185,7 +187,7 @@ Do not sprinkle `cfg` through views, services, domain, or storage. If a call nee
 - **User directories.** Fill the three bases `AppPaths::from_bases` already takes. Windows: `%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`. A macOS host maps Application Support, Logs, and the home directory. A Linux host maps XDG config, state, and home. Default recordings stay under Documents via `AppPaths::recordings_dir`.
 - **Recording clock, performance counter, free space.** `RecordingClock::local` is civil local time. `PerformanceCounter::sample` returns `(ticks, ticks_per_second)` for the existing timeline in `domain/chunk_plan.rs` (Windows: QPC). `FreeSpace` reports bytes available for the recordings directory (Windows: `GetDiskFreeSpaceExW`).
 - **Capture.** Do not write a new `CapturePort` for Linux or macOS. flexaudio already selects the backend (cpal mic; PipeWire, WASAPI, or macOS system loopback) and normalizes to 48 kHz stereo `f32`. Keep `infrastructure/audio/flex_capture.rs`. Pass that OS’s `PerformanceCounter` into the existing adapters so the worker does not call QPC. Re-enumerate with `flexaudio::devices()` into the same `DeviceCatalog`. Implement `spawn_device_watch` for that OS: Windows needs `IMMNotificationClient` because flexaudio’s `DeviceWatcher` is a no-op except on Linux; an OS where `flexaudio::watch_devices` reports events should use that and still call `enumerate_catalog`. Do not change the mixer. A capture adapter under `platform/<os>/` is only for a target flexaudio does not support.
-- **Playback.** Keep cpal’s default host unless that host cannot play PCM16 WAV. A special player belongs in `platform/<os>/`, and `files/player.rs` depends on a small output port instead of growing OS `cfg`.
+- **Playback.** `services/playback.rs` owns the play/stop command loop (`PlayerHost`). `files/player.rs` opens the cpal output session. Keep cpal’s default host unless that host cannot play PCM16 WAV; a special output adapter then belongs in `platform/<os>/` behind a small port used by `files/player.rs`.
 - **Packaging.** Windows icon and manifest stay in `build.rs`. Add that OS’s bundle, `.desktop` file, or equivalent beside it. Do not compile `winresource` for the new target.
 - **Not built yet.** When autostart, global hotkey, or whisper.cpp land, their OS APIs and native build flags go under `platform/<os>/` (or that crate’s build script), behind a port in `services/ports.rs`. Services do not link shell or inference libraries themselves.
 
@@ -225,18 +227,23 @@ skrivli/
 │   ├── app/
 │   │   ├── mod.rs
 │   │   ├── bootstrap.rs            # GPUI init, dependency wiring
-│   │   ├── state.rs                # foreground presentation state
-│   │   └── actions.rs              # intent routing
+│   │   ├── bridge.rs               # background shell pulse
+│   │   ├── menus.rs
+│   │   ├── runtime.rs              # menu dispatch onto MainWindow
+│   │   ├── settings_writer.rs
+│   │   └── shutdown.rs
 │   ├── domain/
 │   │   ├── mod.rs
-│   │   ├── audio.rs                # format/frame definitions
-│   │   ├── ring_buffer.rs          # if custom lock-free ring justified
+│   │   ├── audio.rs                # formats, AudioBlock, endpoints
 │   │   ├── chunk_plan.rs           # chunking/timeline logic
-│   │   ├── recording.rs            # recording metadata + status
+│   │   ├── recording.rs            # metadata + RecordPhase
+│   │   ├── theme.rs                # ThemePreference
 │   │   └── transcript.rs           # segments, text formatting
 │   ├── services/
 │   │   ├── mod.rs
 │   │   ├── recording.rs            # one recording lifecycle
+│   │   ├── recording_harness.rs    # fake capture for tests
+│   │   ├── playback.rs             # PlayerHost command loop
 │   │   ├── level_monitor.rs
 │   │   ├── transcription.rs        # queued jobs
 │   │   └── ports.rs                # external capability traits, as needed
@@ -263,7 +270,8 @@ skrivli/
 │   │   │   ├── wav.rs
 │   │   │   ├── flac.rs
 │   │   │   ├── reader.rs
-│   │   │   └── player.rs
+│   │   │   ├── player.rs           # cpal output session
+│   │   │   └── writable.rs         # recordings folder probe
 │   │   └── platform/
 │   │       ├── mod.rs              # cfg(windows) → windows; else compile_error
 │   │       └── windows/            # only tree allowed to use the windows crate
@@ -288,6 +296,9 @@ skrivli/
 │   │       └── tabs.rs
 │   ├── views/
 │   │   ├── mod.rs
+│   │   ├── actions.rs              # AppCommand, bridge drain
+│   │   ├── state.rs                # Presentation
+│   │   ├── hooks.rs                # save/exit hooks from app
 │   │   ├── main_window.rs
 │   │   ├── recording.rs
 │   │   ├── recordings.rs
@@ -310,16 +321,16 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 
 | Module | Primary responsibility |
 | --- | --- |
-| `app/` | GPUI Kit bootstrap, dependency wiring, application-wide actions and lifecycle |
-| `domain/` | Audio formats, timestamp/chunk types, recording and transcript data models, pure text formatting |
-| `services/` | Recording sessions, idle level monitoring, transcription jobs and orchestration |
+| `app/` | Process composition root: GPUI Kit bootstrap, worker wiring, shutdown, settings writer |
+| `domain/` | Audio formats, `AudioBlock`, `RecordPhase`, `ThemePreference`, timeline, recording metadata |
+| `services/` | Recording sessions, playback host, idle level monitoring, transcription jobs |
 | `infrastructure/audio/` | flexaudio capture adapters, device catalog, mixing and resampling (no OS APIs) |
 | `infrastructure/ai/` | Whisper engine integration and local model management |
 | `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
-| `infrastructure/files/` | WAV writer, optional FLAC encoder/reader via `flac-codec`, audio reader and player |
+| `infrastructure/files/` | WAV writer/reader, cpal output session, writability probe, optional FLAC |
 | `infrastructure/platform/` | Sole home for OS APIs: shell, tray, trash, watch, replace, clocks, disk, device wake |
 | `ui/` | Reusable GPUI Kit compositions and custom GPUI elements such as level meters |
-| `views/` | GPUI screens, window composition and presentation state |
+| `views/` | GPUI screens, shell reducer (`Presentation` / commands), window composition |
 | `tests/` | End-to-end application integration tests and reusable test support |
 
 Prefer channels and typed events for worker-to-UI communication, with updates dispatched onto the GPUI foreground executor. Avoid blocking UI rendering with device or inference work.
@@ -452,7 +463,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Resizable GPUI Kit application window, minimum target roughly **560 × 420 logical pixels**, with remembered dimensions and monitor-safe restore.
 - Two top tabs: **Record** and **Recordings**. Use GPUI Kit navigation/tab components where they meet requirements, **not** Win32 `CTabCtrl`/`CDialogImpl` child windows.
 - Adopt **GPUI Kit themes, design tokens, typography, buttons, inputs, selectors, tabs, menus, dialogs, tooltips, and other styled controls** as defaults. Use GPUI layout primitives (`div`, flex/grid) to compose screens; avoid duplicating GPUI Kit widgets in custom code.
-- No in-window File/Help menu bar. `TabBar::suffix` holds a theme-cycle button (left) and Settings gear (`IconName::Settings`). The theme button uses Kit component icons for Light (`Sun`) and Dark (`Moon`). System uses `Icon::data` with a sun–moon SVG (working moon crescent plus sun rays) because bundled `icons/sun-moon.svg` does not paint under GPUI. Tooltip names the current preference (Light / Dark / System); preference persists via `Settings::theme`. `ThemePreference::next(system_is_dark)` drives the button as a three-slot cycle with Light/Dark swapped from `window.appearance()`: dark OS `[System, Light, Dark]`, light OS `[System, Dark, Light]`. System mode calls `Theme::sync_system_appearance` and re-syncs on `window.observe_window_appearance`; Light and Dark call `Theme::change`. About is linked from the Settings dialog. Open recordings folder and Exit stay on the Recordings tab and tray.
+- No in-window File/Help menu bar. `TabBar::suffix` holds a theme-cycle button (left) and Settings gear (`IconName::Settings`). The theme button uses Kit component icons for Light (`Sun`) and Dark (`Moon`). System uses `IconName::Palette` for follow-system. Tooltip names the current preference (Light / Dark / System); preference is the domain `ThemePreference` type persisted via `Settings::theme`. `ThemePreference::next(system_is_dark)` drives the button as a three-slot cycle with Light/Dark swapped from `window.appearance()`: dark OS `[System, Light, Dark]`, light OS `[System, Dark, Light]`. System mode calls `Theme::sync_system_appearance` and re-syncs on `window.observe_window_appearance`; Light and Dark call `Theme::change`. About is linked from the Settings dialog. Open recordings folder and Exit stay on the Recordings tab and tray.
 - A compact status strip shows recording state, duration and transcription progress.
 - Use logical-pixel layout, Windows DPI-aware assets and explicit keyboard focus/shortcuts. Test per-monitor scaling on real Windows devices.
 - Keep views declarative: update model/entity state when a service event arrives, notify GPUI to rerender, and never allocate an audio device during `Render::render`.
@@ -495,7 +506,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Actions: Play, Transcribe, Open folder, Rename, Delete, Refresh. Delete goes to the Windows Recycle Bin through a Windows Shell adapter and includes associated audio/`.txt`/`.json`; ask for confirmation and handle partial failures.
 - Double-click/Enter can start playback; selection change stops playback by design.
 - Background directory watcher debounces changes; the library scans WAV/FLAC files and matches sidecars/transcripts. Preserve selected recording after refresh.
-- Playback audio runs through a file/player adapter; never decode files or drive playback from GPUI rendering.
+- Playback audio runs through `services/playback` and the cpal session in `files/player`; never decode files or drive playback from GPUI rendering.
 
 ### 8.4 Model prompt and settings
 

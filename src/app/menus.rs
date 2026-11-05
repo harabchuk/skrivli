@@ -3,7 +3,8 @@
 
 use gpui_kit::App;
 
-use super::actions::AppCommand;
+use crate::views::actions::AppCommand;
+
 use super::runtime::dispatch;
 
 gpui_kit::actions!(

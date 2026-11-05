@@ -17,8 +17,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::common::error::AppError;
+use crate::infrastructure::files::writable::ensure_writable;
 use crate::services::ports::DesktopShell;
-use crate::services::recording::ensure_writable;
 
 /// gpui-pre 0.3.11's Windows hide is a no-op (D-01). Find the existing window.
 const WINDOW_CLASS: PCWSTR = w!("Zed::Window");

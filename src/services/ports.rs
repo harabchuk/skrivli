@@ -12,8 +12,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::common::error::AppError;
-use crate::domain::audio::{CivilTime, SessionOrigin};
-use crate::infrastructure::audio::queue::AudioBlock;
+use crate::domain::audio::{AudioBlock, CivilTime, SessionOrigin};
 
 /// Debounce used by the production directory watcher.
 pub(crate) const DEFAULT_WATCH_DEBOUNCE: Duration = Duration::from_millis(350);
