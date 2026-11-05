@@ -57,7 +57,6 @@ where
                 .disabled(locked)
                 .accessibility_label("Microphone"),
         ))
-        .child(gain_row(gain, agc, gain_label, saving, toggle_agc))
         .child(labeled_select(
             "System audio",
             Select::new(system)
@@ -86,7 +85,14 @@ where
         )
         .child(h_flex().w_full().justify_center().child(elapsed))
         .child(h_flex().w_full().justify_center().child(phase))
-        .child(level_meter("Mic", mic_db, mic_hold, cx))
+        .child(
+            h_flex()
+                .gap_3()
+                .items_center()
+                .w_full()
+                .child(level_meter("Mic", mic_db, mic_hold, cx))
+                .child(gain_controls(gain, agc, gain_label, saving, toggle_agc)),
+        )
         .child(level_meter("System", system_db, system_hold, cx))
         .child(notice)
 }
@@ -105,7 +111,7 @@ fn labeled_select(label: &str, select: impl IntoElement) -> impl IntoElement {
         .child(div().flex_1().min_w_0().child(select))
 }
 
-fn gain_row<Agc>(
+fn gain_controls<Agc>(
     gain: &Entity<SliderState>,
     agc: bool,
     gain_label: SharedString,
@@ -116,28 +122,22 @@ where
     Agc: Fn(&bool, &mut gpui_kit::Window, &mut App) + 'static,
 {
     h_flex()
-        .gap_3()
+        .gap_2()
         .items_center()
-        .w_full()
-        .child(div().w(px(FIELD_LABEL_WIDTH)).flex_shrink_0())
+        .flex_shrink_0()
+        .child("Gain")
         .child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child("Gain")
-                .child(
-                    Slider::new(gain)
-                        .disabled(agc || saving)
-                        .w(px(GAIN_SLIDER_WIDTH))
-                        .accessibility_label("Microphone gain"),
-                )
-                .child(gain_label)
-                .child(
-                    Checkbox::new("mic-agc")
-                        .label("Auto")
-                        .checked(agc)
-                        .disabled(saving)
-                        .on_click(toggle_agc),
-                ),
+            Slider::new(gain)
+                .disabled(agc || saving)
+                .w(px(GAIN_SLIDER_WIDTH))
+                .accessibility_label("Microphone gain"),
+        )
+        .child(gain_label)
+        .child(
+            Checkbox::new("mic-agc")
+                .label("Auto")
+                .checked(agc)
+                .disabled(saving)
+                .on_click(toggle_agc),
         )
 }

@@ -422,7 +422,6 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 ┌──────────────────────────────────────────────────┐
 │ INPUT                                            │
 │ Microphone      [ Default communications      ▾ ]│
-│                 Gain ──●──  1.0×  [Auto]         │
 │ System audio    [ Default output device       ▾ ]│
 │                                                  │
 │ OUTPUT                                           │
@@ -431,8 +430,8 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 │               [ ● Start recording ]              │
 │                     00:12:34                     │
 │                      ● REC                       │
-│ Mic       ███████████░░░░░░░░       −12 dB       │
-│ System    █████░░░░░░░░░░░░░       −24 dB        │
+│ Mic  ███████████░░░  −12 dB   Gain ──●── 1.0× [Auto] │
+│ System █████░░░░░░░░░░░░░       −24 dB           │
 │                                                  │
 │ [inline device/permission/disk warning]          │
 └──────────────────────────────────────────────────┘
