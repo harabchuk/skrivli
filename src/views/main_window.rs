@@ -283,7 +283,11 @@ impl MainWindow {
     }
 
     pub(crate) fn cycle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let next = self.settings.theme().next();
+        let system_is_dark = matches!(
+            window.appearance(),
+            gpui_kit::WindowAppearance::Dark | gpui_kit::WindowAppearance::VibrantDark
+        );
+        let next = self.settings.theme().next(system_is_dark);
         self.settings.set_theme(next);
         self.writer.save(self.settings.clone());
         apply_theme(next, Some(window), cx);

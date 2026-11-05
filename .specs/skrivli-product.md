@@ -50,7 +50,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 - Remembers size and position across launches (restored safely on the available display).
 - Status area shows recording state, elapsed time, and transcription progress when relevant.
 - A Settings gear on the tab bar opens Settings; About is available from that dialog. Opening the recordings folder and Exit remain available from the Recordings tab and the tray.
-- A theme button next to Settings cycles Light, Dark, and System (follow Windows appearance). The icon and tooltip name the current choice; the preference is remembered across launches.
+- A theme button next to Settings cycles theme preference. Order is System → opposite of Windows → the other palette → System (light OS: System, Dark, Light; dark OS: System, Light, Dark). The icon and tooltip name the current choice; the preference is remembered across launches.
 
 ### System tray
 
