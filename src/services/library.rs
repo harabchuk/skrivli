@@ -12,10 +12,7 @@ use crate::domain::recording::preserve_selection;
 use crate::infrastructure::storage::library::{
     associated_paths, rename_recording, scan_library, LibraryCatalog, LibraryEntry, RenameResult,
 };
-use crate::infrastructure::storage::watcher::{
-    default_debounce, spawn_directory_watcher, WatchEvent,
-};
-use crate::infrastructure::windows::recycle::send_to_recycle_bin;
+use crate::services::ports::{DirectoryWatch, Trash, WatchEvent, DEFAULT_WATCH_DEBOUNCE};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LibrarySnapshot {
@@ -41,13 +38,15 @@ pub(crate) struct LibraryHost {
 impl LibraryHost {
     pub(crate) fn spawn(
         directory: PathBuf,
+        trash: Arc<dyn Trash>,
+        watch: Arc<dyn DirectoryWatch>,
         on_change: Box<dyn Fn(LibrarySnapshot) + Send>,
         stop: Arc<AtomicBool>,
     ) -> (Self, JoinHandle<()>) {
         let (tx, rx) = mpsc::channel();
         let command_tx = tx.clone();
         let handle = thread::spawn(move || {
-            library_loop(directory, rx, on_change, stop);
+            library_loop(directory, trash, watch, rx, on_change, stop);
         });
         let _ = command_tx.send(LibraryCommand::Refresh);
         (Self { tx }, handle)
@@ -80,13 +79,15 @@ impl LibraryHost {
 
 fn library_loop(
     mut directory: PathBuf,
+    trash: Arc<dyn Trash>,
+    watch: Arc<dyn DirectoryWatch>,
     rx: mpsc::Receiver<LibraryCommand>,
     on_change: Box<dyn Fn(LibrarySnapshot) + Send>,
     stop: Arc<AtomicBool>,
 ) {
     let mut selected = None;
     let mut catalog = LibraryCatalog::empty();
-    let mut watch = start_watch(directory.clone());
+    let mut active = start_watch(watch.as_ref(), directory.clone());
 
     publish(&catalog, selected, None, &on_change);
 
@@ -95,7 +96,7 @@ fn library_loop(
             break;
         }
 
-        while let Ok(event) = watch.rx.try_recv() {
+        while let Ok(event) = active.rx.try_recv() {
             if matches!(event, WatchEvent::Changed | WatchEvent::Poll) {
                 rescan(&directory, &mut catalog, &mut selected, None, &on_change);
             }
@@ -108,8 +109,8 @@ fn library_loop(
             }
             Ok(LibraryCommand::SetDirectory(next)) => {
                 directory = next;
-                watch.stop();
-                watch = start_watch(directory.clone());
+                active.stop();
+                active = start_watch(watch.as_ref(), directory.clone());
                 rescan(&directory, &mut catalog, &mut selected, None, &on_change);
             }
             Ok(LibraryCommand::Select(id)) => {
@@ -132,7 +133,7 @@ fn library_loop(
             }
             Ok(LibraryCommand::Delete { id }) => {
                 let notice = match catalog.find(id) {
-                    Some(entry) => delete_entry(entry),
+                    Some(entry) => delete_entry(entry, trash.as_ref()),
                     None => Some("Could not update the recordings library."),
                 };
                 let keep = selected.filter(|current| *current != id);
@@ -144,7 +145,7 @@ fn library_loop(
         }
     }
 
-    watch.stop();
+    active.stop();
 }
 
 struct ActiveWatch {
@@ -160,9 +161,9 @@ impl ActiveWatch {
     }
 }
 
-fn start_watch(directory: PathBuf) -> ActiveWatch {
+fn start_watch(watch: &dyn DirectoryWatch, directory: PathBuf) -> ActiveWatch {
     let stop = Arc::new(AtomicBool::new(false));
-    let (rx, handle) = spawn_directory_watcher(directory, Arc::clone(&stop), default_debounce());
+    let (rx, handle) = watch.spawn(directory, Arc::clone(&stop), DEFAULT_WATCH_DEBOUNCE);
     ActiveWatch { stop, rx, handle }
 }
 
@@ -187,9 +188,9 @@ fn preserve_ids(previous: Option<RecordingId>, catalog: &LibraryCatalog) -> Opti
     preserve_selection(previous, &infos)
 }
 
-fn delete_entry(entry: &LibraryEntry) -> Option<&'static str> {
+fn delete_entry(entry: &LibraryEntry, trash: &dyn Trash) -> Option<&'static str> {
     let paths = associated_paths(entry);
-    match send_to_recycle_bin(&paths) {
+    match trash.discard(&paths) {
         Ok(()) => None,
         Err(error) => {
             tracing::error!(error = %error, "delete failed");
@@ -222,12 +223,18 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::mpsc::{self, Receiver};
     use std::sync::{Arc, Mutex};
+    use std::thread::JoinHandle;
     use std::time::Duration;
 
     use super::LibraryHost;
+    use crate::common::error::AppError;
+    use crate::infrastructure::platform;
     use crate::infrastructure::storage::sidecar::{write_sidecar, Sidecar};
+    use crate::services::ports::{DirectoryWatch, Trash, WatchEvent};
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -236,6 +243,36 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("dir");
         dir
+    }
+
+    struct FakeTrash {
+        discarded: Mutex<Vec<PathBuf>>,
+    }
+
+    impl Trash for FakeTrash {
+        fn discard(&self, paths: &[PathBuf]) -> Result<(), AppError> {
+            self.discarded
+                .lock()
+                .expect("lock")
+                .extend_from_slice(paths);
+            Ok(())
+        }
+    }
+
+    struct SilentWatch;
+
+    impl DirectoryWatch for SilentWatch {
+        fn spawn(
+            &self,
+            _directory: PathBuf,
+            _stop: Arc<AtomicBool>,
+            _debounce: Duration,
+        ) -> (Receiver<WatchEvent>, JoinHandle<()>) {
+            let (tx, rx) = mpsc::channel();
+            drop(tx);
+            let handle = std::thread::spawn(|| {});
+            (rx, handle)
+        }
     }
 
     #[test]
@@ -260,8 +297,11 @@ mod tests {
         let snapshots = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&snapshots);
         let stop = Arc::new(AtomicBool::new(false));
+        let host_ports = platform::host();
         let (host, handle) = LibraryHost::spawn(
             dir.clone(),
+            Arc::clone(&host_ports.trash),
+            Arc::clone(&host_ports.watch),
             Box::new(move |snapshot| {
                 sink.lock().expect("lock").push(snapshot);
             }),
@@ -292,6 +332,82 @@ mod tests {
 
         // Assert
         assert!(found, "expected catalog entry id 99");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn delete_asks_trash_and_leaves_files_on_disk() {
+        // Arrange
+        let dir = temp_dir("delete");
+        let wav = dir.join("clip.wav");
+        fs::write(&wav, b"RIFF").expect("wav");
+        write_sidecar(
+            &wav,
+            &Sidecar {
+                id: 42,
+                started_at_unix_ms: 10,
+                ended_at_unix_ms: 20,
+                duration_ms: 10,
+                microphone_id: "m".into(),
+                system_audio_id: "s".into(),
+                problems: Vec::new(),
+            },
+        )
+        .expect("side");
+        let trash = Arc::new(FakeTrash {
+            discarded: Mutex::new(Vec::new()),
+        });
+        let discarded = Arc::clone(&trash);
+        let snapshots = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&snapshots);
+        let stop = Arc::new(AtomicBool::new(false));
+        let (host, handle) = LibraryHost::spawn(
+            dir.clone(),
+            trash,
+            Arc::new(SilentWatch),
+            Box::new(move |snapshot| {
+                sink.lock().expect("lock").push(snapshot);
+            }),
+            Arc::clone(&stop),
+        );
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut id = None;
+        while std::time::Instant::now() < deadline {
+            let guard = snapshots.lock().expect("lock");
+            if let Some(entry) = guard
+                .iter()
+                .rev()
+                .find_map(|snap| snap.catalog.entries.first())
+            {
+                id = Some(entry.info.id());
+                break;
+            }
+            drop(guard);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let id = id.expect("catalog entry");
+
+        // Act
+        host.delete(id);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if !discarded.discarded.lock().expect("lock").is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        host.shutdown();
+        stop.store(true, Ordering::Release);
+        let _ = handle.join();
+
+        // Assert
+        let paths = discarded.discarded.lock().expect("lock");
+        assert!(
+            paths.iter().any(|path| path == &wav),
+            "trash should receive the wav path"
+        );
+        assert!(wav.exists(), "fake trash must leave files on disk");
         let _ = fs::remove_dir_all(dir);
     }
 }

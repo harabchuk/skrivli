@@ -121,7 +121,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M1.3 — Windows tray and instance handoff
 
-- [x] `infrastructure/windows/tray.rs`: native notification icon, stable GUID where appropriate, Show/Hide, Start/Stop (disabled until M2), Open Folder, Settings and Exit.
+- [x] `infrastructure/platform/windows/tray.rs`: native notification icon, stable GUID where appropriate, Show/Hide, Start/Stop (disabled until M2), Open Folder, Settings and Exit.
 - [x] Integrate a supported message window/pump with thread-safe action handoff; never assume GPUI HWND subclassing is supported.
 - [x] Implement configured close-to-tray/minimize behavior and explicit Exit, including first-use explanation.
 - [x] Re-add tray icon on Explorer `TaskbarCreated`, remove icon on normal Exit, keep one authoritative lifecycle controller.
@@ -145,7 +145,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 - [x] `domain/audio.rs`: `AudioFormat`, frame counts, monotonic session time and sample index conversion with checked integer arithmetic.
 - [x] `infrastructure/audio/devices.rs`: enumerate `eCapture`/`eRender` endpoints via MMDevice; expose stable IDs and friendly display names; select Windows default communications microphone and default render endpoint.
 - [x] Design `DeviceSelection` with explicit/default modes and missing-device fallback notification; persist stable endpoint choices.
-- [x] `infrastructure/windows/dialogs.rs`: native folder picker; validate write permissions and folder creation. Wire GPUI Kit device selectors and destination read-only field in `views/recording.rs`.
+- [x] `infrastructure/platform/windows/shell.rs`: native folder picker; validate write permissions and folder creation. Wire GPUI Kit device selectors and destination read-only field in `views/recording.rs`.
 - [x] Test absent/disabled devices and microphone privacy denied. Do not allow endpoint/path modifications during active recording.
 
 ### M2.2 — Mic capture worker and normalization
@@ -337,8 +337,8 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M8.2 — OS commands and accessibility
 
-- [ ] `infrastructure/windows/hotkeys.rs`: configurable RegisterHotKey toggle, default `Ctrl+Alt+R`, conflict detection, unregister/re-register and shared app command dispatch.
-- [ ] `infrastructure/windows/autostart.rs`: opt-in startup registration with clear enable/disable status; choose/document a mechanism suitable for portable ZIP distribution. No surprise autostart.
+- [ ] `infrastructure/platform/windows/hotkeys.rs`: configurable RegisterHotKey toggle, default `Ctrl+Alt+R`, conflict detection, unregister/re-register and shared app command dispatch.
+- [ ] `infrastructure/platform/windows/autostart.rs`: opt-in startup registration with clear enable/disable status; choose/document a mechanism suitable for portable ZIP distribution. No surprise autostart.
 - [ ] Improve keyboard focus, shortcut discoverability, dark/light theme, high DPI, multi-monitor bounds, error feedback and long filename/path rendering. Verify keyboard-only operation.
 - [ ] Test Explorer restart, autostart permissions, hotkey conflicts and tray/foreground synchronization under active recording.
 

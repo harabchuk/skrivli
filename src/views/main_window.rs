@@ -33,11 +33,9 @@ use crate::infrastructure::storage::library::LibraryCatalog;
 use crate::infrastructure::storage::settings::{
     Settings, StoredEndpoint, StoredWindowBounds, ThemePreference,
 };
-use crate::infrastructure::windows::dialogs::pick_recordings_folder;
-use crate::infrastructure::windows::recordings_folder::open_recordings_folder;
-use crate::infrastructure::windows::shell_window;
 use crate::services::level_monitor::MonitorTargets;
 use crate::services::library::{LibraryHost, LibrarySnapshot};
+use crate::services::ports::DesktopShell;
 use crate::services::recording::{
     RecordPhase as ServicePhase, RecordSnapshot, RecordingHost, StartRequest, NOTICE_FALLBACK,
     NOTICE_MIC, NOTICE_MIC_MISSING, NOTICE_SYSTEM_FALLBACK, NOTICE_SYSTEM_MISSING,
@@ -62,6 +60,7 @@ pub(crate) struct MainWindow {
     writer: SettingsWriter,
     commands: Receiver<BridgeMessage>,
     shutdown: ShutdownController,
+    shell: Arc<dyn DesktopShell>,
     recording: RecordingHost,
     library: LibraryHost,
     player: PlayerHost,
@@ -103,6 +102,7 @@ impl MainWindow {
         writer: SettingsWriter,
         commands: Receiver<BridgeMessage>,
         shutdown: ShutdownController,
+        shell: Arc<dyn DesktopShell>,
         recording: RecordingHost,
         library: LibraryHost,
         player: PlayerHost,
@@ -233,6 +233,7 @@ impl MainWindow {
             writer,
             commands,
             shutdown,
+            shell,
             recording,
             library,
             player,
@@ -365,7 +366,7 @@ impl MainWindow {
             self.show_window(window);
             changed = true;
         }
-        if self.presentation.close_to_tray() && shell_window::main_window_is_iconic() {
+        if self.presentation.close_to_tray() && self.shell.window_is_minimized() {
             let effect = apply(&mut self.presentation, AppCommand::Hide);
             self.perform(effect, window, cx);
             changed = true;
@@ -388,7 +389,7 @@ impl MainWindow {
             Effect::Show => self.show_window(window),
             Effect::Hide { explain } => {
                 self.flush_bounds(window);
-                let _ = shell_window::set_main_window_visible(false);
+                let _ = self.shell.set_window_visible(false);
                 if explain {
                     self.settings.set_tray_explanation_seen(true);
                     self.writer.save(self.settings.clone());
@@ -396,7 +397,10 @@ impl MainWindow {
                 }
             }
             Effect::OpenFolder => {
-                if let Err(error) = open_recordings_folder(self.settings.recordings_directory()) {
+                if let Err(error) = self
+                    .shell
+                    .open_recordings_folder(self.settings.recordings_directory())
+                {
                     tracing::error!(error = %error, "recordings folder was not opened");
                     self.presentation
                         .set_notice(Some("Could not open the recordings folder."));
@@ -433,7 +437,7 @@ impl MainWindow {
     }
 
     fn show_window(&mut self, window: &mut Window) {
-        if shell_window::set_main_window_visible(true) {
+        if self.shell.set_window_visible(true) {
             window.activate_window();
             self.presentation.set_visible(true);
             self.presentation.set_pending_show(false);
@@ -858,7 +862,7 @@ impl MainWindow {
     }
 
     fn browse_folder(&mut self) {
-        match pick_recordings_folder() {
+        match self.shell.pick_recordings_folder() {
             Ok(Some(path)) => {
                 if self.settings.set_recordings_directory(path.clone()).is_ok() {
                     self.writer.save(self.settings.clone());

@@ -17,31 +17,26 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Threading::WaitForSingleObject;
 
 use crate::common::error::AppError;
+use crate::services::ports::{DirectoryWatch, WatchEvent};
 
-const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(350);
 const WAIT_SLICE: Duration = Duration::from_millis(200);
 const FULL_REFRESH_FALLBACK: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WatchEvent {
-    /// Debounced directory change; caller should rescan.
-    Changed,
-    /// Periodic fallback when notifications are quiet or unavailable.
-    Poll,
-}
+pub(super) struct WindowsDirectoryWatch;
 
-/// Spawn a watcher thread. Stops when `stop` is set. Missing directories are
-/// polled until they appear; notification failures fall back to polling.
-pub(crate) fn spawn_directory_watcher(
-    directory: PathBuf,
-    stop: Arc<AtomicBool>,
-    debounce: Duration,
-) -> (Receiver<WatchEvent>, JoinHandle<()>) {
-    let (tx, rx) = mpsc::channel();
-    let handle = thread::spawn(move || {
-        watch_loop(directory, stop, debounce, tx);
-    });
-    (rx, handle)
+impl DirectoryWatch for WindowsDirectoryWatch {
+    fn spawn(
+        &self,
+        directory: PathBuf,
+        stop: Arc<AtomicBool>,
+        debounce: Duration,
+    ) -> (Receiver<WatchEvent>, JoinHandle<()>) {
+        let (tx, rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            watch_loop(directory, stop, debounce, tx);
+        });
+        (rx, handle)
+    }
 }
 
 fn watch_loop(
@@ -167,11 +162,6 @@ fn wide_path(path: &Path) -> Vec<u16> {
         .collect()
 }
 
-/// Test helper: debounce duration used by production watchers.
-pub(crate) fn default_debounce() -> Duration {
-    DEFAULT_DEBOUNCE
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -179,7 +169,8 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use super::{spawn_directory_watcher, WatchEvent};
+    use super::WindowsDirectoryWatch;
+    use crate::services::ports::{DirectoryWatch, WatchEvent};
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -195,13 +186,15 @@ mod tests {
         // Arrange
         let dir = temp_dir("chg");
         let stop = Arc::new(AtomicBool::new(false));
-        let (rx, handle) =
-            spawn_directory_watcher(dir.clone(), Arc::clone(&stop), Duration::from_millis(50));
+        let watch = WindowsDirectoryWatch;
+        let (rx, handle) = watch.spawn(dir.clone(), Arc::clone(&stop), Duration::from_millis(50));
+        // Let FindFirstChangeNotification arm before the create.
+        std::thread::sleep(Duration::from_millis(100));
 
         // Act
         fs::write(dir.join("note.txt"), "hi").expect("write");
         let mut saw_change = false;
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             if let Ok(event) = rx.recv_timeout(Duration::from_millis(100)) {
                 if matches!(event, WatchEvent::Changed | WatchEvent::Poll) {

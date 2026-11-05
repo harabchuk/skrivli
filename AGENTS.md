@@ -1,8 +1,8 @@
 # Skrivli — agent guide
 
-Windows desktop app (Win10/11, `x86_64-pc-windows-msvc`). Rust stable, one Cargo package (`src/lib.rs` testable library, `src/main.rs` thin entry). UI is **GPUI Kit** (`gpui-kit`); do not mix its re-exported GPUI crates at other versions. Windows APIs via the `windows` crate. Audio capture is **flexaudio** (mic via cpal/WASAPI, system via WASAPI loopback) on dedicated worker threads. Settings and sidecars are `serde_json`. Transcription is local whisper.cpp. Logs use `tracing`. Commit `Cargo.lock`.
+Windows desktop app (Win10/11, `x86_64-pc-windows-msvc`). Rust stable, one Cargo package (`src/lib.rs` testable library, `src/main.rs` thin entry). UI is **GPUI Kit** (`gpui-kit`); do not mix its re-exported GPUI crates at other versions. OS APIs live only under `infrastructure/platform/<os>/` (today `platform/windows/` via the `windows` crate). Audio capture is **flexaudio** (mic via cpal/WASAPI, system via WASAPI loopback) on dedicated worker threads. Settings and sidecars are `serde_json`. Transcription is local whisper.cpp. Logs use `tracing`. Commit `Cargo.lock`.
 
-`domain/` is the core. It has no GPUI, Windows, COM, file I/O, or AI types. `services/` own use cases and depend on ports. `infrastructure/` implements adapters. `ui/` is only Kit overrides and custom controls. `views/` compose screens. Rendering never owns a capture handle or calls Whisper. The GPUI thread does no blocking audio, disk, or inference work.
+`domain/` is the core. It has no GPUI, Windows, COM, file I/O, or AI types. `services/` own use cases and depend on ports. `infrastructure/` implements adapters; **OS calls are forbidden outside `infrastructure/platform/`**. `ui/` is only Kit overrides and custom controls. `views/` compose screens. Rendering never owns a capture handle or calls Whisper. The GPUI thread does no blocking audio, disk, or inference work.
 
 ## Specs keep pace with features
 
@@ -29,11 +29,12 @@ src/
 ├── domain/               # core: formats, timeline, recording, transcript
 ├── services/             # recording, level monitor, transcription, ports
 ├── infrastructure/
-│   ├── audio/            # flexaudio capture, mixer, resample, device watch
+│   ├── audio/            # flexaudio capture, mixer, resample, device catalog
 │   ├── files/            # WAV, optional M4A, reader, player
 │   ├── ai/               # whisper.cpp, model files
-│   ├── storage/          # settings, library, sidecars, watcher
-│   └── windows/          # tray, hotkey, dialogs, autostart
+│   ├── storage/          # settings, library, sidecars
+│   └── platform/         # sole OS tree: windows/ today; cfg selects host
+│       └── windows/      # tray, shell, trash, watch, replace, clocks, wake
 ├── ui/
 │   └── components/       # Kit overrides and custom controls (e.g. level meter)
 ├── views/                # main window, record, recordings, settings, model prompt

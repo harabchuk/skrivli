@@ -6,7 +6,7 @@
 //! `WM_CLOSE`, which removes the icon before the thread exits.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,15 +21,16 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer,
-    ShowWindow, TrackPopupMenuEx, TranslateMessage, IDI_APPLICATION, MF_GRAYED, MF_STRING, SW_HIDE,
+    DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, PostQuitMessage,
+    RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer, ShowWindow,
+    TrackPopupMenuEx, TranslateMessage, IDI_APPLICATION, MF_GRAYED, MF_STRING, SW_HIDE,
     TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE,
     WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_QUERYENDSESSION,
     WM_RBUTTONUP, WM_TIMER, WM_USER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 use crate::common::error::AppError;
+use crate::services::ports::{HostCommand, Tray};
 
 /// Stable notify-icon GUID. Do not change it across builds.
 const TRAY_GUID: GUID = GUID::from_u128(0x7c3e_8a21_4b6d_4e91_9f2a_1d5c_8b0e_6a44);
@@ -44,33 +45,33 @@ const ID_FOLDER: usize = 4;
 const ID_SETTINGS: usize = 5;
 const ID_EXIT: usize = 6;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TrayCommand {
-    Show,
-    ToggleVisibility,
-    StartRecording,
-    StopRecording,
-    OpenRecordingsFolder,
-    Settings,
-    Exit,
-    /// Windows logoff/shutdown: finalize without an Exit confirmation.
-    SessionEnding,
+pub(super) struct WindowsTray;
+
+impl Tray for WindowsTray {
+    fn run(
+        &self,
+        stop: Arc<AtomicBool>,
+        recording: Arc<AtomicBool>,
+        on_command: Box<dyn Fn(HostCommand) + Send>,
+    ) -> Result<(), AppError> {
+        run_tray(stop, recording, on_command)
+    }
 }
 
-pub(crate) fn command_from_menu_id(id: i32) -> Option<TrayCommand> {
+fn command_from_menu_id(id: i32) -> Option<HostCommand> {
     match id as usize {
-        ID_SHOW => Some(TrayCommand::Show),
-        ID_START => Some(TrayCommand::StartRecording),
-        ID_STOP => Some(TrayCommand::StopRecording),
-        ID_FOLDER => Some(TrayCommand::OpenRecordingsFolder),
-        ID_SETTINGS => Some(TrayCommand::Settings),
-        ID_EXIT => Some(TrayCommand::Exit),
+        ID_SHOW => Some(HostCommand::Show),
+        ID_START => Some(HostCommand::StartRecording),
+        ID_STOP => Some(HostCommand::StopRecording),
+        ID_FOLDER => Some(HostCommand::OpenRecordingsFolder),
+        ID_SETTINGS => Some(HostCommand::OpenSettings),
+        ID_EXIT => Some(HostCommand::Exit),
         _ => None,
     }
 }
 
 struct TrayState {
-    on_command: Box<dyn Fn(TrayCommand) + Send>,
+    on_command: Box<dyn Fn(HostCommand) + Send>,
     stop: Arc<AtomicBool>,
     recording: Arc<AtomicBool>,
     taskbar_created: u32,
@@ -82,17 +83,16 @@ thread_local! {
 }
 
 /// Runs until `stop` is set and the message window closes. Call from a dedicated thread.
-pub(crate) fn run(
+fn run_tray(
     stop: Arc<AtomicBool>,
-    hwnd_slot: Arc<AtomicIsize>,
     recording: Arc<AtomicBool>,
-    on_command: Box<dyn Fn(TrayCommand) + Send>,
+    on_command: Box<dyn Fn(HostCommand) + Send>,
 ) -> Result<(), AppError> {
     let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
     TRAY.with(|slot| {
         *slot.borrow_mut() = Some(TrayState {
             on_command,
-            stop,
+            stop: Arc::clone(&stop),
             recording,
             taskbar_created,
             last_toggle: Instant::now() - Duration::from_secs(1),
@@ -119,7 +119,6 @@ pub(crate) fn run(
         )
     }
     .map_err(|error| AppError::message("tray", error.to_string()))?;
-    hwnd_slot.store(hwnd.0 as isize, Ordering::Release);
     let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
     if let Err(error) = add_icon(hwnd) {
         tracing::error!(error = %error, "tray icon was not added");
@@ -128,21 +127,10 @@ pub(crate) fn run(
     pump();
     let _ = unsafe { KillTimer(hwnd, 1) };
     remove_icon(hwnd);
-    hwnd_slot.store(0, Ordering::Release);
     TRAY.with(|slot| {
         *slot.borrow_mut() = None;
     });
     Ok(())
-}
-
-pub(crate) fn nudge(hwnd_slot: &AtomicIsize) {
-    let raw = hwnd_slot.load(Ordering::Acquire);
-    if raw == 0 {
-        return;
-    }
-    let hwnd = HWND(raw as *mut _);
-    // SAFETY: the tray thread published this message-window handle.
-    let _ = unsafe { PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) };
 }
 
 fn pump() {
@@ -240,11 +228,11 @@ unsafe extern "system" fn tray_wndproc(
     lparam: LPARAM,
 ) -> LRESULT {
     if message == WM_QUERYENDSESSION {
-        emit(TrayCommand::SessionEnding);
+        emit(HostCommand::SessionEnding);
         return LRESULT(1);
     }
     if message == WM_ENDSESSION && wparam.0 != 0 {
-        emit(TrayCommand::SessionEnding);
+        emit(HostCommand::SessionEnding);
         return LRESULT(0);
     }
     if message == WM_CLOSE || message == WM_DESTROY {
@@ -309,11 +297,11 @@ fn toggle_once() {
             return;
         }
         state.last_toggle = Instant::now();
-        (state.on_command)(TrayCommand::ToggleVisibility);
+        (state.on_command)(HostCommand::ToggleVisibility);
     });
 }
 
-fn emit(command: TrayCommand) {
+fn emit(command: HostCommand) {
     TRAY.with(|slot| {
         if let Some(state) = slot.borrow().as_ref() {
             (state.on_command)(command);
@@ -321,7 +309,7 @@ fn emit(command: TrayCommand) {
     });
 }
 
-fn popup(hwnd: HWND) -> Option<TrayCommand> {
+fn popup(hwnd: HWND) -> Option<HostCommand> {
     let recording = TRAY.with(|slot| {
         slot.borrow()
             .as_ref()
@@ -363,10 +351,11 @@ fn append(
 
 #[cfg(test)]
 mod tests {
-    use super::{command_from_menu_id, TrayCommand};
+    use super::command_from_menu_id;
+    use crate::services::ports::HostCommand;
 
     #[test]
-    fn menu_ids_map_to_tray_commands() {
+    fn menu_ids_map_to_host_commands() {
         // Arrange
         let ids = [1, 2, 3, 4, 5, 6, 0];
 
@@ -377,12 +366,12 @@ mod tests {
         assert_eq!(
             mapped,
             vec![
-                Some(TrayCommand::Show),
-                Some(TrayCommand::StartRecording),
-                Some(TrayCommand::StopRecording),
-                Some(TrayCommand::OpenRecordingsFolder),
-                Some(TrayCommand::Settings),
-                Some(TrayCommand::Exit),
+                Some(HostCommand::Show),
+                Some(HostCommand::StartRecording),
+                Some(HostCommand::StopRecording),
+                Some(HostCommand::OpenRecordingsFolder),
+                Some(HostCommand::OpenSettings),
+                Some(HostCommand::Exit),
                 None,
             ]
         );

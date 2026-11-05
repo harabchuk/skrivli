@@ -21,24 +21,70 @@ use windows::Win32::System::Threading::{
 };
 
 use crate::common::error::AppError;
+use crate::services::ports::{ActivationWatch, InstanceAcquire, PrimaryInstance, SingleInstance};
 
-pub(crate) const SINGLE_INSTANCE_MUTEX: &str = r"Local\Skrivli.SingleInstance";
-pub(crate) const ACTIVATE_EVENT_NAME: &str = r"Local\Skrivli.Activate";
+const SINGLE_INSTANCE_MUTEX: &str = r"Local\Skrivli.SingleInstance";
+const ACTIVATE_EVENT_NAME: &str = r"Local\Skrivli.Activate";
+
+pub(super) struct WindowsSingleInstance;
+
+impl SingleInstance for WindowsSingleInstance {
+    fn acquire(&self) -> Result<InstanceAcquire, AppError> {
+        match MutexGuard::acquire(SINGLE_INSTANCE_MUTEX) {
+            Ok(mutex) => {
+                let signal = ShowSignal::create(ACTIVATE_EVENT_NAME)?;
+                Ok(InstanceAcquire::Primary {
+                    guard: Box::new(WindowsPrimary { mutex }),
+                    activation: Box::new(WindowsActivation { signal }),
+                })
+            }
+            Err(InstanceGuardError::AlreadyRunning) => {
+                if let Err(error) = signal_primary_instance(ACTIVATE_EVENT_NAME) {
+                    tracing::warn!(error = %error, "the running instance was not signaled");
+                }
+                Ok(InstanceAcquire::Secondary)
+            }
+            Err(InstanceGuardError::Failed(error)) => Err(error),
+        }
+    }
+}
+
+struct WindowsPrimary {
+    /// Drop releases the named mutex on this thread.
+    #[allow(dead_code)]
+    mutex: MutexGuard,
+}
+
+impl PrimaryInstance for WindowsPrimary {}
+
+struct WindowsActivation {
+    signal: ShowSignal,
+}
+
+// SAFETY: the auto-reset event handle is waited and closed from one dedicated
+// listener thread; CreateEventW handles are safe to wait across threads.
+unsafe impl Send for WindowsActivation {}
+
+impl ActivationWatch for WindowsActivation {
+    fn wait_timeout(&self, timeout: Duration) -> bool {
+        self.signal.wait_timeout(timeout)
+    }
+}
 
 #[derive(Debug)]
-pub(crate) enum InstanceGuardError {
+enum InstanceGuardError {
     AlreadyRunning,
     Failed(AppError),
 }
 
 /// Owns the named mutex until dropped.
-pub(crate) struct SingleInstance {
+struct MutexGuard {
     handle: HANDLE,
     _thread: PhantomData<*const ()>,
 }
 
-impl SingleInstance {
-    pub(crate) fn acquire(name: &str) -> Result<Self, InstanceGuardError> {
+impl MutexGuard {
+    fn acquire(name: &str) -> Result<Self, InstanceGuardError> {
         if name.is_empty() {
             return Err(InstanceGuardError::Failed(AppError::message(
                 "single instance",
@@ -75,7 +121,7 @@ impl SingleInstance {
     }
 }
 
-impl Drop for SingleInstance {
+impl Drop for MutexGuard {
     fn drop(&mut self) {
         // SAFETY: the guard is !Send, so Drop runs on the thread that acquired
         // the mutex. ReleaseMutex requires that thread.
@@ -91,12 +137,12 @@ impl Drop for SingleInstance {
 }
 
 /// Named auto-reset event. The owner creates it; a second process opens and pulses it.
-pub(crate) struct ShowSignal {
+struct ShowSignal {
     handle: HANDLE,
 }
 
 impl ShowSignal {
-    pub(crate) fn create(name: &str) -> Result<Self, AppError> {
+    fn create(name: &str) -> Result<Self, AppError> {
         let wide = wide(name);
         // SAFETY: `wide` is NUL-terminated. The event is auto-reset and starts unsignaled.
         let handle = unsafe { CreateEventW(None, false, false, PCWSTR(wide.as_ptr())) }
@@ -104,7 +150,7 @@ impl ShowSignal {
         Ok(Self { handle })
     }
 
-    pub(crate) fn open(name: &str) -> Result<Self, AppError> {
+    fn open(name: &str) -> Result<Self, AppError> {
         let wide = wide(name);
         // SAFETY: `wide` is NUL-terminated. EVENT_MODIFY_STATE is enough to pulse.
         let handle = unsafe { OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR(wide.as_ptr())) }
@@ -112,13 +158,13 @@ impl ShowSignal {
         Ok(Self { handle })
     }
 
-    pub(crate) fn pulse(&self) -> Result<(), AppError> {
+    fn pulse(&self) -> Result<(), AppError> {
         // SAFETY: the handle came from CreateEventW or OpenEventW.
         unsafe { SetEvent(self.handle) }
             .map_err(|error| AppError::message("activation", error.to_string()))
     }
 
-    pub(crate) fn wait_timeout(&self, timeout: Duration) -> bool {
+    fn wait_timeout(&self, timeout: Duration) -> bool {
         let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
         // SAFETY: the handle came from CreateEventW or OpenEventW.
         unsafe { WaitForSingleObject(self.handle, millis) == WAIT_OBJECT_0 }
@@ -137,7 +183,7 @@ impl Drop for ShowSignal {
 }
 
 /// Retry briefly so a loser that starts before the winner creates the event still signals.
-pub(crate) fn signal_primary_instance(name: &str) -> Result<(), AppError> {
+fn signal_primary_instance(name: &str) -> Result<(), AppError> {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match ShowSignal::open(name) {
@@ -161,7 +207,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
-    use super::{signal_primary_instance, InstanceGuardError, ShowSignal, SingleInstance};
+    use super::{signal_primary_instance, InstanceGuardError, MutexGuard, ShowSignal};
 
     const SHOW_FOCUS: &str = "show/focus";
 
@@ -177,15 +223,15 @@ mod tests {
         let name = unique_name();
 
         // Act
-        let first = SingleInstance::acquire(&name);
-        let second = SingleInstance::acquire(&name);
+        let first = MutexGuard::acquire(&name);
+        let second = MutexGuard::acquire(&name);
 
         // Assert
         assert!(first.is_ok());
         assert!(matches!(second, Err(InstanceGuardError::AlreadyRunning)));
 
         drop(first);
-        let third = SingleInstance::acquire(&name);
+        let third = MutexGuard::acquire(&name);
         assert!(third.is_ok());
     }
 
@@ -195,7 +241,7 @@ mod tests {
         let name = "";
 
         // Act
-        let acquired = SingleInstance::acquire(name);
+        let acquired = MutexGuard::acquire(name);
 
         // Assert
         assert!(matches!(acquired, Err(InstanceGuardError::Failed(_))));
@@ -206,11 +252,11 @@ mod tests {
         // Arrange
         let mutex_name = unique_name();
         let event_name = unique_event();
-        let owner = SingleInstance::acquire(&mutex_name).expect("owner");
+        let owner = MutexGuard::acquire(&mutex_name).expect("owner");
         let signal = ShowSignal::create(&event_name).expect("event");
 
         // Act
-        let second = SingleInstance::acquire(&mutex_name);
+        let second = MutexGuard::acquire(&mutex_name);
         let signaled = matches!(second, Err(InstanceGuardError::AlreadyRunning))
             && signal_primary_instance(&event_name).is_ok();
         let pulsed = signal.wait_timeout(Duration::from_secs(2));

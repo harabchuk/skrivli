@@ -6,8 +6,8 @@ use crate::domain::ids::{JobId, RecordingId};
 use crate::infrastructure::audio::devices::DeviceCatalog;
 use crate::infrastructure::files::player::PlayerSnapshot;
 use crate::infrastructure::storage::settings::StoredEndpoint;
-use crate::infrastructure::windows::tray::TrayCommand;
 use crate::services::library::LibrarySnapshot;
+use crate::services::ports::HostCommand;
 use crate::services::recording::RecordSnapshot;
 
 use super::state::{AppTab, Presentation};
@@ -63,16 +63,18 @@ pub(crate) enum Effect {
     RefreshLibrary,
 }
 
-pub(crate) fn command_from_tray(command: TrayCommand) -> AppCommand {
-    match command {
-        TrayCommand::Show => AppCommand::Show,
-        TrayCommand::ToggleVisibility => AppCommand::ToggleVisibility,
-        TrayCommand::StartRecording => AppCommand::StartRecording,
-        TrayCommand::StopRecording => AppCommand::StopRecording,
-        TrayCommand::OpenRecordingsFolder => AppCommand::OpenRecordingsFolder,
-        TrayCommand::Settings => AppCommand::OpenSettings,
-        TrayCommand::Exit => AppCommand::Exit,
-        TrayCommand::SessionEnding => AppCommand::SessionEnding,
+impl From<HostCommand> for AppCommand {
+    fn from(command: HostCommand) -> Self {
+        match command {
+            HostCommand::Show => AppCommand::Show,
+            HostCommand::ToggleVisibility => AppCommand::ToggleVisibility,
+            HostCommand::StartRecording => AppCommand::StartRecording,
+            HostCommand::StopRecording => AppCommand::StopRecording,
+            HostCommand::OpenRecordingsFolder => AppCommand::OpenRecordingsFolder,
+            HostCommand::OpenSettings => AppCommand::OpenSettings,
+            HostCommand::Exit => AppCommand::Exit,
+            HostCommand::SessionEnding => AppCommand::SessionEnding,
+        }
     }
 }
 
@@ -195,13 +197,10 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use super::{
-        apply_command, command_from_tray, drain_bridge, AppCommand, BridgeMessage, Effect,
-        NOT_AVAILABLE,
-    };
+    use super::{apply_command, drain_bridge, AppCommand, BridgeMessage, Effect, NOT_AVAILABLE};
     use crate::app::state::{AppTab, Presentation};
     use crate::domain::ids::{JobId, RecordingId};
-    use crate::infrastructure::windows::tray::TrayCommand;
+    use crate::services::ports::HostCommand;
 
     fn presentation() -> Presentation {
         Presentation::new(true, false, true)
@@ -288,26 +287,26 @@ mod tests {
     }
 
     #[test]
-    fn tray_commands_use_the_same_path() {
+    fn host_commands_use_the_same_path() {
         // Arrange
         let mapped = [
-            (TrayCommand::Show, AppCommand::Show),
-            (TrayCommand::ToggleVisibility, AppCommand::ToggleVisibility),
-            (TrayCommand::StartRecording, AppCommand::StartRecording),
-            (TrayCommand::StopRecording, AppCommand::StopRecording),
+            (HostCommand::Show, AppCommand::Show),
+            (HostCommand::ToggleVisibility, AppCommand::ToggleVisibility),
+            (HostCommand::StartRecording, AppCommand::StartRecording),
+            (HostCommand::StopRecording, AppCommand::StopRecording),
             (
-                TrayCommand::OpenRecordingsFolder,
+                HostCommand::OpenRecordingsFolder,
                 AppCommand::OpenRecordingsFolder,
             ),
-            (TrayCommand::Settings, AppCommand::OpenSettings),
-            (TrayCommand::Exit, AppCommand::Exit),
-            (TrayCommand::SessionEnding, AppCommand::SessionEnding),
+            (HostCommand::OpenSettings, AppCommand::OpenSettings),
+            (HostCommand::Exit, AppCommand::Exit),
+            (HostCommand::SessionEnding, AppCommand::SessionEnding),
         ];
 
         // Act
         let actual: Vec<_> = mapped
             .iter()
-            .map(|(tray, _)| command_from_tray(*tray))
+            .map(|(host, _)| AppCommand::from(*host))
             .collect();
 
         // Assert

@@ -98,3 +98,7 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 - **UI:** GPUI Kit `DataTable` + detail pane; Rename uses Kit dialog + `Input`; Delete uses confirm alert. Narrow stacked fallback not implemented (fixed split).
 
 **Not exercised on hardware this session:** large-folder browse (hundreds of files), live Explorer edits while the app is open, and audible WASAPI playback of a real recording.
+
+## D-12 — One platform tree; Windows is the only host
+
+**Outcome:** Every Win32 / COM / `std::os::windows` call lives under `infrastructure/platform/windows/`. `platform/mod.rs` is `cfg(windows)` today and `compile_error!` on other targets. Traits (`DesktopShell`, `Trash`, `DirectoryWatch`, `SingleInstance`, `Tray`, recording clocks/capture) live in `services/ports.rs`. Free functions `replace_file`, `user_paths`, `spawn_device_watch`, `clock`, `disk`, and `performance_counter` are selected in `platform/mod.rs`. flexaudio capture stays in `infrastructure/audio/`; adapters take an injected `PerformanceCounter`. Future OS work follows **Adding a platform** in `skrivli-app-design.md` (§4.4). Product scope stays Windows until another host ships.

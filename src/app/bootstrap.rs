@@ -2,7 +2,7 @@
 //! The loop owns the window, the tray thread, the activation listener, and the
 //! fake shell-event producer. `ShutdownController::join` runs after `run` returns.
 
-use std::sync::atomic::{AtomicBool, AtomicIsize};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -15,28 +15,23 @@ use crate::common::error::AppError;
 use crate::common::logging;
 use crate::common::paths::AppPaths;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
-use crate::infrastructure::audio::devices::spawn_device_watch;
 use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-use crate::infrastructure::audio::system::{QpcCounter, SystemClock, WindowsDisk};
 use crate::infrastructure::files::player::PlayerHost;
 use crate::infrastructure::files::wav::recover_partials;
+use crate::infrastructure::platform::{self, PlatformHost};
 use crate::infrastructure::storage::settings::Settings;
-use crate::infrastructure::windows::single_instance::{
-    signal_primary_instance, InstanceGuardError, SingleInstance, ACTIVATE_EVENT_NAME,
-    SINGLE_INSTANCE_MUTEX,
-};
-use crate::infrastructure::windows::tray::{self, TrayCommand};
 use crate::services::lease::EndpointLease;
 use crate::services::level_monitor::{spawn_level_monitor, MonitorTargets};
 use crate::services::library::LibraryHost;
+use crate::services::ports::{ActivationWatch, HostCommand, InstanceAcquire};
 use crate::services::recording::{
     spawn_recording_host, RecordingEngine, RecordingHost, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED,
 };
 use crate::ui::theme::apply_theme;
 use crate::views::main_window::MainWindow;
 
-use super::actions::{command_from_tray, AppCommand, BridgeMessage};
+use super::actions::{AppCommand, BridgeMessage};
 use super::bridge::{spawn_shell_producer, SHELL_PULSE_INTERVAL};
 use super::menus::register;
 use super::runtime::ShellGlobal;
@@ -45,7 +40,8 @@ use super::shutdown::ShutdownController;
 use super::state::Presentation;
 
 pub(crate) fn run() -> i32 {
-    let paths = match AppPaths::from_env() {
+    let host = platform::host();
+    let paths = match platform::user_paths() {
         Ok(paths) => paths,
         Err(error) => {
             eprintln!("{}", error.user_message());
@@ -62,16 +58,13 @@ pub(crate) fn run() -> i32 {
         }
     };
 
-    let instance = match SingleInstance::acquire(SINGLE_INSTANCE_MUTEX) {
-        Ok(instance) => instance,
-        Err(InstanceGuardError::AlreadyRunning) => {
+    let (primary_guard, activation) = match host.single_instance.acquire() {
+        Ok(InstanceAcquire::Primary { guard, activation }) => (guard, activation),
+        Ok(InstanceAcquire::Secondary) => {
             tracing::info!("another Skrivli instance owns the mutex; signaling it");
-            if let Err(error) = signal_primary_instance(ACTIVATE_EVENT_NAME) {
-                tracing::warn!(error = %error, "the running instance was not signaled");
-            }
             return 0;
         }
-        Err(InstanceGuardError::Failed(error)) => {
+        Err(error) => {
             tracing::error!(error = %error, "single-instance guard failed");
             eprintln!("{}", error.user_message());
             return 1;
@@ -116,6 +109,7 @@ pub(crate) fn run() -> i32 {
     let lease = Arc::new(EndpointLease::new());
     let targets = Arc::new(MonitorTargets::new());
     let workers = spawn_workers(
+        &host,
         tx,
         &shutdown,
         Arc::clone(&recording_flag),
@@ -125,6 +119,7 @@ pub(crate) fn run() -> i32 {
         Arc::clone(&targets),
         paths.rescue_dir(),
         settings.recordings_directory().to_path_buf(),
+        activation,
     );
 
     tracing::info!(
@@ -146,9 +141,10 @@ pub(crate) fn run() -> i32 {
         levels,
         gain,
         targets,
+        Arc::clone(&host.shell),
     );
     shutdown.join();
-    drop(instance);
+    drop(primary_guard);
     drop(logs);
     0
 }
@@ -161,6 +157,7 @@ struct ShellWorkers {
 
 #[allow(clippy::too_many_arguments)]
 fn spawn_workers(
+    host: &PlatformHost,
     tx: mpsc::Sender<BridgeMessage>,
     shutdown: &ShutdownController,
     recording_flag: Arc<AtomicBool>,
@@ -170,14 +167,16 @@ fn spawn_workers(
     targets: Arc<MonitorTargets>,
     rescue_dir: std::path::PathBuf,
     recordings_dir: std::path::PathBuf,
+    activation: Box<dyn ActivationWatch>,
 ) -> ShellWorkers {
-    let (host, session) = spawn_recording_host(
+    let performance = Arc::from(platform::performance_counter());
+    let (host_recording, session) = spawn_recording_host(
         RecordingEngine {
-            mic: Box::new(FlexMicCapture),
-            system: Box::new(FlexSystemCapture),
-            clock: Box::new(SystemClock),
-            space: Box::new(WindowsDisk),
-            performance: Box::new(QpcCounter),
+            mic: Box::new(FlexMicCapture::new(Arc::clone(&performance))),
+            system: Box::new(FlexSystemCapture::new(Arc::clone(&performance))),
+            clock: platform::clock(),
+            space: platform::disk(),
+            performance: Box::new(CloneCounter(Arc::clone(&performance))),
             levels: Arc::clone(&levels),
             gain: Arc::clone(&gain),
             lease: Arc::clone(&lease),
@@ -198,21 +197,21 @@ fn spawn_workers(
     );
     let monitor_stop = shutdown.flag();
     shutdown.track(spawn_level_monitor(
-        Box::new(FlexMicCapture),
-        Box::new(FlexSystemCapture),
+        Box::new(FlexMicCapture::new(Arc::clone(&performance))),
+        Box::new(FlexSystemCapture::new(performance)),
         lease,
         levels,
         gain,
         targets,
         monitor_stop,
     ));
-    let stop_host = host.clone();
+    let stop_host = host_recording.clone();
     shutdown.on_stop(move || stop_host.shutdown());
     shutdown.track(session);
 
     let device_tx = tx.clone();
     let device_stop = shutdown.flag();
-    shutdown.track(spawn_device_watch(
+    shutdown.track(platform::spawn_device_watch(
         Box::new(move |catalog| {
             let _ = device_tx.send(BridgeMessage::Devices(catalog));
         }),
@@ -228,18 +227,20 @@ fn spawn_workers(
         producer.acknowledge();
     }));
 
-    let activation = shutdown.clone();
+    let activation_shutdown = shutdown.clone();
     let activation_tx = tx.clone();
     let activation_stop = shutdown.flag();
     shutdown.track(thread::spawn(move || {
-        listen_for_activation(&activation_stop, &activation_tx);
-        activation.acknowledge();
+        listen_for_activation(activation.as_ref(), &activation_stop, &activation_tx);
+        activation_shutdown.acknowledge();
     }));
 
     let library_tx = tx.clone();
     let library_stop = shutdown.flag();
     let (library, library_thread) = LibraryHost::spawn(
         recordings_dir,
+        Arc::clone(&host.trash),
+        Arc::clone(&host.watch),
         Box::new(move |snapshot| {
             let _ = library_tx.send(BridgeMessage::Library(snapshot));
         }),
@@ -257,20 +258,17 @@ fn spawn_workers(
     shutdown.on_stop(move || stop_player.shutdown());
     shutdown.track(player_thread);
 
-    let hwnd_slot = Arc::new(AtomicIsize::new(0));
-    let nudge_slot = Arc::clone(&hwnd_slot);
-    shutdown.on_stop(move || tray::nudge(&nudge_slot));
+    let tray = Arc::clone(&host.tray);
     let tray_worker = shutdown.clone();
     let tray_tx = tx;
     let tray_stop = shutdown.flag();
     shutdown.track(thread::spawn(move || {
         let sender = tray_tx;
-        if let Err(error) = tray::run(
+        if let Err(error) = tray.run(
             tray_stop,
-            hwnd_slot,
             recording_flag,
-            Box::new(move |command: TrayCommand| {
-                let _ = sender.send(BridgeMessage::Command(command_from_tray(command)));
+            Box::new(move |command: HostCommand| {
+                let _ = sender.send(BridgeMessage::Command(AppCommand::from(command)));
             }),
         ) {
             tracing::error!(error = %error, "tray stopped");
@@ -278,32 +276,32 @@ fn spawn_workers(
         tray_worker.acknowledge();
     }));
     ShellWorkers {
-        recording: host,
+        recording: host_recording,
         library,
         player,
     }
 }
 
-fn listen_for_activation(stop: &std::sync::atomic::AtomicBool, tx: &mpsc::Sender<BridgeMessage>) {
+/// Share one performance-counter implementation with `RecordingEngine`'s `Box` slot.
+struct CloneCounter(Arc<dyn crate::services::ports::PerformanceCounter>);
+
+impl crate::services::ports::PerformanceCounter for CloneCounter {
+    fn sample(&self) -> (u64, u64) {
+        self.0.sample()
+    }
+}
+
+fn listen_for_activation(
+    activation: &dyn ActivationWatch,
+    stop: &std::sync::atomic::AtomicBool,
+    tx: &mpsc::Sender<BridgeMessage>,
+) {
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
-    use crate::infrastructure::windows::single_instance::ShowSignal;
-
-    let signal = match ShowSignal::create(ACTIVATE_EVENT_NAME) {
-        Ok(signal) => Some(signal),
-        Err(error) => {
-            tracing::error!(error = %error, "activation event was not created");
-            None
-        }
-    };
     while !stop.load(Ordering::Acquire) {
-        if let Some(signal) = &signal {
-            if signal.wait_timeout(Duration::from_millis(200)) {
-                let _ = tx.send(BridgeMessage::Command(AppCommand::Show));
-            }
-        } else {
-            thread::sleep(Duration::from_millis(200));
+        if activation.wait_timeout(Duration::from_millis(200)) {
+            let _ = tx.send(BridgeMessage::Command(AppCommand::Show));
         }
     }
 }
@@ -319,6 +317,7 @@ fn open_shell(
     levels: Arc<LevelSnapshot>,
     gain: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
+    shell: Arc<dyn crate::services::ports::DesktopShell>,
 ) {
     let theme = settings.theme();
     gpui_kit::application()
@@ -342,6 +341,7 @@ fn open_shell(
             let window_levels = levels;
             let window_gain = gain;
             let window_targets = targets;
+            let window_shell = shell;
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 window.set_window_title("Skrivli");
                 cx.new(|cx| {
@@ -351,6 +351,7 @@ fn open_shell(
                         window_writer,
                         commands,
                         window_shutdown,
+                        window_shell,
                         window_recording,
                         window_library,
                         window_player,

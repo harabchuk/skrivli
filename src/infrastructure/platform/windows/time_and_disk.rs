@@ -1,16 +1,17 @@
-//! Wall clock and free-space probes used by the recording host.
-//! Tests inject their own clock and free-space values.
+//! Wall clock, QPC, free space, and COM apartment helpers.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use windows::core::PCWSTR;
+use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::System::SystemInformation::GetLocalTime;
 
 use crate::common::error::AppError;
 use crate::domain::audio::CivilTime;
-use crate::services::recording::{FreeSpace, PerformanceCounter, RecordingClock};
+use crate::services::ports::{CaptureError, FreeSpace, PerformanceCounter, RecordingClock};
 
 pub(crate) struct SystemClock;
 
@@ -47,7 +48,7 @@ pub(crate) struct QpcCounter;
 
 impl PerformanceCounter for QpcCounter {
     fn sample(&self) -> (u64, u64) {
-        super::capture::qpc_now().unwrap_or((0, 0))
+        qpc_now().unwrap_or((0, 0))
     }
 }
 
@@ -64,6 +65,46 @@ impl FreeSpace for WindowsDisk {
         }
         Ok(free)
     }
+}
+
+pub(crate) struct ComApartment {
+    uninit: bool,
+}
+
+impl ComApartment {
+    pub(crate) fn multithreaded() -> Result<Self, AppError> {
+        // SAFETY: this thread owns the apartment. S_FALSE means it was already
+        // initialized, so this guard must not call CoUninitialize.
+        let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if hr.0 == 0 {
+            Ok(Self { uninit: true })
+        } else if hr.0 == 1 || hr.0 == RPC_E_CHANGED_MODE.0 {
+            Ok(Self { uninit: false })
+        } else {
+            Err(AppError::message("microphone", hr.0.to_string()))
+        }
+    }
+}
+
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        if self.uninit {
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
+const RPC_E_CHANGED_MODE: HRESULT = HRESULT(0x80010106_u32 as i32);
+
+fn qpc_now() -> Result<(u64, u64), CaptureError> {
+    let mut counter = 0_i64;
+    let mut frequency = 0_i64;
+    unsafe { QueryPerformanceCounter(&mut counter) }.map_err(|_| CaptureError::Failed)?;
+    unsafe { QueryPerformanceFrequency(&mut frequency) }.map_err(|_| CaptureError::Failed)?;
+    if frequency <= 0 {
+        return Err(CaptureError::Failed);
+    }
+    Ok((counter as u64, frequency as u64))
 }
 
 fn existing_ancestor(path: &Path) -> std::path::PathBuf {

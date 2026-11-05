@@ -113,13 +113,13 @@ This is a firm framework decision, **not** an optional later UI improvement.
  │  audio: flexaudio mic + loopback → SPSC → timed mixer → peak snapshots │
  │  files: WAV writer / reader / playback / optional FLAC encoder       │
  │  ai: decode → 16 kHz mono → whisper.cpp → transcript                  │
- │  storage: settings / library / sidecars / folder watcher             │
- │  windows: tray / hotkey / shell dialogs / autostart                   │
+ │  storage: settings / library / sidecars (no OS APIs)                 │
+ │  platform/: shell, tray, trash, watch, replace, clocks, disk, wake   │
  └───────────────────────────────────────────────────────────────────────┘
                         domain/: pure models, timestamp rules, text
 ```
 
-`domain/` contains no GPUI, Windows, COM, file I/O or AI dependency. `services/` express use cases and depend on small ports where implementation interchangeability or testing warrants them. `infrastructure/` implements adapters. `app/` wires services into views. UI rendering must never own a capture handle or call Whisper.
+`domain/` contains no GPUI, Windows, COM, file I/O or AI dependency. `services/` express use cases and depend on small ports where implementation interchangeability or testing warrants them. `infrastructure/` implements adapters. OS calls are forbidden outside `infrastructure/platform/<os>/`. `app/` wires the platform host into views. UI rendering must never own a capture handle or call Whisper.
 
 ### 4.2 Threads and communication
 
@@ -166,6 +166,43 @@ pub enum AppEvent {
 
 These are illustrative types, not ready-to-compile declarations; IDs and state types belong to the appropriate domain/service modules.
 
+### 4.4 Adding a platform
+
+Ship another OS only when that target is committed. v1 is Windows only. The compiler target selects the host. `infrastructure/platform/mod.rs` is the only `target_os` branch in the app. `#[cfg(windows)]` compiles `platform/windows/`. A Linux port adds `platform/linux/` and a `#[cfg(target_os = "linux")]` re-export of the same function names. Use `target_os`, not `cfg(unix)`, because macOS is also Unix. Do not use a Cargo feature as the OS switch.
+
+One binary contains one host. `cargo build` on Windows compiles only the Windows module. `cargo build --target x86_64-unknown-linux-gnu` (or a native `cargo build` on Linux) sets `target_os = "linux"`, type-checks `platform/linux/`, and does not type-check `platform/windows/`. OS-only crates follow that: `[target.'cfg(windows)'.dependencies]` for the `windows` crate, and `[target.'cfg(target_os = "linux")'.dependencies]` for Linux crates. `build.rs` already keys off `CARGO_CFG_TARGET_OS`, which matches the target triple during a cross compile.
+
+Do not sprinkle `cfg` through views, services, domain, or storage. If a call needs the OS, it belongs on the host surface in `services/ports.rs` (traits) or as a free function on `infrastructure::platform` (`replace_file`, `user_paths`, `spawn_device_watch`, `clock`, `disk`, `performance_counter`). `domain/` stays free of GPUI, OS APIs, file I/O, and AI types.
+
+**Implement these pieces for the new OS** before that OS can record, hide to tray, and manage the library. Behavior must match the Windows product promises (trash rather than permanent delete, one running instance, close-to-tray, atomic settings and sidecars).
+
+- **Desktop shell.** Folder picker, reveal the recordings directory in the file manager, and show/hide/minimize the main window. Use GPUI’s window API when that backend’s hide and minimize actually work. The Windows path stays `ShowWindow` because gpui-pre 0.3.11’s Windows hide is a no-op (D-01).
+- **Tray.** Status icon, the same commands as `HostCommand` / `AppCommand` (show/hide, start/stop, open folder, settings, exit), and a best-effort session-end signal so logoff still finalizes a recording. Re-add the icon if the shell restarts. Windows uses `Shell_NotifyIconW` on a private message window, not a GPUI subclass.
+- **Single instance.** An OS lock plus a way for the second process to ask the first to show itself, then exit without touching a `.partial` file. The guard drops on the thread that acquired it.
+- **Trash.** Move the recording and its `.json` / `.txt` sidecars to the system trash. Windows: Recycle Bin via `SHFileOperationW`.
+- **Directory watch.** Debounced `Changed`, plus `Poll` when notifications are unavailable. Missing folders are polled until they appear. Windows uses `FindFirstChangeNotificationW`. A later replacement may use the `notify` crate behind this same trait; do not call `notify` from `services/library.rs`.
+- **Atomic replace.** `replace_file` must replace an existing destination and remove the temp name. Windows uses `ReplaceFileW` because `std::fs::rename` fails when the destination exists. Unix rename replaces; that body is written only with the Unix host.
+- **User directories.** Fill the three bases `AppPaths::from_bases` already takes. Windows: `%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`. A macOS host maps Application Support, Logs, and the home directory. A Linux host maps XDG config, state, and home. Default recordings stay under Documents via `AppPaths::recordings_dir`.
+- **Recording clock, performance counter, free space.** `RecordingClock::local` is civil local time. `PerformanceCounter::sample` returns `(ticks, ticks_per_second)` for the existing timeline in `domain/chunk_plan.rs` (Windows: QPC). `FreeSpace` reports bytes available for the recordings directory (Windows: `GetDiskFreeSpaceExW`).
+- **Capture.** Do not write a new `CapturePort` for Linux or macOS. flexaudio already selects the backend (cpal mic; PipeWire, WASAPI, or macOS system loopback) and normalizes to 48 kHz stereo `f32`. Keep `infrastructure/audio/flex_capture.rs`. Pass that OS’s `PerformanceCounter` into the existing adapters so the worker does not call QPC. Re-enumerate with `flexaudio::devices()` into the same `DeviceCatalog`. Implement `spawn_device_watch` for that OS: Windows needs `IMMNotificationClient` because flexaudio’s `DeviceWatcher` is a no-op except on Linux; an OS where `flexaudio::watch_devices` reports events should use that and still call `enumerate_catalog`. Do not change the mixer. A capture adapter under `platform/<os>/` is only for a target flexaudio does not support.
+- **Playback.** Keep cpal’s default host unless that host cannot play PCM16 WAV. A special player belongs in `platform/<os>/`, and `files/player.rs` depends on a small output port instead of growing OS `cfg`.
+- **Packaging.** Windows icon and manifest stay in `build.rs`. Add that OS’s bundle, `.desktop` file, or equivalent beside it. Do not compile `winresource` for the new target.
+- **Not built yet.** When autostart, global hotkey, or whisper.cpp land, their OS APIs and native build flags go under `platform/<os>/` (or that crate’s build script), behind a port in `services/ports.rs`. Services do not link shell or inference libraries themselves.
+
+**Prove it**
+
+- `cargo test` on that host uses fakes for capture, clock, disk, trash, and watch. It does not open a microphone.
+- `cfg` the tests that need a real shell, tray, or loopback device.
+- Update `skrivli-product.md` only when the OS is actually something a user can run. Until then this section is the contract and the product stays Windows.
+- Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` on the new target.
+
+**Do not**
+
+- Do not put a second recording state machine in the tray.
+- Do not claim `Send` or `Sync` for COM or other apartment-bound wrappers.
+- Do not log audio samples or transcript text.
+- Do not copy Win32 paths (`Local\Skrivli.SingleInstance`, `%LOCALAPPDATA%\Skrivli\rescue\`) into another OS. The rescue directory comes from `AppPaths::rescue_dir()`.
+
 ---
 
 ## 5. Source layout
@@ -207,9 +244,8 @@ skrivli/
 │   │   ├── mod.rs
 │   │   ├── audio/
 │   │   │   ├── mod.rs
-│   │   │   ├── devices.rs
-│   │   │   ├── capture.rs
-│   │   │   ├── loopback.rs
+│   │   │   ├── devices.rs          # flexaudio catalog (no Win32)
+│   │   │   ├── flex_capture.rs
 │   │   │   ├── mixer.rs
 │   │   │   ├── resampler.rs
 │   │   │   └── format.rs
@@ -221,21 +257,26 @@ skrivli/
 │   │   │   ├── mod.rs
 │   │   │   ├── settings.rs
 │   │   │   ├── library.rs
-│   │   │   ├── sidecar.rs
-│   │   │   └── watcher.rs
+│   │   │   └── sidecar.rs
 │   │   ├── files/
 │   │   │   ├── mod.rs
 │   │   │   ├── wav.rs
 │   │   │   ├── flac.rs
 │   │   │   ├── reader.rs
 │   │   │   └── player.rs
-│   │   └── windows/
-│   │       ├── mod.rs
-│   │       ├── autostart.rs
-│   │       ├── hotkeys.rs
-│   │       ├── clipboard.rs
-│   │       ├── tray.rs
-│   │       └── dialogs.rs
+│   │   └── platform/
+│   │       ├── mod.rs              # cfg(windows) → windows; else compile_error
+│   │       └── windows/            # only tree allowed to use the windows crate
+│   │           ├── mod.rs          # host() + free functions
+│   │           ├── shell.rs
+│   │           ├── tray.rs
+│   │           ├── single_instance.rs
+│   │           ├── trash.rs
+│   │           ├── watcher.rs
+│   │           ├── replace.rs
+│   │           ├── paths.rs
+│   │           ├── time_and_disk.rs
+│   │           └── device_wake.rs
 │   ├── ui/
 │   │   ├── mod.rs
 │   │   ├── theme.rs
@@ -272,11 +313,11 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `app/` | GPUI Kit bootstrap, dependency wiring, application-wide actions and lifecycle |
 | `domain/` | Audio formats, timestamp/chunk types, recording and transcript data models, pure text formatting |
 | `services/` | Recording sessions, idle level monitoring, transcription jobs and orchestration |
-| `infrastructure/audio/` | flexaudio capture adapters, device catalog, mixing and resampling |
+| `infrastructure/audio/` | flexaudio capture adapters, device catalog, mixing and resampling (no OS APIs) |
 | `infrastructure/ai/` | Whisper engine integration and local model management |
-| `infrastructure/storage/` | JSON settings, recording library, sidecars and directory watching |
+| `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
 | `infrastructure/files/` | WAV writer, optional FLAC encoder/reader via `flac-codec`, audio reader and player |
-| `infrastructure/windows/` | System tray, global hotkeys, startup behavior and Windows dialogs |
+| `infrastructure/platform/` | Sole home for OS APIs: shell, tray, trash, watch, replace, clocks, disk, device wake |
 | `ui/` | Reusable GPUI Kit compositions and custom GPUI elements such as level meters |
 | `views/` | GPUI screens, window composition and presentation state |
 | `tests/` | End-to-end application integration tests and reusable test support |
@@ -464,7 +505,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 
 ### 8.5 System tray (native Windows integration)
 
-- The tray is **not a GPUI widget**: implement Windows `Shell_NotifyIconW` behind `infrastructure/windows/tray.rs`, potentially using a supported tray crate if it fulfills shell lifecycle requirements.
+- The tray is **not a GPUI widget**: implement Windows `Shell_NotifyIconW` behind `infrastructure/platform/windows/tray.rs`, potentially using a supported tray crate if it fulfills shell lifecycle requirements.
 - Idle/recording icons and tooltip `Recording HH:MM:SS`.
 - Left click toggles window visibility. Right-click menu: **Show Skrivli**, **Start/Stop recording**, **Open recordings folder**, **Settings**, **Exit**.
 - Minimize hides to tray. Close hides to tray by default (configurable), with a one-time message explaining the app is still running. Exit is explicit.
@@ -599,7 +640,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 - Local summaries and action items (e.g. llama.cpp), without cloud dependency by default.
 - Full-text transcript search across the recording library.
 - Optional ggml GPU acceleration on supported Windows systems, with a validated distribution path.
-- Consider more platform backends only when there is a committed non-Windows target.
+- Consider more platform backends only when there is a committed non-Windows target. Follow section **4.4 Adding a platform**.
 
 ---
 

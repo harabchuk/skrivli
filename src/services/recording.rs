@@ -25,6 +25,10 @@ use crate::infrastructure::files::wav::{WavWrite, WavWriter};
 
 use super::lease::EndpointLease;
 
+pub(crate) use super::ports::{
+    CaptureError, CapturePort, CaptureStream, FreeSpace, PerformanceCounter, RecordingClock,
+};
+
 /// Free space required before a recording starts and during periodic checks.
 pub(crate) const FREE_SPACE_FLOOR_BYTES: u64 = 200 * 1024 * 1024;
 /// How often an active session rechecks destination free space and writability.
@@ -76,14 +80,6 @@ pub(crate) struct RecordSnapshot {
     pub(crate) id: Option<RecordingId>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CaptureError {
-    PrivacyDenied,
-    Unavailable,
-    UnsupportedFormat,
-    Failed,
-}
-
 pub(crate) fn capture_notice(error: CaptureError) -> &'static str {
     match error {
         CaptureError::PrivacyDenied => NOTICE_PRIVACY,
@@ -91,35 +87,6 @@ pub(crate) fn capture_notice(error: CaptureError) -> &'static str {
         CaptureError::UnsupportedFormat => NOTICE_FORMAT,
         CaptureError::Failed => NOTICE_START,
     }
-}
-
-pub(crate) trait CaptureStream: Send {
-    fn pull(&mut self) -> Result<Option<AudioBlock>, CaptureError>;
-    fn close(&mut self);
-    fn overruns(&self) -> u64;
-}
-
-pub(crate) trait CapturePort: Send {
-    fn open(
-        &mut self,
-        endpoint_id: &str,
-        origin: SessionOrigin,
-        drift_error: Arc<std::sync::atomic::AtomicI64>,
-    ) -> Result<Box<dyn CaptureStream>, CaptureError>;
-}
-
-/// QPC sample used to build the session origin and to decide mix lateness.
-pub(crate) trait PerformanceCounter: Send {
-    fn sample(&self) -> (u64, u64);
-}
-
-pub(crate) trait RecordingClock: Send {
-    fn unix_millis(&self) -> u64;
-    fn local(&self) -> CivilTime;
-}
-
-pub(crate) trait FreeSpace: Send {
-    fn available_bytes(&self, directory: &Path) -> Result<u64, AppError>;
 }
 
 pub(crate) struct StartRequest {

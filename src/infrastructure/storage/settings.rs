@@ -1,13 +1,11 @@
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use windows::core::PCWSTR;
-use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_IGNORE_MERGE_ERRORS};
 
 use crate::common::error::AppError;
+use crate::infrastructure::platform;
 
 pub(crate) const SCHEMA_VERSION: u32 = 3;
 
@@ -282,7 +280,7 @@ impl Settings {
             file.sync_all()
                 .map_err(|source| AppError::io("save settings", source))?;
         }
-        replace_file(&temp, path)
+        platform::replace_file(&temp, path, "save settings")
     }
 }
 
@@ -320,37 +318,6 @@ fn temp_sibling(path: &Path) -> PathBuf {
         .unwrap_or_else(|| std::ffi::OsString::from("settings.json"));
     name.push(".tmp");
     path.with_file_name(name)
-}
-
-/// `std::fs::rename` fails on Windows when the destination already exists.
-/// `ReplaceFileW` replaces that destination and removes the temp name.
-fn replace_file(replacement: &Path, replaced: &Path) -> Result<(), AppError> {
-    if !replaced.exists() {
-        return std::fs::rename(replacement, replaced)
-            .map_err(|source| AppError::io("save settings", source));
-    }
-    let replacement_wide = wide_path(replacement);
-    let replaced_wide = wide_path(replaced);
-    // SAFETY: both buffers are NUL-terminated and point at files in the same
-    // directory. The temp file is closed. ReplaceFileW moves it onto `replaced`.
-    let result = unsafe {
-        ReplaceFileW(
-            PCWSTR(replaced_wide.as_ptr()),
-            PCWSTR(replacement_wide.as_ptr()),
-            PCWSTR::null(),
-            REPLACEFILE_IGNORE_MERGE_ERRORS,
-            None,
-            None,
-        )
-    };
-    result.map_err(|error| AppError::message("save settings", error.to_string()))
-}
-
-fn wide_path(path: &Path) -> Vec<u16> {
-    path.as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect()
 }
 
 #[cfg(test)]

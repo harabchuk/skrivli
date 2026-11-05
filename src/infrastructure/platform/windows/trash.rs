@@ -1,6 +1,6 @@
-//! Send files to the Windows Recycle Bin via `SHFileOperationW`.
+//! Recycle Bin via `SHFileOperationW`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use windows::core::PCWSTR;
 use windows::Win32::UI::Shell::{
@@ -9,9 +9,18 @@ use windows::Win32::UI::Shell::{
 };
 
 use crate::common::error::AppError;
+use crate::services::ports::Trash;
+
+pub(super) struct WindowsTrash;
+
+impl Trash for WindowsTrash {
+    fn discard(&self, paths: &[PathBuf]) -> Result<(), AppError> {
+        send_to_recycle_bin(paths)
+    }
+}
 
 /// Move one or more existing files to the Recycle Bin. Missing paths are skipped.
-pub(crate) fn send_to_recycle_bin(paths: &[impl AsRef<Path>]) -> Result<(), AppError> {
+fn send_to_recycle_bin(paths: &[impl AsRef<Path>]) -> Result<(), AppError> {
     let existing: Vec<&Path> = paths
         .iter()
         .map(AsRef::as_ref)

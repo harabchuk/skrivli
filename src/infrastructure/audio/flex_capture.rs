@@ -16,18 +16,33 @@ use flexaudio::{
 };
 
 use crate::domain::audio::{SessionOrigin, INTERNAL_CHANNELS, INTERNAL_SAMPLE_RATE};
-use crate::services::recording::{CaptureError, CapturePort, CaptureStream, PerformanceCounter};
+use crate::services::ports::{CaptureError, CapturePort, CaptureStream, PerformanceCounter};
 
 use super::queue::{AudioBlock, CAPTURE_QUEUE_CAPACITY};
 use super::resampler::StereoResampler;
-use super::system::QpcCounter;
 
 /// Microphone capture through flexaudio (`SourceKind::Mic`).
-pub(crate) struct FlexMicCapture;
+pub(crate) struct FlexMicCapture {
+    clock: Arc<dyn PerformanceCounter>,
+}
 
 /// System loopback through flexaudio (`SourceKind::SystemLoopback`) with classic
 /// WASAPI silent-render keepalive enabled (flexaudio default).
-pub(crate) struct FlexSystemCapture;
+pub(crate) struct FlexSystemCapture {
+    clock: Arc<dyn PerformanceCounter>,
+}
+
+impl FlexMicCapture {
+    pub(crate) fn new(clock: Arc<dyn PerformanceCounter>) -> Self {
+        Self { clock }
+    }
+}
+
+impl FlexSystemCapture {
+    pub(crate) fn new(clock: Arc<dyn PerformanceCounter>) -> Self {
+        Self { clock }
+    }
+}
 
 impl CapturePort for FlexMicCapture {
     fn open(
@@ -36,7 +51,13 @@ impl CapturePort for FlexMicCapture {
         origin: SessionOrigin,
         drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
-        open_flex_port(SourceKind::Mic, endpoint_id, origin, drift_error)
+        open_flex_port(
+            SourceKind::Mic,
+            endpoint_id,
+            origin,
+            drift_error,
+            Arc::clone(&self.clock),
+        )
     }
 }
 
@@ -47,7 +68,13 @@ impl CapturePort for FlexSystemCapture {
         origin: SessionOrigin,
         drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
-        open_flex_port(SourceKind::SystemLoopback, endpoint_id, origin, drift_error)
+        open_flex_port(
+            SourceKind::SystemLoopback,
+            endpoint_id,
+            origin,
+            drift_error,
+            Arc::clone(&self.clock),
+        )
     }
 }
 
@@ -56,6 +83,7 @@ fn open_flex_port(
     endpoint_id: &str,
     origin: SessionOrigin,
     drift_error: Arc<AtomicI64>,
+    clock: Arc<dyn PerformanceCounter>,
 ) -> Result<Box<dyn CaptureStream>, CaptureError> {
     let device_id = if endpoint_id.is_empty() {
         None
@@ -78,6 +106,7 @@ fn open_flex_port(
             thread_stop,
             thread_overruns,
             ready_tx,
+            clock,
         );
     });
     match ready_rx.recv_timeout(Duration::from_secs(8)) {
@@ -109,6 +138,7 @@ fn run_flex_worker(
     stop: Arc<AtomicBool>,
     overruns: Arc<AtomicU64>,
     ready: std::sync::mpsc::Sender<Result<(), CaptureError>>,
+    clock: Arc<dyn PerformanceCounter>,
 ) {
     let config = StreamConfig {
         kind,
@@ -139,7 +169,6 @@ fn run_flex_worker(
     let mut resampler = StereoResampler::new(INTERNAL_SAMPLE_RATE, INTERNAL_SAMPLE_RATE);
     let mut session_base: Option<u64> = None;
     let mut pending_gap = false;
-    let clock = QpcCounter;
 
     while !stop.load(Ordering::Acquire) {
         if let Some(error) = drain_events(&mut stream) {
@@ -153,7 +182,8 @@ fn run_flex_worker(
                     overruns.fetch_add(drops, Ordering::Relaxed);
                     pending_gap = true;
                 }
-                let timeline = map_timeline(origin, &clock, &mut session_base, chunk.frame_index);
+                let timeline =
+                    map_timeline(origin, clock.as_ref(), &mut session_base, chunk.frame_index);
                 let discontinuity = chunk_discontinuity(&chunk) || pending_gap;
                 resampler.set_drift_error(drift_error.load(Ordering::Relaxed));
                 let samples = resampler.process(&chunk.data);
@@ -302,7 +332,7 @@ mod tests {
     use super::{chunk_discontinuity, map_flex_error, map_timeline, AudioBlock};
     use crate::domain::audio::{SessionOrigin, INTERNAL_SAMPLE_RATE};
     use crate::infrastructure::audio::resampler::StereoResampler;
-    use crate::services::recording::{CaptureError, PerformanceCounter};
+    use crate::services::ports::{CaptureError, PerformanceCounter};
     use flexaudio::{AudioChunk, ChunkFlags, Error, ErrorKind, Permission};
 
     fn block_from_chunk(

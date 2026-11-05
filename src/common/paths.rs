@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use super::error::AppError;
-
 const APP_DIR: &str = "Skrivli";
 
 /// Folders derived from roaming, local, and home bases. Nothing is created here.
@@ -23,16 +21,6 @@ impl AppPaths {
             local_app_data: local_app_data.into(),
             home: home.into(),
         }
-    }
-
-    pub(crate) fn from_env() -> Result<Self, AppError> {
-        let roaming = std::env::var_os("APPDATA")
-            .ok_or_else(|| AppError::message("app paths", "APPDATA is not set"))?;
-        let local = std::env::var_os("LOCALAPPDATA")
-            .ok_or_else(|| AppError::message("app paths", "LOCALAPPDATA is not set"))?;
-        let home = std::env::var_os("USERPROFILE")
-            .ok_or_else(|| AppError::message("app paths", "USERPROFILE is not set"))?;
-        Ok(Self::from_bases(roaming, local, home))
     }
 
     pub(crate) fn settings_file(&self) -> PathBuf {

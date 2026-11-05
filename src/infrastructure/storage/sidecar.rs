@@ -6,16 +6,14 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use windows::core::PCWSTR;
-use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_IGNORE_MERGE_ERRORS};
 
 use crate::common::error::AppError;
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::{RecordingFormat, SidecarState, TranscriptStatus};
+use crate::infrastructure::platform;
 
 pub(crate) const SIDECAR_SCHEMA: u32 = 3;
 const LEGACY_SCHEMA: u32 = 2;
@@ -130,7 +128,7 @@ pub(crate) fn write_sidecar(wav_path: &Path, sidecar: &Sidecar) -> Result<PathBu
         file.sync_all()
             .map_err(|source| AppError::io("save recording", source))?;
     }
-    replace_file(&temp, &path)?;
+    platform::replace_file(&temp, &path, "save recording")?;
     Ok(path)
 }
 
@@ -218,34 +216,6 @@ fn temp_sibling(path: &Path) -> PathBuf {
         .unwrap_or_else(|| std::ffi::OsString::from("recording.json"));
     name.push(".tmp");
     path.with_file_name(name)
-}
-
-fn replace_file(replacement: &Path, replaced: &Path) -> Result<(), AppError> {
-    if !replaced.exists() {
-        return std::fs::rename(replacement, replaced)
-            .map_err(|source| AppError::io("save recording", source));
-    }
-    let replacement_wide = wide_path(replacement);
-    let replaced_wide = wide_path(replaced);
-    // SAFETY: both buffers are NUL-terminated files in the same directory.
-    let result = unsafe {
-        ReplaceFileW(
-            PCWSTR(replaced_wide.as_ptr()),
-            PCWSTR(replacement_wide.as_ptr()),
-            PCWSTR::null(),
-            REPLACEFILE_IGNORE_MERGE_ERRORS,
-            None,
-            None,
-        )
-    };
-    result.map_err(|error| AppError::message("save recording", error.to_string()))
-}
-
-fn wide_path(path: &Path) -> Vec<u16> {
-    path.as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect()
 }
 
 #[cfg(test)]
