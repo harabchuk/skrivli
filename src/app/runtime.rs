@@ -1,4 +1,4 @@
-//! Foreground dispatch from menus onto the shell entity.
+//! Foreground dispatch from GPUI actions onto the shell entity.
 
 use gpui_kit::{AnyWindowHandle, App, Entity, Global, Subscription};
 

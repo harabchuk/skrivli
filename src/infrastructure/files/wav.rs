@@ -171,10 +171,10 @@ impl WavWriter {
             self.repair()?;
             return Ok(WavWrite::SafeStop { frames: 0 });
         }
-        let num_samples = u32::try_from(accept_frames.saturating_mul(usize::from(INTERNAL_CHANNELS)))
-            .map_err(|_| {
-                AppError::message("save recording", "frame count does not fit in a length")
-            })?;
+        let num_samples = u32::try_from(
+            accept_frames.saturating_mul(usize::from(INTERNAL_CHANNELS)),
+        )
+        .map_err(|_| AppError::message("save recording", "frame count does not fit in a length"))?;
         {
             let writer = self.writer_mut()?;
             let mut samples = writer.get_i16_writer(num_samples);
@@ -573,8 +573,7 @@ mod tests {
                 .append(true)
                 .open(&partial)
                 .expect("append");
-            file.write_all(&[1, 0, 2, 0, 3, 0, 4, 0])
-                .expect("pcm");
+            file.write_all(&[1, 0, 2, 0, 3, 0, 4, 0]).expect("pcm");
         }
         let garbage = dir.join("Skrivli_bad.wav.partial");
         fs::write(&garbage, b"not a wav header at all, still too short").expect("garbage");

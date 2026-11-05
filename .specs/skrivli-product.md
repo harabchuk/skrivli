@@ -49,7 +49,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 - Resizable main window with two tabs: **Record** and **Recordings**.
 - Remembers size and position across launches (restored safely on the available display).
 - Status area shows recording state, elapsed time, and transcription progress when relevant.
-- Menus include opening the recordings folder, Settings, About, and Exit.
+- A Settings gear on the tab bar opens Settings; About is available from that dialog. Opening the recordings folder and Exit remain available from the Recordings tab and the tray.
 
 ### System tray
 

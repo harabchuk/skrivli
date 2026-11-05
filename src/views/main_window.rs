@@ -1,15 +1,15 @@
-//! Resizable shell: menus, Record and Recordings tabs, and the status strip.
+//! Resizable shell: Record and Recordings tabs, settings gear, and the status strip.
 
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::menu::AppMenuBar;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::table::{TableEvent, TableSelection, TableState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, IconName};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     div, px, App, Context, Entity, FocusHandle, IntoElement, ParentElement, Render, SharedString,
@@ -54,7 +54,6 @@ const BOUNDS_DEBOUNCE: Duration = Duration::from_millis(400);
 
 pub(crate) struct MainWindow {
     focus: FocusHandle,
-    menu_bar: Entity<AppMenuBar>,
     presentation: Presentation,
     settings: Settings,
     writer: SettingsWriter,
@@ -111,7 +110,6 @@ impl MainWindow {
     ) -> Self {
         let focus = cx.focus_handle().tab_stop(true);
         window.focus(&focus, cx);
-        let menu_bar = AppMenuBar::new(cx);
         let recordings_table = cx.new(|cx| {
             TableState::new(RecordingsDelegate::new(), window, cx)
                 .row_selectable(true)
@@ -214,7 +212,6 @@ impl MainWindow {
         });
         Self {
             focus,
-            menu_bar,
             presentation,
             settings,
             writer,
@@ -1082,6 +1079,7 @@ impl Render for MainWindow {
             }
         };
         let status = SharedString::from(self.presentation.status_line());
+        let settings_entity = entity.clone();
         v_flex()
             .id("skrivli-shell")
             .track_focus(&self.focus)
@@ -1089,18 +1087,22 @@ impl Render for MainWindow {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
-                h_flex()
-                    .h(px(32.))
-                    .px_2()
-                    .items_center()
-                    .child(self.menu_bar.clone()),
-            )
-            .child(
                 TabBar::new("shell-tabs")
                     .px_2()
                     .selected_index(selected)
                     .child(Tab::new().label("Record"))
                     .child(Tab::new().label("Recordings"))
+                    .suffix(
+                        Button::new("open-settings")
+                            .ghost()
+                            .icon(IconName::Settings)
+                            .accessibility_label("Settings")
+                            .on_click(move |_event, window, cx| {
+                                settings_entity.update(cx, |view, cx| {
+                                    view.handle(AppCommand::OpenSettings, window, cx);
+                                });
+                            }),
+                    )
                     .on_click(move |index, window, cx| {
                         let tab = if *index == 0 {
                             AppTab::Record

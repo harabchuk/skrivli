@@ -4,10 +4,16 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::select::{SearchableVec, Select, SelectState};
 use gpui_kit::component::slider::{Slider, SliderState};
-use gpui_kit::component::{h_flex, v_flex, Disableable as _};
-use gpui_kit::{px, App, ClickEvent, Entity, IntoElement, ParentElement, SharedString, Styled};
+use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _};
+use gpui_kit::{
+    div, px, App, ClickEvent, Entity, IntoElement, ParentElement, SharedString, Styled,
+};
 
 use crate::ui::components::level_meter::level_meter;
+
+const FIELD_LABEL_WIDTH: f32 = 110.;
+const START_BUTTON_WIDTH: f32 = 240.;
+const GAIN_SLIDER_WIDTH: f32 = 100.;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_tab<Browse, Toggle, Agc>(
@@ -45,20 +51,19 @@ where
     v_flex()
         .gap_3()
         .child("Input")
-        .child("Microphone")
-        .child(
+        .child(labeled_select(
+            "Microphone",
             Select::new(microphone)
                 .disabled(locked)
                 .accessibility_label("Microphone"),
-        )
-        .child(level_meter("Mic", mic_db, mic_hold, cx))
-        .child("System audio")
-        .child(
+        ))
+        .child(gain_row(gain, agc, gain_label, saving, toggle_agc))
+        .child(labeled_select(
+            "System audio",
             Select::new(system)
                 .disabled(locked)
                 .accessibility_label("System audio"),
-        )
-        .child(level_meter("System", system_db, system_hold, cx))
+        ))
         .child("Output")
         .child(
             h_flex().gap_2().items_center().child(destination).child(
@@ -69,20 +74,63 @@ where
             ),
         )
         .child(
-            Button::new("toggle-recording")
-                .primary()
-                .label(toggle_label)
-                .disabled(saving)
-                .on_click(toggle),
+            h_flex().w_full().justify_center().child(
+                Button::new("toggle-recording")
+                    .primary()
+                    .large()
+                    .w(px(START_BUTTON_WIDTH))
+                    .label(toggle_label)
+                    .disabled(saving)
+                    .on_click(toggle),
+            ),
         )
-        .child(elapsed)
-        .child(phase)
+        .child(h_flex().w_full().justify_center().child(elapsed))
+        .child(h_flex().w_full().justify_center().child(phase))
+        .child(level_meter("Mic", mic_db, mic_hold, cx))
+        .child(level_meter("System", system_db, system_hold, cx))
+        .child(notice)
+}
+
+fn labeled_select(label: &str, select: impl IntoElement) -> impl IntoElement {
+    h_flex()
+        .gap_3()
+        .items_center()
+        .w_full()
+        .child(
+            div()
+                .w(px(FIELD_LABEL_WIDTH))
+                .flex_shrink_0()
+                .child(label.to_string()),
+        )
+        .child(div().flex_1().min_w_0().child(select))
+}
+
+fn gain_row<Agc>(
+    gain: &Entity<SliderState>,
+    agc: bool,
+    gain_label: SharedString,
+    saving: bool,
+    toggle_agc: Agc,
+) -> impl IntoElement
+where
+    Agc: Fn(&bool, &mut gpui_kit::Window, &mut App) + 'static,
+{
+    h_flex()
+        .gap_3()
+        .items_center()
+        .w_full()
+        .child(div().w(px(FIELD_LABEL_WIDTH)).flex_shrink_0())
         .child(
             h_flex()
                 .gap_2()
                 .items_center()
                 .child("Gain")
-                .child(div_slider(gain, agc || saving))
+                .child(
+                    Slider::new(gain)
+                        .disabled(agc || saving)
+                        .w(px(GAIN_SLIDER_WIDTH))
+                        .accessibility_label("Microphone gain"),
+                )
                 .child(gain_label)
                 .child(
                     Checkbox::new("mic-agc")
@@ -92,12 +140,4 @@ where
                         .on_click(toggle_agc),
                 ),
         )
-        .child(notice)
-}
-
-fn div_slider(gain: &Entity<SliderState>, disabled: bool) -> impl IntoElement {
-    Slider::new(gain)
-        .disabled(disabled)
-        .w(px(180.))
-        .accessibility_label("Microphone gain")
 }

@@ -38,7 +38,7 @@ use crate::views::main_window::MainWindow;
 
 use super::actions::{command_from_tray, AppCommand, BridgeMessage};
 use super::bridge::{spawn_shell_producer, SHELL_PULSE_INTERVAL};
-use super::menus::{install, register};
+use super::menus::register;
 use super::runtime::ShellGlobal;
 use super::settings_writer::SettingsWriter;
 use super::shutdown::ShutdownController;
@@ -327,7 +327,6 @@ fn open_shell(
             gpui_kit::init(cx);
             apply_theme(theme, cx);
             register(cx);
-            install(cx);
             let options = shell_window_options(&settings, cx);
             let mut presentation = Presentation::new(
                 settings.close_to_tray(),

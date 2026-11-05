@@ -1,8 +1,9 @@
 //! Settings placeholder. Only close-to-tray is wired; the rest of the form is M8.
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::WindowExt as _;
-use gpui_kit::{App, IntoElement, ParentElement, SharedString, Window};
+use gpui_kit::component::{v_flex, WindowExt as _};
+use gpui_kit::{App, IntoElement, ParentElement, SharedString, Styled, Window};
 
 pub(crate) fn open_settings(
     window: &mut Window,
@@ -13,9 +14,19 @@ pub(crate) fn open_settings(
     window.open_dialog(cx, move |dialog, _, cx| {
         let value = checked(cx);
         let on_change = on_change.clone();
-        dialog
-            .title("Settings")
-            .child(close_to_tray_checkbox(value, on_change))
+        dialog.title("Settings").child(
+            v_flex()
+                .gap_3()
+                .child(close_to_tray_checkbox(value, on_change))
+                .child(
+                    Button::new("settings-about")
+                        .ghost()
+                        .label("About")
+                        .on_click(|_, window, cx| {
+                            open_about(window, cx);
+                        }),
+                ),
+        )
     });
 }
 

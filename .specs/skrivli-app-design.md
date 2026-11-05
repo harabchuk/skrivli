@@ -411,7 +411,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Resizable GPUI Kit application window, minimum target roughly **560 × 420 logical pixels**, with remembered dimensions and monitor-safe restore.
 - Two top tabs: **Record** and **Recordings**. Use GPUI Kit navigation/tab components where they meet requirements, **not** Win32 `CTabCtrl`/`CDialogImpl` child windows.
 - Adopt **GPUI Kit themes, design tokens, typography, buttons, inputs, selectors, tabs, menus, dialogs, tooltips, and other styled controls** as defaults. Use GPUI layout primitives (`div`, flex/grid) to compose screens; avoid duplicating GPUI Kit widgets in custom code.
-- Application menu affordances: **File** (open recordings folder, Settings, Exit), **Help** (About). Prefer GPUI Kit menus; if native Windows menu APIs are required, isolate them in a Windows adapter and document accessibility differences.
+- No in-window File/Help menu bar. Settings opens from a gear button on `TabBar::suffix` (`IconName::Settings`); About is linked from the Settings dialog. Open recordings folder and Exit stay on the Recordings tab and tray.
 - A compact status strip shows recording state, duration and transcription progress.
 - Use logical-pixel layout, Windows DPI-aware assets and explicit keyboard focus/shortcuts. Test per-monitor scaling on real Windows devices.
 - Keep views declarative: update model/entity state when a service event arrives, notify GPUI to rerender, and never allocate an audio device during `Render::render`.
@@ -422,6 +422,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 ┌──────────────────────────────────────────────────┐
 │ INPUT                                            │
 │ Microphone      [ Default communications      ▾ ]│
+│                 Gain ──●──  1.0×  [Auto]         │
 │ System audio    [ Default output device       ▾ ]│
 │                                                  │
 │ OUTPUT                                           │
@@ -431,7 +432,6 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 │                     00:12:34                     │
 │                      ● REC                       │
 │ Mic       ███████████░░░░░░░░       −12 dB       │
-│ Gain      ─────●────  1.0×  [Auto]               │
 │ System    █████░░░░░░░░░░░░░       −24 dB        │
 │                                                  │
 │ [inline device/permission/disk warning]          │

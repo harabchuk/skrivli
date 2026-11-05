@@ -319,10 +319,10 @@ pub(crate) fn recordings_tab(
                 )
                 .child(
                     v_flex()
-                        .w(px(260.))
-                        .flex_shrink_0()
-                        .h_full()
+                        .flex_1()
+                        .min_w(px(200.))
                         .min_h_0()
+                        .h_full()
                         .overflow_hidden()
                         .gap_2()
                         .child(detail),
