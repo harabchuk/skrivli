@@ -235,7 +235,7 @@ skrivli/
 │   ├── domain/
 │   │   ├── mod.rs
 │   │   ├── audio.rs                # formats, AudioBlock, endpoints
-│   │   ├── chunk_plan.rs           # chunking/timeline logic
+│   │   ├── chunk_plan.rs           # QPC session timeline (48 kHz); transcript windows live in transcript.rs
 │   │   ├── recording.rs            # metadata + RecordPhase
 │   │   ├── theme.rs                # ThemePreference
 │   │   └── transcript.rs           # segments, text formatting

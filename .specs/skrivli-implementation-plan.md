@@ -2,7 +2,7 @@
 
 **Target:** Windows 10/11, x86_64-pc-windows-msvc  
 **Stack:** Rust stable, GPUI Kit/GPUI, flexaudio (WASAPI/cpal), local whisper.cpp  
-**Source of truth:** `app-design.md` for product and technical design; `AGENTS.md` for source placement, layering and coding conventions.  
+**Source of truth:** `.specs/skrivli-product.md` for what the user can do; `.specs/skrivli-app-design.md` for architecture; `AGENTS.md` for source placement, layering, and coding conventions.  
 **Status:** Execution backlog; tasks unchecked until implemented and verified.
 
 ## How to execute this plan
@@ -16,7 +16,7 @@
 
 ### Cross-cutting contracts to establish early
 
-1. **Layering:** `domain` has no platform or I/O dependencies; `services` own use-case state machines; `infrastructure` owns COM, threads, disk and FFI; `app` wires commands/events; `views` and `ui` contain presentation only.
+1. **Layering:** `domain` has no platform, GPUI, file I/O, or AI types. `services` own use cases and depend on traits in `services/ports.rs`. `infrastructure` implements those traits. OS calls stay in `infrastructure/platform/windows/` (selected only from `infrastructure/platform/mod.rs`). `app/` is the composition root (`bootstrap`, `bridge`, `menus`, `runtime`, `settings_writer`, `shutdown`) and does not own the shell reducer. `views/` owns `Presentation`, `AppCommand`, and `ShellHooks` and does not import `app/`. `ui/` is Kit overrides and custom controls.
 2. **Thread ownership:** GPUI foreground must never perform capture, decoding, disk scanning, model inference or blocking joins. Every worker has an owner, cancellation/shutdown signal and join strategy; COM objects stay in the correct apartment.
 3. **Commands/events:** a single command path drives toolbar, tray and hotkey. Use discrete structured events, coalesce high-rate progress and meter snapshots and marshal all UI state changes to the GPUI executor.
 4. **Persistence:** settings and JSON sidecars are schema-versioned and written using a temporary sibling file, flush/sync as appropriate, then replace/rename; handle Windows replacement semantics and recovery errors explicitly.
@@ -25,7 +25,7 @@
 
 ### Proposed application-facing types (design sketches)
 
-These are contracts to refine, not guaranteed compiling code:
+The live command path is `views/actions.rs` (`AppCommand`, including `Transcribe` and `CancelTranscription`) and `services/ports.rs` (`HostCommand` from the tray). Recording phase is `domain/recording.rs` `RecordPhase`. Library, playback, and recording publish snapshots (`LibrarySnapshot`, `PlayerSnapshot`, `RecordSnapshot`) rather than one shared event enum. The sketches below are the original shape; new jobs extend those modules instead of adding a second command type.
 
 ```rust
 pub enum AppCommand {
@@ -78,7 +78,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 - [x] Select and pin a GPUI Kit revision and bundled GPUI runtime; start from its official minimal sample, **not** guessed bootstrap APIs.
 - [x] Create/close a real window, initialize GPUI Kit, apply a theme, draw a Kit button/select, and verify input/focus/keyboard interaction.
 - [x] Check supported foreground task/event scheduling, `Render` lifecycle, close interception, selection/editor behavior, overlay/dialog positioning, timers, and window sizing on Windows.
-- [ ] Test 100%/150% display scaling and multiple displays. Record issues/workarounds in `.specs/`.
+- [ ] On a Windows 10/11 machine, run the shell at 100% and 150% scaling and with the window moved to a second monitor. Per-monitor DPI awareness is already the gpui-pre manifest (`PerMonitorV2`); `resources/skrivli.manifest` documents that contract and is not linked, because a second manifest fails the link (D-01). Confirm logical-pixel layout at the 560×420 minimum: tab bar, theme-cycle button, Settings gear, Record and Recordings content, Kit dialogs (Settings, About, tray explanation, exit-while-recording), and the level meter stay inside the window and keep a visible focus ring. Move the window between monitors, quit, and confirm `domain/window_frame` restores into `PlatformDisplay::visible_bounds` instead of opening off-screen. Write the measured scale factors, any Kit overlay or focus bugs, and the workaround into `.specs/decisions.md`.
 
 **Decision gate:** if any required Windows window/keyboard/text API is missing, record a targeted adapter/workaround and verify it **before** committing to dependent UI work.
 
@@ -131,7 +131,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M1 acceptance
 
-- [ ] Tab/navigation/window state works via GPUI Kit; Explorer restart restores tray icon; only one process controls app state.
+- [ ] Manual pass on Windows hardware, written up in `.specs/decisions.md` (D-02 still lists these checks as unrun). Switch Record and Recordings; cycle `ThemePreference` (System, Light, Dark) from the tab-bar control; open Settings from the gear and About from that dialog. The window has no File or Help menu. Resize and move the window, restart, and confirm bounds persist through `ShellHooks` into `app/settings_writer` (debounced, off `render`) and land on a visible monitor. Close and minimize with close-to-tray on, show again from the tray, and Exit. Tray clicks are `HostCommand` values mapped to `AppCommand` and drained on the GPUI thread; Exit removes the notify icon and `ShutdownController` joins workers after `application().run` returns. Restart Explorer and confirm `TaskbarCreated` re-adds the `Shell_NotifyIconW` icon and that menu still hits the same command path. Start a second process while the first window exists and once during startup: it signals `Local\Skrivli.Activate` and exits without a window and without touching a recording. Only the primary process owns `Presentation`.
 
 ---
 
@@ -167,7 +167,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M2 acceptance
 
-- [ ] On real Windows hardware a user can choose microphone and folder, record and stop; a finalized WAV survives app restart and plays back.
+- [ ] On Windows hardware, from the Record tab, choose a microphone (default communications device or an explicit flexaudio id) and a writable folder through `DesktopShell::pick_recordings_folder`. Start and stop go `AppCommand` → `RecordingHost`. The view does not open a capture stream. Stopping produces a finalized `Skrivli_YYYY-MM-DD_HH-MM-SS.wav` (the `.wav.partial` name is gone), a sibling sidecar replaced through `platform::replace_file`, and a duration close to the session clock. Quit, relaunch, and play that file in a normal Windows player and from the Recordings tab (`PlayerHost` plus `infrastructure/files/player.rs`). A refused start (privacy denial or unwritable folder) leaves no capture thread and no header whose sizes disagree with the bytes on disk. `cargo test` keeps using the fake `CapturePort` in `services/recording_harness.rs`.
 
 ---
 
@@ -271,32 +271,32 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M6.1 — Engine binding spike and models
 
-- [ ] Evaluate maintained Rust whisper.cpp bindings versus minimal FFI; select, pin exact versions and build on x86_64 MSVC CPU-only. Verify ownership, callbacks, cancellation and required notices/licenses.
-- [ ] `infrastructure/ai/whisper.rs`: thin safe wrapper around model/context, progress callback and abort flag; no engine pointers cross invalid lifetime/apartment boundaries; avoid stdout noise.
-- [ ] `infrastructure/ai/models.rs`: find installed `ggml-*.bin` in Local AppData/models or user-selected path; validate file readability and model compatibility before job.
-- [ ] Create a trusted manifest with **verified** URLs, SHA-256 digests, size/variant and licenses; download only on explicit user action to a temp file, expose progress/cancel, verify digest, then promote atomically. Never guess hashes or download a model in the background.
-- [ ] Default to compatible quantized multilingual base model after user selection; allow available tiny/base/small choices only when verified.
+- [ ] Spike whisper.cpp on `x86_64-pc-windows-msvc`, CPU only, before any transcript UI. Compare a maintained Rust binding with a minimal FFI crate. Pin the crate and the whisper.cpp revision in `Cargo.lock` and record the choice, license, and notice files in `.specs/decisions.md` (D-07). The spike loads one model, runs a short inference, reports progress, and aborts cooperatively on a worker thread. The native build stays inside that crate's build script, or in `build.rs` flags that apply only to the native library. `views/`, `services/`, and `domain/` stay free of whisper types and of `cfg` for the engine.
+- [ ] Add `infrastructure/ai/whisper.rs` as the only module that holds engine pointers. The wrapper keeps model and context on the owning thread, turns progress and abort callbacks into plain values, and keeps engine stdout and stderr out of the log. Expose it through an inference port on `services/ports.rs` (load, transcribe a chunk, cancel, progress). `services/transcription.rs` depends on that port. `app/bootstrap.rs` builds the real adapter the same way it builds `PlatformHost`. Tests supply a fake. The GPUI foreground thread, including `Render::render`, never calls the engine.
+- [ ] Add `infrastructure/ai/models.rs` to find `ggml-*.bin` files under `AppPaths::models_dir()` (bases come from `platform::user_paths`) and under a path the user picked. Before a job starts, open the file and confirm the pinned engine accepts that variant. Missing, unreadable, and unsupported files are distinct `AppError` values. `user_message()` carries neither transcript text nor audio samples.
+- [ ] Check in a model manifest whose URL, SHA-256, byte size, variant, and license were verified against the downloaded bytes (D-08). A download starts only from an explicit user action: write a temp sibling, report progress, honor cancel, hash the file, and promote it with `infrastructure::platform::replace_file` only when the digest matches. A failed or cancelled download leaves no accepted model. Bootstrap, recording stop, and background retry do not start a download.
+- [ ] Once the user selects it, jobs default to the verified quantized multilingual base model. Offer tiny, base, and small only for rows in that manifest that the pinned engine accepts. Store the choice on `Settings` with a schema bump and migrate-or-fallback in `infrastructure/storage/settings.rs`. A `schema_version` newer than this build still falls back to defaults.
 
 ### M6.2 — Input pipeline and transcription text
 
-- [ ] `infrastructure/files/reader.rs`: validate supported decoder coverage for WAV/MP3 and FLAC (via `flac-codec`); errors identify unsupported codecs.
-- [ ] Normalize streamed audio to 16 kHz mono `f32`, with channel mapping and anti-alias filtering. Unit-test duration, sine pitch/amplitude, high-frequency alias rejection.
-- [ ] `domain/chunk_plan.rs`: split long recordings into approximately 30-minute windows with overlap; apply global timestamp offsets and de-duplicate overlaps, without loading a two-hour recording into memory.
-- [ ] `domain/transcript.rs`: segment/time types and deterministic UTF-8 formatter using `[HH:MM:SS]`, paragraph breaks (~1.5 s pause or ~60 s span), conservative repeated-line cleanup. Atomically write `<basename>.txt`.
-- [ ] Test >1-hour timestamp formatting, segment stitching, repeated genuine speech, empty/silent transcript, and Unicode content.
+- [ ] Decode off the GPUI thread. Keep `infrastructure/files/reader.rs` as the streaming PCM16 WAV reader that `services/playback.rs` (`PlayerHost`) and `infrastructure/files/player.rs` already use. Add a separate transcription reader that pulls the finalized WAV in bounded chunks. When M8 lands FLAC, that reader also accepts FLAC through `flac-codec`. MP3 stays out of v1 until a decoder is pinned and tested. A refused file names the container or codec. The reader opens the finalized path, never the live `.wav.partial`.
+- [ ] Convert each decoded chunk to 16 kHz mono `f32` inside `infrastructure/ai/`, with an explicit downmix and an anti-alias resample. Leave `infrastructure/audio/resampler.rs` as the capture-stream Rubato drift nudge (D-06). Unit-test duration, the pitch and amplitude of a 1 kHz sine, and attenuation of energy above 8 kHz. Logs stay free of samples.
+- [ ] Put transcription window planning in a new `domain/transcript.rs`. Leave `domain/chunk_plan.rs` as the QPC-to-48 kHz session timeline. The planner cuts about 30-minute windows with a fixed overlap, attaches a global timestamp offset to each window, and marks the overlap for later de-duplication. It accepts a streaming length and does its work without holding a two-hour recording in one buffer.
+- [ ] In `domain/transcript.rs`, add segment and time types and a deterministic UTF-8 formatter. Timestamps render as `[HH:MM:SS]`, so 3661 seconds is `[01:01:01]`. Paragraphs break after a pause of about 1.5 seconds or a span of about 60 seconds. The formatter trims whitespace and drops an immediately repeated identical line while keeping genuine repeated speech. `infrastructure/storage` writes `<basename>.txt` through the existing temp-sibling, `sync_all`, and `platform::replace_file` path, using `transcript_path_for` beside the audio. A failed text write leaves the previous `.txt` and the WAV bytes as they were.
+- [ ] Cover timestamps past one hour, overlap stitching, a genuine repeated line that must remain, an empty or silent result, and non-ASCII text. Assert the WAV bytes are unchanged after a successful format and after a failed text write. Colocate pure tests on `domain/transcript.rs` and put the file-write cases in `tests/transcription_flow.rs`.
 
 ### M6.3 — Service queue and persistence
 
-- [ ] `services/transcription.rs`: FIFO queue with one inference worker, `Queued → Preparing → Transcribing → Done/Failed/Cancelled`; cancellation via flag + cooperative callback.
-- [ ] Guard duplicate jobs for same recording, track job IDs, throttle progress to UI, persist significant transitions and final status to sidecar. Restart policy: recover previous in-progress job as interrupted/retryable; no implicit auto-resume unless explicitly designed.
-- [ ] Auto-transcribe **off** by default; when enabled, enqueue only after WAV/sidecar finalization. Never modify recording audio during inference.
-- [ ] Test fake engine success/failure, cancellation, cancellation race at completion, invalid model, large input and queue ordering in `tests/transcription_flow.rs`.
+- [ ] Add `services/transcription.rs` with one FIFO queue and one inference worker. The host follows `RecordingHost` and `PlayerHost`: `spawn` from `app/bootstrap.rs`, `shutdown` from `app/shutdown.rs`, and `join` after `application().run` returns. States run `Queued → Preparing → Transcribing → Done`, `Failed`, or `Cancelled`. Cancel sets a flag the engine callback observes; the worker then releases the file handle and the model context. A second `Transcribe` for a `RecordingId` that is already queued or running is a no-op. Job ids use `domain/ids.rs` `JobId`.
+- [ ] `views/actions.rs` already accepts `AppCommand::Transcribe` and `CancelTranscription` and today stores `NOT_AVAILABLE`. Replace that arm with an effect the Recordings pane hands to the transcription host, on the same command path as the tray (`HostCommand` → `AppCommand`). Coalesce progress into `Presentation` the way meter snapshots are coalesced, so one engine callback does not become one GPUI notify. Persist significant transitions and the final status in the sidecar `transcription` body (`infrastructure/storage/sidecar.rs` already stores `status`, `progress_percent`, and `model`). Bump `SIDECAR_SCHEMA` when new fields are required, and keep a malformed sidecar as a library row. On the next launch, an in-progress sidecar status becomes interrupted and retryable. The worker does not resume that job on its own.
+- [ ] Auto-transcribe stays off unless `Settings` enables it, and the default is off. When it is on, enqueue only after `RecordingHost` has renamed the WAV and replaced the sidecar. The job opens that finalized path read-only. Inference leaves the recording bytes unchanged. A failed job sets `TranscriptStatus::Failed` (`domain/recording.rs`) and the WAV stays playable.
+- [ ] Drive `tests/transcription_flow.rs` with a fake inference port, a temporary directory, and no whisper.cpp or microphone. Cover success, engine failure, cancel, cancel racing the completion callback, an invalid model, a long input that stays chunked, and FIFO order for two queued recordings. Default `cargo test` does not download a model or open WASAPI.
 
-**Validate:** English and non-English samples offline; 2-hour audio has bounded memory, correct time offsets and cancellable job; transcription failures preserve source WAV.
+**Validate:** English and a non-English sample run offline after the model file is already installed. A two-hour file stays within a bounded working set, keeps timestamp offsets across windows, and can be cancelled. A failed or cancelled job leaves the source WAV playable and the sidecar status explicit.
 
 ### M6 acceptance
 
-- [ ] A queued local model transcribes finalized audio to correctly timestamped `.txt` with durable success/failure state, progress and cancellation.
+- [ ] With a local model already on disk, a queued job writes a timestamped `<basename>.txt` beside the finalized audio, updates the sidecar through `replace_file`, and surfaces progress and cancel on the existing `AppCommand` path. Success, failure, and cancel each leave a durable `TranscriptStatus` and an unchanged WAV.
 
 ---
 
@@ -307,20 +307,20 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M7.1 — Transcript and model interactions
 
-- [ ] `views/model_prompt.rs`: GPUI Kit installed-model picker, Browse, explicit Download, integrity check feedback, progress, Cancel and Retry. Handle corrupt/missing/unsupported model distinctly.
-- [ ] Add Transcribe/Cancel/Retry actions to selected recording; show statuses `—`, `Queued`, `n%`, `Ready`, `Failed` and consistent detail-pane messages.
-- [ ] Use a GPUI Kit **read-only selectable editor/text component** for large plain-text transcripts. Validate select-all, clipboard, keyboard navigation, scroll position and Unicode; no simple nonselectable `div` substitution.
-- [ ] Wire progress and completion events to state snapshots, preserving selection and avoiding frequent full-table rebuilds.
+- [ ] Add `views/model_prompt.rs` as a GPUI Kit dialog opened from the Recordings detail pane. It lists models `infrastructure/ai/models.rs` has already accepted, and offers Browse, Download, Cancel, and Retry. Browse goes through a file-dialog method on `DesktopShell` (`services/ports.rs`), implemented in `infrastructure/platform/windows/shell.rs`. The view does not call Win32, hash a file, or open a socket. Download, cancel, and retry are `AppCommand` effects the window hands to the model host off `render`, matching Start/Stop. Missing, hash-mismatch, and unsupported files each get their own Kit message. Progress is a coalesced snapshot on `Presentation`. `app/bootstrap.rs` constructs the host.
+- [ ] On the selected row in `views/recordings.rs`, add Transcribe, Cancel, and Retry. Transcribe and Cancel dispatch the `AppCommand` variants already declared in `views/actions.rs`. Retry is a `Transcribe` of a row whose `TranscriptStatus` is `Failed`, with one `apply_command` arm so the effect stays explicit. The table and the detail pane show `TranscriptStatus::display`: `—`, `Queued`, `n%`, `Ready`, `Failed`. Failed detail uses `AppError::user_message`, not engine logs. Transcribe is disabled while that `RecordingId` is queued or running. A progress tick updates the selected row and the status strip in place, and leaves the `DataTable` model otherwise intact.
+- [ ] Show a finished transcript in a GPUI Kit read-only editor that can select, select-all, copy, and move by keyboard. Confirm the widget against gpui-kit 0.9.0 before writing the view. Load `<basename>.txt` on the background executor and store the string on the entity. A non-selectable `div` of the whole text is not the transcript view. If the pinned editor stalls on a long file, record the limit and the chosen widget in `.specs/decisions.md` before shipping a substitute. Verify Unicode and that scroll position survives a progress snapshot.
+- [ ] Feed progress and completion through the foreground drain `app/bridge.rs` already uses for `RecordSnapshot`, `LibrarySnapshot`, and `PlayerSnapshot`. `views/state.rs` reduces them into `Presentation`. Keep the library selection with `domain::recording::preserve_selection` across rescans. Completion sets `TranscriptStatus::Ready` and fills the detail text without changing the current tab. Playback still stops only when the selection changes, which `PlayerHost` already does.
 
 ### M7.2 — Completion integration
 
-- [ ] Add Windows completion notification/tray indication where supported and enabled; opening notification selects the correct recording when possible.
-- [ ] Define behavior when recording is renamed/deleted during queued transcription: cancel or pin identity and fail gracefully; never write transcript to stale/incorrect destination.
-- [ ] End-to-end integration scenarios: record and manually transcribe, auto-transcribe path, missing-model prompt, cancel/retry, app restart with transcript present, network disconnected after model installed.
+- [ ] Present transcription completion through a Windows notification implemented in `infrastructure/platform/windows/` behind a new port on `services/ports.rs`. The tray worker already owns the message-only window; the notification uses that lifetime and does not subclass the GPUI HWND. The inference callback only records a structured event. The service emits it, and the platform adapter shows it when the user setting allows. Activating the notification posts `AppCommand::Show` and selects that `RecordingId` when `LibraryHost` still has the row.
+- [ ] Bind each job to its `RecordingId` and to the audio and `.txt` paths captured when the job leaves `Queued`. `LibraryHost::rename` and `LibraryHost::delete` notify the transcription host before they change files. A rename or delete of that id while the job is queued or running cancels the job, or fails it, before any text replace. `replace_file` for the transcript runs only when those paths still belong to that id. A rename that commits before the write may retarget the same id; otherwise the job fails and writes nothing. Delete still goes through the `Trash` port and includes a `.txt` the job has already promoted, plus the sidecar.
+- [ ] Write the manual pass into `.specs/decisions.md`: record then transcribe from the detail pane; auto-transcribe left off, then turned on for one new recording; missing-model prompt satisfied by a verified local file; cancel; retry after `Failed`; restart with the `.txt` and sidecar `Ready` still shown; network disconnected after the model is installed. Each failure leaves the WAV playable in the Recordings tab.
 
 ### M7 acceptance
 
-- [ ] A user can run the full offline workflow and copy a long transcript without UI freezes or losing recording data.
+- [ ] From the Recordings tab a user can install a model, transcribe a finished recording, watch progress, cancel or retry, restart the app, and copy a long transcript from the Kit editor. The GPUI thread stays responsive, and the WAV and sidecar remain a coherent pair.
 
 ---
 
@@ -331,26 +331,26 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M8.1 — Settings and live configuration
 
-- [ ] Build GPUI Kit settings UI for directory, default endpoints, mic gain/AGC, optional stems, WAV/FLAC retention, model, language, CPU threads, optional VAD, auto-transcribe, close-to-tray and start-hidden.
-- [ ] Validate input, atomically persist, distinguish immediate changes from those deferred until next recording/job; disable hazardous controls during active recording.
-- [ ] Add settings migration tests and missing device/model fallback behavior; maintain schema compatibility within v1.
+- [ ] Extend `views/settings.rs`. The dialog already has the close-to-tray checkbox and an About button, opened from the tab-bar gear. Add Kit controls for recordings directory (read-only text plus Browse), default microphone and system endpoints (`StoredEndpoint`), mic gain and AGC, optional stems, WAV and FLAC retention, transcription model, language, CPU thread count, optional VAD, auto-transcribe, and start-hidden. Theme stays on the tab-bar `ThemePreference` cycle so the dialog cannot show a second, disagreeing value. Browse uses `DesktopShell`. Saves go through `ShellHooks::save_settings` into `app/settings_writer`, which already writes a temp sibling, `sync_all`, and `platform::replace_file`. `render` does not write the file.
+- [ ] Validate in the `Settings` constructor: non-empty directory, gain inside the range the recording service already applies, and a thread count the machine can honor. Apply gain, AGC, theme, and close-to-tray on the running session. Hold directory, endpoints, model, language, threads, and VAD until the next recording or the next job. While `Presentation::inputs_locked()` is true, disable directory and device controls the same way the Record tab does. Hotkey and autostart apply immediately and report a failure inline in the dialog.
+- [ ] Bump the `Settings` schema in `infrastructure/storage/settings.rs`. New fields deserialize with `#[serde(default)]` so an older `settings.json` still loads. A `schema_version` newer than this build still falls back to defaults. Tests cover a round-trip, a missing device id and a missing model id falling back to the default with a non-blocking notice, and a recording that keeps the endpoints captured in its `StartRequest` after a settings edit.
 
 ### M8.2 — OS commands and accessibility
 
-- [ ] `infrastructure/platform/windows/hotkeys.rs`: configurable RegisterHotKey toggle, default `Ctrl+Alt+R`, conflict detection, unregister/re-register and shared app command dispatch.
-- [ ] `infrastructure/platform/windows/autostart.rs`: opt-in startup registration with clear enable/disable status; choose/document a mechanism suitable for portable ZIP distribution. No surprise autostart.
-- [ ] Improve keyboard focus, shortcut discoverability, dark/light theme, high DPI, multi-monitor bounds, error feedback and long filename/path rendering. Verify keyboard-only operation.
-- [ ] Test Explorer restart, autostart permissions, hotkey conflicts and tray/foreground synchronization under active recording.
+- [ ] Add a global-hotkey port to `services/ports.rs` and implement it in `infrastructure/platform/windows/hotkeys.rs` with `RegisterHotKey` and `UnregisterHotKey`. Register on the tray message-only window (`Skrivli.TrayMessage`), which already pumps `GetMessageW`. A second message pump, and any subclass of the GPUI HWND, stay out of this work. Default binding is `Ctrl+Alt+R`, stored on `Settings`, with a disable flag. When the OS reports a conflict, keep the previous binding and surface `AppError::user_message`. The hotkey callback sends the same start/stop `HostCommand` the tray sends, which `views/actions.rs` already maps onto `AppCommand`. Unregister inside tray shutdown, before that window is destroyed.
+- [ ] Add an autostart port and `infrastructure/platform/windows/autostart.rs`. The Settings checkbox reads the real OS registration (enabled, disabled, or failed), not only the JSON flag. Default is off. Pick one mechanism that works for a portable ZIP and record it in `.specs/decisions.md`: a per-user Run value, or a Startup-folder shortcut, aimed at the current executable path. Disabling removes that registration. First launch does not register. The service calls the port; registry and shell calls stay in `platform/windows/`.
+- [ ] Walk the shell with the keyboard: Record tab (device selects, folder, start/stop, gain), Recordings tab (table, play/stop, rename, delete, transcribe, transcript editor), Settings, and the model prompt. Focus rings stay visible. Shortcuts that exist are named on the control or its tooltip. Confirm Light, Dark, and System, then 100%, 150%, and 200% scaling and a second monitor, using the M0.2 notes. Long paths ellipsize inside the 560×420 minimum. Privacy, device, disk, and model failures show `user_message()` in Kit inline text or a Kit dialog.
+- [ ] Manual pass while a recording is active: restart Explorer with the hotkey registered; grant and deny autostart; take `Ctrl+Alt+R` from another app and confirm Skrivli keeps the previous binding; start from the tray and stop from the hotkey, then the reverse. Both paths hit one `RecordingHost`. A second start while `RecordPhase::Recording` is a no-op, and stop stays idempotent.
 
 ### M8.3 — Optional post-processing (feature-gated)
 
-- [ ] Only if core M0–M7 gates are green: implement `infrastructure/files/flac.rs` with `flac-codec` encode (`FlacSampleWriter` / byte writer) in a background worker, and decode via `flac-codec` when reading/verifying. Verify output by reopening/decoding before any optional WAV removal.
-- [ ] Optional separate source stems and VAD only after validated engine/device integration; default disabled. Treat failed post-processing as nonfatal and preserve WAV.
-- [ ] If `flac-codec` encode/decode or packaging is unstable, **defer FLAC/stems/VAD** and explicitly document the v1 exclusion rather than blocking essential release.
+- [ ] After the M0–M7 gates are green, add `infrastructure/files/flac.rs` and confirm the `flac-codec` encode API (`FlacSampleWriter` or its byte writer) against the pinned crate (D-09). A background host, spawned and joined like `PlayerHost`, encodes the finalized WAV. Reopen and decode that FLAC and compare duration and sample bounds before any optional WAV removal. `scan_library` already pairs FLAC with its sidecar and `.txt`. The GPUI thread does not encode. A failed encode leaves the WAV in place and records a sidecar problem string.
+- [ ] Add separate `*.mic.wav` and `*.system.wav` stems, and whisper VAD, only after the capture port and the inference port already used by recording and transcription can supply them. Both default off. A failed stem or VAD pass records a sidecar problem and leaves the mixed WAV as the library entry.
+- [ ] When the FLAC spike fails encode, decode, or packaging, record the v1 exclusion in `.specs/decisions.md` and `.specs/skrivli-product.md` and skip stems and VAD in that same note. The release stays on WAV plus the offline transcript path.
 
 ### M8 acceptance
 
-- [ ] Settings survive restart, hotkey and tray share recording state, major app functions are keyboard accessible, and optional conversions never risk original WAV.
+- [ ] Settings round-trip across a restart through `settings_writer`. The hotkey and the tray drive one `RecordingHost`. The main flows complete from the keyboard at 100% and 150% scaling. A failed FLAC or stem conversion leaves the original WAV playable.
 
 ---
 
@@ -361,22 +361,22 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M9.1 — Automated and hardware validation
 
-- [ ] Run clean `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo build --release` on supported MSVC toolchain.
-- [ ] Run manual matrix on Windows 10 and 11 where available: default mic, USB mic, headset, no mic, no render device, privacy denial, device swap/default change, loopback silence, 10-minute two-source capture, >2-hour endurance and crash recovery.
-- [ ] Exercise active recording close-to-tray, explicit Exit, logoff/shutdown best effort, second launch, Explorer restart, DPI 100/150/200%, keyboard-only use, transcription cancel/retry and long transcript selection.
-- [ ] Measure audio duration/sync, queue overruns/drift, CPU/memory, startup latency, inference real-time factor and worst-case UI stalls. Record test hardware and measured results; do not invent pass thresholds not verified in design.
+- [ ] On the pinned `x86_64-pc-windows-msvc` toolchain, run `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and `cargo build --release`. `cargo test` stays on fakes (`recording_harness`, fake capture, clock, disk, trash, watch, and the transcription port) and does not open a microphone or whisper.cpp. Attach the command output to the release notes.
+- [ ] Where a Windows 10 machine and a Windows 11 machine are available, record the matrix in `.specs/decisions.md`: default communications mic, USB mic, headset, no mic, no render device, microphone privacy denial, unplug or default-device change mid-take, loopback that stays silent, a 10-minute two-source take with a shared audible cue, a session past two hours, and a process kill with `.wav.partial` recovery on the next launch (`*.recovered.wav` when the header is safe). Single-source takes stay on the timeline and say so in the status strip.
+- [ ] With a recording active, hide to tray, show again, and Exit through the save confirmation. Exercise `HostCommand::SessionEnding` as far as a logoff or shutdown test allows, then a second launch (`Local\Skrivli.SingleInstance`), an Explorer restart (`TaskbarCreated`), 100/150/200% DPI, a second monitor, keyboard-only use of Record and Recordings, transcription cancel and retry, and selection plus copy in a long transcript.
+- [ ] Measure WAV duration against the session clock, sidecar overrun and drift counters, CPU and memory for capture and for one inference, time from process start to the first frame, inference real-time factor on the installed model, and the longest GPUI stall during progress updates. Write the machine, OS build, and numbers into `.specs/decisions.md`. Thresholds are the numbers this pass measured. The design doc does not supply pass limits to invent.
 
 ### M9.2 — Portable distribution
 
-- [ ] Embed icon, manifest and version metadata; package release executable plus only required runtime DLLs/assets, license/notice files, README and privacy notes.
-- [ ] Check runtime loader dependencies on clean VM; verify no developer-installed MSVC/native library dependency is silently assumed.
-- [ ] Verify ZIP extraction path with spaces/Unicode, writeable user directories, settings and model location, Windows Defender/SmartScreen behavior; code signing is recommended if distribution warrants it.
-- [ ] Confirm no model is bundled/downloaded by default; ensure explicit model installation and documented disk/network impact.
-- [ ] Final privacy audit: no account, telemetry or transcript/audio uploads; logs exclude content, and user can find/delete recordings and models.
+- [ ] `build.rs` already embeds the icon and `VERSIONINFO` only, because gpui-pre links its own manifest (D-01). Ship the release executable, the runtime DLLs the loader actually needs, GPUI Kit assets the binary expects, license and notice files for the app and for whisper.cpp, `README`, and a privacy note that matches `.specs/skrivli-product.md`. Leave `resources/skrivli.manifest` in the repo as the DPI contract; it is not a second linked manifest.
+- [ ] On a clean Windows VM, inspect the release binary with a loader-dependency tool. Every native dependency is either in the ZIP or a Windows component the supported OS already has. A machine without a Visual Studio install still starts the app. Record the dependency list next to the ZIP.
+- [ ] Extract the ZIP to a path that contains a space and a non-ASCII character. Launch, confirm settings land in the roaming `AppPaths::settings_file()`, models under `AppPaths::models_dir()`, and logs under `AppPaths::logs_dir()`. Note SmartScreen and Defender behavior. Sign the binary when the distribution channel needs it, and record the choice in `.specs/decisions.md`.
+- [ ] The ZIP contains no `ggml-*.bin`. First launch does not download one. The model prompt states the file size and that the download needs a network. After that file is installed, transcription of an existing recording completes with the network disconnected.
+- [ ] Privacy check against the product spec: no account, no telemetry, and no upload of audio or transcript text. A log sample from a real recording-plus-transcription session contains neither samples nor transcript lines. The user can open the recordings folder, delete a recording through the Recycle Bin (`Trash`), and remove a model file from the models directory.
 
 ### M9 acceptance
 
-- [ ] From a clean Windows machine, a new user can unzip, launch, record mic + system, stop, find/play recording, explicitly install a model, transcribe offline and copy text. Test report and reproducible ZIP are attached to release.
+- [ ] On a clean Windows machine a new user unzips the package, launches Skrivli, records microphone and system audio, stops, finds and plays the file, installs a model only after choosing to, transcribes offline, and copies the text. The release attaches this test report and a ZIP built from the pinned toolchain and `Cargo.lock`.
 
 ---
 
