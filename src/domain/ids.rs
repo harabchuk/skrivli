@@ -17,12 +17,11 @@ impl RecordingId {
 pub(crate) struct JobId(u64);
 
 impl JobId {
-    #[allow(dead_code)]
     pub(crate) fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))] // Compared in CancelTranscription; raw used by tests.
     pub(crate) fn raw(self) -> u64 {
         self.0
     }

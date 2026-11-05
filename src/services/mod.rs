@@ -7,3 +7,4 @@ pub(crate) mod playback;
 pub(crate) mod ports;
 pub(crate) mod recording;
 pub(crate) mod recording_harness;
+pub(crate) mod transcription;

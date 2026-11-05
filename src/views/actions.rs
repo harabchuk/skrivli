@@ -9,10 +9,9 @@ use crate::services::library::LibrarySnapshot;
 use crate::services::playback::PlayerSnapshot;
 use crate::services::ports::HostCommand;
 use crate::services::recording::RecordSnapshot;
+use crate::services::transcription::TranscriptionSnapshot;
 
 use super::state::{AppTab, Presentation};
-
-pub(crate) const NOT_AVAILABLE: &str = "Not available yet.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AppCommand {
@@ -21,11 +20,12 @@ pub(crate) enum AppCommand {
     SelectMicrophone(StoredEndpoint),
     SelectSystem(StoredEndpoint),
     BrowseRecordings,
-    // Queued until a recording service exists. The command path already accepts them.
+    /// Dispatched from the Recordings pane (M7 UI) and command tests.
     #[allow(dead_code)]
     Transcribe {
         recording_id: RecordingId,
     },
+    /// Dispatched from the Recordings pane (M7 UI) and command tests.
     #[allow(dead_code)]
     CancelTranscription {
         job_id: JobId,
@@ -56,11 +56,18 @@ pub(crate) enum Effect {
     OpenFolder,
     OpenSettings,
     OpenAbout,
+    #[allow(dead_code)] // Reserved for future unavailable-feature notices.
     Unavailable,
     StartRecording,
     StopRecording,
     BrowseRecordings,
     RefreshLibrary,
+    Transcribe {
+        recording_id: RecordingId,
+    },
+    CancelTranscription {
+        job_id: JobId,
+    },
 }
 
 impl From<HostCommand> for AppCommand {
@@ -98,10 +105,8 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
             }
         }
         AppCommand::SelectMicrophone(_) | AppCommand::SelectSystem(_) => Effect::None,
-        AppCommand::Transcribe { .. } | AppCommand::CancelTranscription { .. } => {
-            state.set_notice(Some(NOT_AVAILABLE));
-            Effect::Unavailable
-        }
+        AppCommand::Transcribe { recording_id } => Effect::Transcribe { recording_id },
+        AppCommand::CancelTranscription { job_id } => Effect::CancelTranscription { job_id },
         AppCommand::RefreshLibrary => Effect::RefreshLibrary,
         AppCommand::Show => {
             state.set_visible(true);
@@ -152,6 +157,7 @@ pub(crate) enum BridgeMessage {
     Devices(DeviceCatalog),
     Library(LibrarySnapshot),
     Player(PlayerSnapshot),
+    Transcription(TranscriptionSnapshot),
 }
 
 pub(crate) struct BridgeBatch {
@@ -160,9 +166,11 @@ pub(crate) struct BridgeBatch {
     pub(crate) devices: Option<DeviceCatalog>,
     pub(crate) library: Option<LibrarySnapshot>,
     pub(crate) player: Option<PlayerSnapshot>,
+    pub(crate) transcription: Option<TranscriptionSnapshot>,
 }
 
-/// Coalesce pulses and keep only the latest recording, device, library, and player snapshots.
+/// Coalesce pulses and keep only the latest recording, device, library, player,
+/// and transcription snapshots.
 pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentation) -> BridgeBatch {
     let mut pulses = 0_u64;
     let mut effects = Vec::new();
@@ -170,6 +178,7 @@ pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentatio
     let mut devices = None;
     let mut library = None;
     let mut player = None;
+    let mut transcription = None;
     while let Ok(message) = rx.try_recv() {
         match message {
             BridgeMessage::ShellPulse => pulses = pulses.saturating_add(1),
@@ -178,6 +187,7 @@ pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentatio
             BridgeMessage::Devices(catalog) => devices = Some(catalog),
             BridgeMessage::Library(snapshot) => library = Some(snapshot),
             BridgeMessage::Player(snapshot) => player = Some(snapshot),
+            BridgeMessage::Transcription(snapshot) => transcription = Some(snapshot),
         }
     }
     if pulses > 0 {
@@ -189,6 +199,7 @@ pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentatio
         devices,
         library,
         player,
+        transcription,
     }
 }
 
@@ -197,7 +208,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use super::{apply_command, drain_bridge, AppCommand, BridgeMessage, Effect, NOT_AVAILABLE};
+    use super::{apply_command, drain_bridge, AppCommand, BridgeMessage, Effect};
     use crate::domain::ids::{JobId, RecordingId};
     use crate::domain::recording::RecordPhase;
     use crate::services::ports::HostCommand;
@@ -224,19 +235,32 @@ mod tests {
                 recording_id: RecordingId::from_raw(7),
             },
         );
+        let cancel = apply_command(
+            &mut state,
+            AppCommand::CancelTranscription {
+                job_id: JobId::from_raw(3),
+            },
+        );
 
         // Assert
         assert_eq!(start, Effect::StartRecording);
         assert_eq!(stop, Effect::StopRecording);
         assert_eq!(ignored, Effect::None);
         assert_eq!(browse, Effect::None);
-        assert_eq!(transcribe, Effect::Unavailable);
+        assert_eq!(
+            transcribe,
+            Effect::Transcribe {
+                recording_id: RecordingId::from_raw(7)
+            }
+        );
+        assert_eq!(
+            cancel,
+            Effect::CancelTranscription {
+                job_id: JobId::from_raw(3)
+            }
+        );
         let refresh = apply_command(&mut state, AppCommand::RefreshLibrary);
         assert_eq!(refresh, Effect::RefreshLibrary);
-        assert_eq!(
-            state.status_line(),
-            format!("Recording {NOT_AVAILABLE} Idle")
-        );
         assert_eq!(RecordingId::from_raw(7).raw(), 7);
         assert_eq!(JobId::from_raw(3).raw(), 3);
     }

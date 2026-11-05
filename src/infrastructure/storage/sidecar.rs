@@ -95,6 +95,29 @@ pub(crate) fn transcript_path_for(audio_path: &Path) -> Result<PathBuf, AppError
     Ok(directory.join(format!("{stem}.txt")))
 }
 
+/// Atomically write UTF-8 transcript text beside the audio file.
+///
+/// Uses a temp sibling, `sync_all`, then [`platform::replace_file`]. A failed
+/// write leaves any previous `.txt` and the WAV bytes unchanged.
+pub(crate) fn write_transcript_text(audio_path: &Path, text: &str) -> Result<PathBuf, AppError> {
+    let path = transcript_path_for(audio_path)?;
+    let temp = temp_sibling(&path);
+    {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&temp)
+            .map_err(|source| AppError::io("save transcript", source))?;
+        file.write_all(text.as_bytes())
+            .map_err(|source| AppError::io("save transcript", source))?;
+        file.sync_all()
+            .map_err(|source| AppError::io("save transcript", source))?;
+    }
+    platform::replace_file(&temp, &path, "save transcript")?;
+    Ok(path)
+}
+
 pub(crate) fn write_sidecar(wav_path: &Path, sidecar: &Sidecar) -> Result<PathBuf, AppError> {
     let path = sidecar_path_for(wav_path)?;
     let body = SidecarBody {
@@ -113,22 +136,7 @@ pub(crate) fn write_sidecar(wav_path: &Path, sidecar: &Sidecar) -> Result<PathBu
         problems: sidecar.problems.clone(),
         transcription: TranscriptionBody::default(),
     };
-    let bytes = serde_json::to_vec_pretty(&body)
-        .map_err(|error| AppError::message("save recording", error.to_string()))?;
-    let temp = temp_sibling(&path);
-    {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&temp)
-            .map_err(|source| AppError::io("save recording", source))?;
-        file.write_all(&bytes)
-            .map_err(|source| AppError::io("save recording", source))?;
-        file.sync_all()
-            .map_err(|source| AppError::io("save recording", source))?;
-    }
-    platform::replace_file(&temp, &path, "save recording")?;
+    write_sidecar_body(&path, &body)?;
     Ok(path)
 }
 
@@ -183,9 +191,12 @@ fn parse_transcript(body: &TranscriptionBody) -> TranscriptStatus {
     match body.status.to_ascii_lowercase().as_str() {
         "" | "none" | "—" | "-" => TranscriptStatus::None,
         "queued" => TranscriptStatus::Queued,
+        "preparing" => TranscriptStatus::Progress(0),
         "ready" => TranscriptStatus::Ready,
-        "failed" => TranscriptStatus::Failed,
-        "progress" => TranscriptStatus::Progress(body.progress_percent.unwrap_or(0).min(100)),
+        "failed" | "cancelled" | "interrupted" => TranscriptStatus::Failed,
+        "progress" | "transcribing" => {
+            TranscriptStatus::Progress(body.progress_percent.unwrap_or(0).min(100))
+        }
         other if other.ends_with('%') => {
             let digits = other.trim_end_matches('%');
             digits
@@ -195,6 +206,135 @@ fn parse_transcript(body: &TranscriptionBody) -> TranscriptStatus {
         }
         _ => TranscriptStatus::None,
     }
+}
+
+/// Values written into the sidecar `transcription` body by the worker.
+/// Variants beyond those exercised in unit tests are for the M6.3 host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum TranscriptionWrite {
+    Queued,
+    Preparing,
+    Progress(u8),
+    Ready,
+    Failed,
+    Cancelled,
+}
+
+impl TranscriptionWrite {
+    fn to_body(self) -> TranscriptionBody {
+        match self {
+            Self::Queued => TranscriptionBody {
+                status: "queued".into(),
+                progress_percent: None,
+                model: None,
+            },
+            Self::Preparing => TranscriptionBody {
+                status: "preparing".into(),
+                progress_percent: Some(0),
+                model: None,
+            },
+            Self::Progress(percent) => TranscriptionBody {
+                status: "progress".into(),
+                progress_percent: Some(percent.min(100)),
+                model: None,
+            },
+            Self::Ready => TranscriptionBody {
+                status: "ready".into(),
+                progress_percent: Some(100),
+                model: None,
+            },
+            Self::Failed => TranscriptionBody {
+                status: "failed".into(),
+                progress_percent: None,
+                model: None,
+            },
+            Self::Cancelled => TranscriptionBody {
+                status: "cancelled".into(),
+                progress_percent: None,
+                model: None,
+            },
+        }
+    }
+
+    #[allow(dead_code)] // Mapped by the M6.3 transcription host.
+    pub(crate) fn to_status(self) -> TranscriptStatus {
+        match self {
+            Self::Queued => TranscriptStatus::Queued,
+            Self::Preparing => TranscriptStatus::Progress(0),
+            Self::Progress(percent) => TranscriptStatus::Progress(percent.min(100)),
+            Self::Ready => TranscriptStatus::Ready,
+            Self::Failed | Self::Cancelled => TranscriptStatus::Failed,
+        }
+    }
+}
+
+/// Whether a stored transcript status means a job was mid-flight when the process exited.
+pub(crate) fn transcript_is_in_progress(status: TranscriptStatus) -> bool {
+    matches!(
+        status,
+        TranscriptStatus::Queued | TranscriptStatus::Progress(_)
+    )
+}
+
+/// Persist a transcription status (and optional model id) into the sidecar beside `audio_path`.
+///
+/// Leaves audio bytes untouched. Preserves unrelated sidecar fields. A missing or
+/// malformed sidecar returns an error without creating a new one.
+pub(crate) fn update_transcription(
+    audio_path: &Path,
+    status: TranscriptionWrite,
+    model: Option<&str>,
+) -> Result<(), AppError> {
+    let path = sidecar_path_for(audio_path)?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|source| AppError::io("save recording", source))?;
+    let mut body: SidecarBody = serde_json::from_str(&text)
+        .map_err(|error| AppError::message("save recording", error.to_string()))?;
+    let mut next = status.to_body();
+    if let Some(model) = model {
+        next.model = Some(model.to_string());
+    } else if body
+        .transcription
+        .model
+        .as_ref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        next.model = body.transcription.model.take();
+    }
+    body.transcription = next;
+    body.schema_version = SIDECAR_SCHEMA;
+    write_sidecar_body(&path, &body)
+}
+
+/// On launch / library scan: in-progress jobs become Failed (retryable). Does not resume.
+pub(crate) fn interrupt_in_progress_transcription(audio_path: &Path) -> bool {
+    match load_sidecar(audio_path) {
+        SidecarLoad::Loaded(doc) if transcript_is_in_progress(doc.transcript) => {
+            update_transcription(audio_path, TranscriptionWrite::Failed, None).is_ok()
+        }
+        _ => false,
+    }
+}
+
+fn write_sidecar_body(path: &Path, body: &SidecarBody) -> Result<(), AppError> {
+    let bytes = serde_json::to_vec_pretty(body)
+        .map_err(|error| AppError::message("save recording", error.to_string()))?;
+    let temp = temp_sibling(path);
+    {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&temp)
+            .map_err(|source| AppError::io("save recording", source))?;
+        file.write_all(&bytes)
+            .map_err(|source| AppError::io("save recording", source))?;
+        file.sync_all()
+            .map_err(|source| AppError::io("save recording", source))?;
+    }
+    platform::replace_file(&temp, path, "save recording")?;
+    Ok(())
 }
 
 fn audio_stem(audio_path: &Path) -> Result<String, AppError> {
@@ -223,7 +363,10 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::{load_sidecar, write_sidecar, Sidecar, SidecarLoad, SIDECAR_SCHEMA};
+    use super::{
+        interrupt_in_progress_transcription, load_sidecar, update_transcription, write_sidecar,
+        write_transcript_text, Sidecar, SidecarLoad, TranscriptionWrite, SIDECAR_SCHEMA,
+    };
     use crate::domain::recording::TranscriptStatus;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -308,6 +451,87 @@ mod tests {
         }
         assert_eq!(malformed, SidecarLoad::Malformed);
         assert_eq!(missing, SidecarLoad::Missing);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn update_transcription_persists_progress_and_leaves_wav() {
+        // Arrange
+        let dir = temp_dir("tx");
+        let wav = dir.join("meeting.wav");
+        fs::write(&wav, b"RIFF....WAVE").expect("wav");
+        let wav_before = fs::read(&wav).expect("before");
+        write_sidecar(
+            &wav,
+            &Sidecar {
+                id: 3,
+                started_at_unix_ms: 1,
+                ended_at_unix_ms: 2,
+                duration_ms: 1,
+                microphone_id: "m".into(),
+                system_audio_id: "s".into(),
+                problems: Vec::new(),
+            },
+        )
+        .expect("sidecar");
+
+        // Act
+        update_transcription(&wav, TranscriptionWrite::Progress(42), Some("base-q5_1"))
+            .expect("update");
+        let loaded = load_sidecar(&wav);
+
+        // Assert
+        assert_eq!(fs::read(&wav).expect("after"), wav_before);
+        match loaded {
+            SidecarLoad::Loaded(doc) => {
+                assert_eq!(doc.transcript, TranscriptStatus::Progress(42));
+            }
+            other => panic!("expected loaded, got {other:?}"),
+        }
+        let text = fs::read_to_string(dir.join("meeting.json")).expect("json");
+        assert!(text.contains("\"model\": \"base-q5_1\""));
+        assert!(text.contains("42"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn interrupt_marks_queued_as_failed_without_resume() {
+        // Arrange
+        let dir = temp_dir("int");
+        let wav = dir.join("clip.wav");
+        fs::write(&wav, b"RIFF....WAVE").expect("wav");
+        write_sidecar(
+            &wav,
+            &Sidecar {
+                id: 4,
+                started_at_unix_ms: 1,
+                ended_at_unix_ms: 2,
+                duration_ms: 1,
+                microphone_id: "m".into(),
+                system_audio_id: "s".into(),
+                problems: Vec::new(),
+            },
+        )
+        .expect("sidecar");
+        update_transcription(&wav, TranscriptionWrite::Queued, None).expect("queued");
+        write_transcript_text(&wav, "keep me\n").expect("txt");
+
+        // Act
+        let changed = interrupt_in_progress_transcription(&wav);
+        let again = interrupt_in_progress_transcription(&wav);
+        let loaded = load_sidecar(&wav);
+
+        // Assert
+        assert!(changed);
+        assert!(!again);
+        match loaded {
+            SidecarLoad::Loaded(doc) => assert_eq!(doc.transcript, TranscriptStatus::Failed),
+            other => panic!("expected loaded, got {other:?}"),
+        }
+        assert_eq!(
+            fs::read_to_string(dir.join("clip.txt")).expect("txt"),
+            "keep me\n"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 }

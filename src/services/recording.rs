@@ -65,11 +65,13 @@ pub(crate) const NOTICE_STALL: &str = "Audio capture appears stalled.";
 
 pub(crate) use crate::domain::recording::RecordPhase;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RecordSnapshot {
     pub(crate) phase: RecordPhase,
     pub(crate) notice: Option<&'static str>,
     pub(crate) id: Option<RecordingId>,
+    /// Finalized WAV path after stop; drives auto-transcribe enqueue.
+    pub(crate) finalized_path: Option<PathBuf>,
 }
 
 pub(crate) fn capture_notice(error: CaptureError) -> &'static str {
@@ -323,6 +325,7 @@ pub(crate) fn run_session(
         phase: RecordPhase::Starting,
         notice: request.degraded_notice,
         id: None,
+        finalized_path: None,
     });
     match session_body(engine, request, stop, emit) {
         Ok(snapshot) => snapshot,
@@ -330,6 +333,7 @@ pub(crate) fn run_session(
             phase: RecordPhase::Error,
             notice: Some(notice),
             id: None,
+            finalized_path: None,
         },
     }
 }
@@ -439,6 +443,7 @@ fn session_body(
         phase: RecordPhase::Recording,
         notice: degraded,
         id: Some(id),
+        finalized_path: None,
     });
     let mut mixer = Mixer::new(
         want_system,
@@ -546,6 +551,7 @@ fn session_body(
                     phase: RecordPhase::Recording,
                     notice: degraded,
                     id: Some(id),
+                    finalized_path: None,
                 });
             }
         }
@@ -597,6 +603,7 @@ fn session_body(
         phase: RecordPhase::Stopping,
         notice: degraded,
         id: Some(id),
+        finalized_path: None,
     });
     let diagnostics = mixer.diagnostics();
     if diagnostics.gaps > 0 {
@@ -699,6 +706,7 @@ fn pull_alive(
                 phase: RecordPhase::Recording,
                 notice: *degraded,
                 id: Some(id),
+                finalized_path: None,
             });
             None
         }
@@ -712,6 +720,7 @@ fn pull_alive(
                 phase: RecordPhase::Recording,
                 notice: *degraded,
                 id: Some(id),
+                finalized_path: None,
             });
             None
         }
@@ -784,6 +793,7 @@ fn try_reopen_sources(
             phase: RecordPhase::Recording,
             notice: *degraded,
             id: Some(id),
+            finalized_path: None,
         });
     }
 }
@@ -867,6 +877,7 @@ fn finish_session(
         phase: RecordPhase::Idle,
         notice: Some(notice),
         id: Some(id),
+        finalized_path: Some(path),
     })
 }
 

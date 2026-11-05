@@ -9,7 +9,8 @@ use crate::domain::recording::{
     synthetic_recording_id, RecordingContainer, RecordingInfo, SidecarState, TranscriptStatus,
 };
 use crate::infrastructure::storage::sidecar::{
-    load_sidecar, sidecar_path_for, sidecar_state, transcript_path_for, LoadedSidecar, SidecarLoad,
+    interrupt_in_progress_transcription, load_sidecar, sidecar_path_for, sidecar_state,
+    transcript_path_for, LoadedSidecar, SidecarLoad,
 };
 
 /// One catalog row with filesystem paths attached.
@@ -91,6 +92,7 @@ pub(crate) fn scan_library(directory: &Path) -> LibraryCatalog {
                     .map(|d| d.as_millis() as u64)
             });
         let stem = display_stem(name);
+        let _ = interrupt_in_progress_transcription(&path);
         let sidecar = load_sidecar(&path);
         let transcript_file = transcript_path_for(&path)
             .ok()

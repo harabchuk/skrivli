@@ -127,3 +127,139 @@ pub(crate) trait ActivationWatch: Send {
 pub(crate) trait SingleInstance: Send + Sync {
     fn acquire(&self) -> Result<InstanceAcquire, AppError>;
 }
+
+/// One transcribed segment as plain values. No whisper.cpp types cross this boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InferenceSegment {
+    pub(crate) start_ms: u64,
+    pub(crate) end_ms: u64,
+    pub(crate) text: String,
+}
+
+/// Local speech inference. The real adapter lives in `infrastructure/ai/whisper.rs`.
+/// Progress is 0–100. Cancel is cooperative via `cancel`; implementations must not
+/// expose engine pointers or log transcript text / audio samples.
+pub(crate) trait InferencePort: Send {
+    fn load(&mut self, model_path: &Path) -> Result<(), AppError>;
+
+    fn unload(&mut self);
+
+    fn transcribe_chunk(
+        &mut self,
+        samples_f32_16k_mono: &[f32],
+        cancel: &Arc<AtomicBool>,
+        on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+    ) -> Result<Vec<InferenceSegment>, AppError>;
+}
+
+#[cfg(test)]
+mod inference_port_tests {
+    use super::{InferencePort, InferenceSegment};
+    use crate::common::error::AppError;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    struct FakeInference {
+        loaded: bool,
+        fail_load: bool,
+        segments: Vec<InferenceSegment>,
+    }
+
+    impl InferencePort for FakeInference {
+        fn load(&mut self, _model_path: &Path) -> Result<(), AppError> {
+            if self.fail_load {
+                return Err(AppError::message("model unsupported", "fake reject"));
+            }
+            self.loaded = true;
+            Ok(())
+        }
+
+        fn unload(&mut self) {
+            self.loaded = false;
+        }
+
+        fn transcribe_chunk(
+            &mut self,
+            samples_f32_16k_mono: &[f32],
+            cancel: &Arc<AtomicBool>,
+            on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+        ) -> Result<Vec<InferenceSegment>, AppError> {
+            if !self.loaded {
+                return Err(AppError::message("inference", "model not loaded"));
+            }
+            if cancel.load(Ordering::Acquire) {
+                return Err(AppError::message("transcription cancelled", "cancel"));
+            }
+            if samples_f32_16k_mono.is_empty() {
+                on_progress(100);
+                return Ok(Vec::new());
+            }
+            on_progress(50);
+            on_progress(100);
+            Ok(self.segments.clone())
+        }
+    }
+
+    #[test]
+    fn fake_port_reports_progress_and_segments() {
+        // Arrange
+        let mut fake = FakeInference {
+            loaded: false,
+            fail_load: false,
+            segments: vec![InferenceSegment {
+                start_ms: 0,
+                end_ms: 1_000,
+                text: "hello".into(),
+            }],
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let percents = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&percents);
+
+        // Act
+        fake.load(Path::new("ggml-base-q5_1.bin")).expect("load");
+        let segments = fake
+            .transcribe_chunk(
+                &[0.0; 160],
+                &cancel,
+                Arc::new(move |p| sink.lock().expect("lock").push(p)),
+            )
+            .expect("transcribe");
+
+        // Assert
+        assert_eq!(*percents.lock().expect("lock"), vec![50, 100]);
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "hello");
+        fake.unload();
+        assert!(!fake.loaded);
+    }
+
+    #[test]
+    fn fake_port_honors_cancel_flag() {
+        // Arrange
+        let mut fake = FakeInference {
+            loaded: true,
+            fail_load: false,
+            segments: Vec::new(),
+        };
+        let cancel = Arc::new(AtomicBool::new(true));
+        let progress = Arc::new(AtomicBool::new(false));
+        let saw_progress = Arc::clone(&progress);
+
+        // Act
+        let error = fake
+            .transcribe_chunk(
+                &[0.0],
+                &cancel,
+                Arc::new(move |_| {
+                    saw_progress.store(true, Ordering::Release);
+                }),
+            )
+            .expect_err("cancelled");
+
+        // Assert
+        assert_eq!(error.user_message(), "Transcription was cancelled.");
+        assert!(!progress.load(Ordering::Acquire));
+    }
+}

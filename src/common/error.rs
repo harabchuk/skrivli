@@ -54,6 +54,17 @@ impl AppError {
                 "Could not update the recordings library."
             }
             "playback" => "Could not play the recording.",
+            "transcription" | "save transcript" => "Could not prepare the transcript.",
+            "model missing" => "The speech model file is missing.",
+            "model unreadable" => "The speech model file could not be read.",
+            "model unsupported" => "The speech model file is not supported.",
+            "model manifest" => "The speech model list could not be read.",
+            "download model" => "Could not download the speech model.",
+            "download cancelled" => "The model download was cancelled.",
+            "verify model" => "The downloaded speech model could not be verified.",
+            "load model" => "Could not load the speech model.",
+            "inference" => "Could not run speech recognition.",
+            "transcription cancelled" => "Transcription was cancelled.",
             _ => "Something went wrong.",
         }
     }

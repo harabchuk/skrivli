@@ -1,5 +1,6 @@
 //! Resizable shell: Record and Recordings tabs, settings gear, and the status strip.
 
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,6 +23,7 @@ use crate::domain::ids::RecordingId;
 use crate::domain::recording::RecordPhase;
 use crate::domain::theme::ThemePreference;
 use crate::domain::window_frame::LogicalRect;
+use crate::infrastructure::ai::models::{path_for_variant, validate_model_file, ModelManifest};
 use crate::infrastructure::audio::devices::DeviceCatalog;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::storage::library::LibraryCatalog;
@@ -33,6 +35,9 @@ use crate::services::ports::DesktopShell;
 use crate::services::recording::{
     build_start_request, RecordSnapshot, RecordingHost, StartRequestBuild, NOTICE_FALLBACK,
     NOTICE_SYSTEM_FALLBACK,
+};
+use crate::services::transcription::{
+    JobPhase, TranscriptionHost, TranscriptionSnapshot, NOTICE_MODEL,
 };
 use crate::ui::theme::{apply_theme, theme_icon};
 use crate::views::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
@@ -60,9 +65,12 @@ pub(crate) struct MainWindow {
     recording: RecordingHost,
     library: LibraryHost,
     player: PlayerHost,
+    transcription: TranscriptionHost,
+    models_dir: PathBuf,
     library_catalog: LibraryCatalog,
     library_selected: Option<RecordingId>,
     player_snapshot: PlayerSnapshot,
+    transcription_snapshot: TranscriptionSnapshot,
     recordings_table: Entity<TableState<RecordingsDelegate>>,
     _table_sub: Subscription,
     levels: Arc<LevelSnapshot>,
@@ -101,6 +109,8 @@ impl MainWindow {
         recording: RecordingHost,
         library: LibraryHost,
         player: PlayerHost,
+        transcription: TranscriptionHost,
+        models_dir: PathBuf,
         levels: Arc<LevelSnapshot>,
         gain_control: Arc<GainControl>,
         targets: Arc<MonitorTargets>,
@@ -231,6 +241,8 @@ impl MainWindow {
             recording,
             library,
             player,
+            transcription,
+            models_dir,
             library_catalog: LibraryCatalog::empty(),
             library_selected: None,
             player_snapshot: PlayerSnapshot {
@@ -238,6 +250,7 @@ impl MainWindow {
                 recording_id: None,
                 notice: None,
             },
+            transcription_snapshot: TranscriptionSnapshot::idle(),
             recordings_table,
             _table_sub: table_sub,
             levels,
@@ -352,6 +365,10 @@ impl MainWindow {
             self.apply_player(snapshot);
             changed = true;
         }
+        if let Some(snapshot) = batch.transcription {
+            self.apply_transcription(snapshot);
+            changed = true;
+        }
         for effect in batch.effects {
             self.perform(effect, window, cx);
             changed = true;
@@ -414,6 +431,8 @@ impl MainWindow {
             Effect::StopRecording => self.recording.stop(),
             Effect::BrowseRecordings => self.browse_folder(),
             Effect::RefreshLibrary => self.library.refresh(),
+            Effect::Transcribe { recording_id } => self.begin_transcription(recording_id),
+            Effect::CancelTranscription { job_id } => self.transcription.cancel(job_id),
             Effect::ConfirmExit => {
                 let entity = cx.entity();
                 open_exit_while_recording(window, cx, move |window, cx| {
@@ -554,10 +573,56 @@ impl MainWindow {
         self.presentation.set_notice(snapshot.notice);
         if became_idle && snapshot.id.is_some() {
             self.library.refresh();
+            if phase == RecordPhase::Idle && self.settings.auto_transcribe() {
+                if let (Some(id), Some(path)) = (snapshot.id, snapshot.finalized_path.clone()) {
+                    self.enqueue_transcription(id, path);
+                }
+            }
         }
         if self.exit_after_stop && matches!(phase, RecordPhase::Idle | RecordPhase::Error) {
             self.exit_after_stop = false;
             self.quit_now(window);
+        }
+    }
+
+    fn apply_transcription(&mut self, snapshot: TranscriptionSnapshot) {
+        self.transcription_snapshot = snapshot;
+        if let Some(notice) = self.transcription_snapshot.notice {
+            self.presentation.set_notice(Some(notice));
+        }
+        if matches!(
+            self.transcription_snapshot.phase,
+            JobPhase::Done | JobPhase::Failed | JobPhase::Cancelled | JobPhase::Queued
+        ) {
+            self.library.refresh();
+        }
+    }
+
+    fn begin_transcription(&mut self, recording_id: RecordingId) {
+        let Some(entry) = self.library_catalog.find(recording_id) else {
+            self.presentation
+                .set_notice(Some("Could not find that recording."));
+            return;
+        };
+        self.enqueue_transcription(recording_id, entry.audio_path.clone());
+    }
+
+    fn enqueue_transcription(&mut self, recording_id: RecordingId, audio_path: PathBuf) {
+        match resolve_model_path(&self.models_dir, self.settings.selected_model()) {
+            Ok((model_path, model_id)) => {
+                self.transcription
+                    .enqueue(recording_id, audio_path, model_path, model_id);
+            }
+            Err(error) => {
+                tracing::error!(error = %error, "transcription model was not resolved");
+                let message = error.user_message();
+                self.presentation
+                    .set_notice(Some(if message.starts_with("The speech model") {
+                        NOTICE_MODEL
+                    } else {
+                        message
+                    }));
+            }
         }
     }
 
@@ -820,6 +885,22 @@ impl MainWindow {
 
 fn apply(state: &mut Presentation, command: AppCommand) -> Effect {
     crate::views::actions::apply_command(state, command)
+}
+
+fn resolve_model_path(
+    models_dir: &std::path::Path,
+    selected_id: &str,
+) -> Result<(PathBuf, String), crate::common::error::AppError> {
+    let manifest = ModelManifest::load_bundled()?;
+    let entry = manifest
+        .by_id(selected_id)
+        .or_else(|| manifest.default_entry())
+        .ok_or_else(|| {
+            crate::common::error::AppError::message("model missing", "no model in manifest")
+        })?;
+    let path = path_for_variant(models_dir, entry);
+    validate_model_file(&path)?;
+    Ok((path, entry.id().to_string()))
 }
 
 fn endpoint_token(choice: &StoredEndpoint) -> String {

@@ -15,6 +15,7 @@ use crate::common::error::AppError;
 use crate::common::logging;
 use crate::common::paths::AppPaths;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
+use crate::infrastructure::ai::whisper::WhisperInference;
 use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::files::wav::recover_partials;
@@ -28,6 +29,7 @@ use crate::services::ports::{ActivationWatch, HostCommand, InstanceAcquire};
 use crate::services::recording::{
     spawn_recording_host, RecordingEngine, RecordingHost, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED,
 };
+use crate::services::transcription::TranscriptionHost;
 use crate::ui::theme::apply_theme;
 use crate::views::actions::{AppCommand, BridgeMessage};
 use crate::views::hooks::ShellHooks;
@@ -119,6 +121,7 @@ pub(crate) fn run() -> i32 {
         Arc::clone(&lease),
         Arc::clone(&targets),
         paths.rescue_dir(),
+        paths.models_dir(),
         settings.recordings_directory().to_path_buf(),
         activation,
     );
@@ -154,6 +157,8 @@ struct ShellWorkers {
     recording: RecordingHost,
     library: LibraryHost,
     player: PlayerHost,
+    transcription: TranscriptionHost,
+    models_dir: std::path::PathBuf,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -167,6 +172,7 @@ fn spawn_workers(
     lease: Arc<EndpointLease>,
     targets: Arc<MonitorTargets>,
     rescue_dir: std::path::PathBuf,
+    models_dir: std::path::PathBuf,
     recordings_dir: std::path::PathBuf,
     activation: Box<dyn ActivationWatch>,
 ) -> ShellWorkers {
@@ -259,6 +265,17 @@ fn spawn_workers(
     shutdown.on_stop(move || stop_player.shutdown());
     shutdown.track(player_thread);
 
+    let transcription_tx = tx.clone();
+    let (transcription, transcription_thread) = TranscriptionHost::spawn(
+        Box::new(WhisperInference::new()),
+        Box::new(move |snapshot| {
+            let _ = transcription_tx.send(BridgeMessage::Transcription(snapshot));
+        }),
+    );
+    let stop_transcription = transcription.clone();
+    shutdown.on_stop(move || stop_transcription.shutdown());
+    shutdown.track(transcription_thread);
+
     let tray = Arc::clone(&host.tray);
     let tray_worker = shutdown.clone();
     let tray_tx = tx;
@@ -280,6 +297,8 @@ fn spawn_workers(
         recording: host_recording,
         library,
         player,
+        transcription,
+        models_dir,
     }
 }
 
@@ -337,6 +356,8 @@ fn open_shell(
             let window_recording = workers.recording;
             let window_library = workers.library;
             let window_player = workers.player;
+            let window_transcription = workers.transcription;
+            let window_models_dir = workers.models_dir;
             let window_levels = levels;
             let window_gain = gain;
             let window_targets = targets;
@@ -366,6 +387,8 @@ fn open_shell(
                         window_recording,
                         window_library,
                         window_player,
+                        window_transcription,
+                        window_models_dir,
                         window_levels,
                         window_gain,
                         window_targets,

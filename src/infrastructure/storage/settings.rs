@@ -10,10 +10,21 @@ use crate::infrastructure::platform;
 
 pub(crate) use crate::domain::theme::ThemePreference;
 
-pub(crate) const SCHEMA_VERSION: u32 = 3;
+pub(crate) const SCHEMA_VERSION: u32 = 4;
+
+/// Default speech model variant id (manifest `base-q5_1`).
+pub(crate) const DEFAULT_MODEL_ID: &str = "base-q5_1";
 
 fn default_mic_gain() -> f32 {
     1.0
+}
+
+fn default_selected_model() -> String {
+    DEFAULT_MODEL_ID.to_string()
+}
+
+fn default_auto_transcribe() -> bool {
+    false
 }
 
 /// Logical-pixel window placement. Zero or negative sizes are rejected.
@@ -103,6 +114,10 @@ pub(crate) struct Settings {
     mic_gain: f32,
     #[serde(default)]
     agc_enabled: bool,
+    #[serde(default = "default_selected_model")]
+    selected_model: String,
+    #[serde(default = "default_auto_transcribe")]
+    auto_transcribe: bool,
 }
 
 impl Settings {
@@ -125,6 +140,8 @@ impl Settings {
             system_audio: StoredEndpoint::Default,
             mic_gain: default_mic_gain(),
             agc_enabled: false,
+            selected_model: default_selected_model(),
+            auto_transcribe: default_auto_transcribe(),
         })
     }
 
@@ -198,6 +215,31 @@ impl Settings {
 
     pub(crate) fn set_agc_enabled(&mut self, enabled: bool) {
         self.agc_enabled = enabled;
+    }
+
+    #[allow(dead_code)] // Settings UI / M6.3 auto-transcribe.
+    pub(crate) fn selected_model(&self) -> &str {
+        &self.selected_model
+    }
+
+    #[allow(dead_code)] // Settings UI / M6.3 auto-transcribe.
+    pub(crate) fn set_selected_model(&mut self, model_id: impl Into<String>) {
+        let model_id = model_id.into();
+        self.selected_model = if model_id.trim().is_empty() {
+            default_selected_model()
+        } else {
+            model_id
+        };
+    }
+
+    #[allow(dead_code)] // Settings UI / M6.3 auto-transcribe.
+    pub(crate) fn auto_transcribe(&self) -> bool {
+        self.auto_transcribe
+    }
+
+    #[allow(dead_code)] // Settings UI / M6.3 auto-transcribe.
+    pub(crate) fn set_auto_transcribe(&mut self, enabled: bool) {
+        self.auto_transcribe = enabled;
     }
 
     pub(crate) fn set_recordings_directory(&mut self, directory: PathBuf) -> Result<(), AppError> {
@@ -276,6 +318,9 @@ fn normalize(mut settings: Settings) -> Option<Settings> {
     settings.microphone = clean_endpoint(settings.microphone);
     settings.system_audio = clean_endpoint(settings.system_audio);
     settings.mic_gain = crate::domain::gain::clamp_slider_gain(settings.mic_gain);
+    if settings.selected_model.trim().is_empty() {
+        settings.selected_model = default_selected_model();
+    }
     settings.schema_version = SCHEMA_VERSION;
     Some(settings)
 }
@@ -301,7 +346,10 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::{Settings, StoredEndpoint, StoredWindowBounds, ThemePreference, SCHEMA_VERSION};
+    use super::{
+        Settings, StoredEndpoint, StoredWindowBounds, ThemePreference, DEFAULT_MODEL_ID,
+        SCHEMA_VERSION,
+    };
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -458,6 +506,8 @@ mod tests {
         assert_eq!(loaded.system_audio(), &StoredEndpoint::Default);
         assert!((loaded.mic_gain() - 1.0).abs() < 0.001);
         assert!(!loaded.agc_enabled());
+        assert_eq!(loaded.selected_model(), DEFAULT_MODEL_ID);
+        assert!(!loaded.auto_transcribe());
         let mut updated = loaded.clone();
         updated.set_system_audio(StoredEndpoint::explicit("{render}"));
         assert!(matches!(
@@ -468,6 +518,44 @@ mod tests {
         assert!(!loaded.close_to_tray);
         assert!(loaded.start_hidden);
         assert_eq!(loaded.theme, ThemePreference::Light);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn schema_v4_round_trips_model_and_auto_transcribe() {
+        // Arrange
+        let dir = temp_dir("model-settings");
+        let path = dir.join("settings.json");
+        let mut settings = sample(&dir);
+        settings.set_selected_model("tiny-q5_1");
+        settings.set_auto_transcribe(true);
+
+        // Act
+        settings.save(&path).expect("save");
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert_eq!(loaded.schema_version, SCHEMA_VERSION);
+        assert_eq!(loaded.selected_model(), "tiny-q5_1");
+        assert!(loaded.auto_transcribe());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn empty_selected_model_falls_back_to_default_variant() {
+        // Arrange
+        let dir = temp_dir("empty-model");
+        let mut settings = sample(&dir);
+
+        // Act
+        settings.set_selected_model("   ");
+
+        // Assert
+        assert_eq!(settings.selected_model(), DEFAULT_MODEL_ID);
+        assert_eq!(
+            DEFAULT_MODEL_ID,
+            crate::infrastructure::ai::models::DEFAULT_VARIANT_ID
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

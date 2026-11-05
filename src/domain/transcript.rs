@@ -1,0 +1,417 @@
+//! Transcript windows, segments, and deterministic plain-text formatting.
+//!
+//! No file I/O, GPUI, Windows, or AI/engine types live here. Infrastructure
+//! resamples audio and writes the formatted UTF-8 bytes to `<basename>.txt`.
+
+use std::time::Duration;
+
+/// Nominal transcription window length (~30 minutes).
+pub(crate) const WINDOW_DURATION: Duration = Duration::from_secs(30 * 60);
+/// Fixed overlap between consecutive windows (for de-duplication).
+pub(crate) const WINDOW_OVERLAP: Duration = Duration::from_secs(30);
+/// Pause between segments that starts a new paragraph (~1.5 s).
+pub(crate) const PARAGRAPH_PAUSE: Duration = Duration::from_millis(1_500);
+/// Maximum wall span covered by one paragraph before a forced break (~60 s).
+pub(crate) const PARAGRAPH_MAX_SPAN: Duration = Duration::from_secs(60);
+/// Keep this many identical consecutive segments; drop further runaway repeats.
+const REPEAT_KEEP: usize = 2;
+
+/// Global timeline offset for one planned decode window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TranscriptWindow {
+    index: u32,
+    /// Inclusive start on the recording timeline.
+    offset: Duration,
+    /// Exclusive end on the recording timeline.
+    end: Duration,
+    /// Leading overlap with the previous window (`Duration::ZERO` for the first).
+    overlap: Duration,
+}
+
+impl TranscriptWindow {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn index(self) -> u32 {
+        self.index
+    }
+
+    pub(crate) fn offset(self) -> Duration {
+        self.offset
+    }
+
+    pub(crate) fn end(self) -> Duration {
+        self.end
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn overlap(self) -> Duration {
+        self.overlap
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn duration(self) -> Duration {
+        self.end.saturating_sub(self.offset)
+    }
+}
+
+/// One timed transcript segment from the recording start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TranscriptSegment {
+    start_ms: u64,
+    end_ms: u64,
+    text: String,
+}
+
+impl TranscriptSegment {
+    pub(crate) fn new(start_ms: u64, end_ms: u64, text: impl Into<String>) -> Self {
+        let end_ms = end_ms.max(start_ms);
+        Self {
+            start_ms,
+            end_ms,
+            text: text.into(),
+        }
+    }
+
+    pub(crate) fn start_ms(&self) -> u64 {
+        self.start_ms
+    }
+
+    pub(crate) fn end_ms(&self) -> u64 {
+        self.end_ms
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Shift timestamps by a global window offset (chunk stitching).
+    pub(crate) fn with_offset(self, offset_ms: u64) -> Self {
+        Self {
+            start_ms: self.start_ms.saturating_add(offset_ms),
+            end_ms: self.end_ms.saturating_add(offset_ms),
+            text: self.text,
+        }
+    }
+}
+
+/// Plan ~30-minute windows for a known streaming length.
+///
+/// Only durations are retained — callers never need to buffer the full PCM.
+pub(crate) fn plan_windows(total: Duration) -> Vec<TranscriptWindow> {
+    if total.is_zero() {
+        return Vec::new();
+    }
+    let hop = WINDOW_DURATION.saturating_sub(WINDOW_OVERLAP);
+    if hop.is_zero() {
+        return vec![TranscriptWindow {
+            index: 0,
+            offset: Duration::ZERO,
+            end: total,
+            overlap: Duration::ZERO,
+        }];
+    }
+
+    let mut windows = Vec::new();
+    let mut offset = Duration::ZERO;
+    let mut index = 0_u32;
+    loop {
+        let end = (offset + WINDOW_DURATION).min(total);
+        let overlap = if index == 0 {
+            Duration::ZERO
+        } else {
+            WINDOW_OVERLAP.min(offset)
+        };
+        windows.push(TranscriptWindow {
+            index,
+            offset,
+            end,
+            overlap,
+        });
+        if end >= total {
+            break;
+        }
+        offset = offset.saturating_add(hop);
+        if offset >= total {
+            break;
+        }
+        index = index.saturating_add(1);
+    }
+    windows
+}
+
+/// Format elapsed wall time as `[HH:MM:SS]` (always includes hours).
+pub(crate) fn format_timestamp(elapsed: Duration) -> String {
+    let total = elapsed.as_secs();
+    let hours = total / 3_600;
+    let minutes = (total % 3_600) / 60;
+    let seconds = total % 60;
+    format!("[{hours:02}:{minutes:02}:{seconds:02}]")
+}
+
+/// Format milliseconds as `[HH:MM:SS]`.
+pub(crate) fn format_timestamp_ms(elapsed_ms: u64) -> String {
+    format_timestamp(Duration::from_millis(elapsed_ms))
+}
+
+/// Merge overlapping chunk windows: drop segments whose global start falls
+/// inside the previous window's exclusive overlap half.
+pub(crate) fn stitch_segments(
+    windows: &[(u64, Vec<TranscriptSegment>)],
+    overlap_ms: u64,
+) -> Vec<TranscriptSegment> {
+    let mut out = Vec::new();
+    let mut cutoff_ms = 0_u64;
+    for (window_index, (offset_ms, segments)) in windows.iter().enumerate() {
+        for segment in segments {
+            let shifted = segment.clone().with_offset(*offset_ms);
+            if window_index > 0 && shifted.start_ms() < cutoff_ms {
+                continue;
+            }
+            out.push(shifted);
+        }
+        if let Some(last) = segments.last() {
+            let window_end = offset_ms.saturating_add(last.end_ms());
+            cutoff_ms = window_end.saturating_sub(overlap_ms / 2);
+        } else if window_index > 0 {
+            cutoff_ms = offset_ms.saturating_add(overlap_ms / 2);
+        }
+    }
+    out
+}
+
+/// Deterministic UTF-8 transcript body with timestamps and paragraph breaks.
+pub(crate) fn format_transcript(segments: &[TranscriptSegment]) -> String {
+    let cleaned = cleanup_repeated_lines(segments);
+    if cleaned.is_empty() {
+        return String::new();
+    }
+
+    let mut body = String::new();
+    let mut paragraph_start_ms = cleaned[0].start_ms();
+    let mut previous_end_ms = cleaned[0].start_ms();
+    let mut first_in_paragraph = true;
+
+    for segment in &cleaned {
+        let text = segment.text().trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        let pause = segment.start_ms().saturating_sub(previous_end_ms);
+        let span = segment.start_ms().saturating_sub(paragraph_start_ms);
+        let new_paragraph = !first_in_paragraph
+            && (pause >= PARAGRAPH_PAUSE.as_millis() as u64
+                || span >= PARAGRAPH_MAX_SPAN.as_millis() as u64);
+
+        if new_paragraph {
+            body.push('\n');
+            body.push('\n');
+            paragraph_start_ms = segment.start_ms();
+            first_in_paragraph = true;
+        } else if !first_in_paragraph {
+            body.push(' ');
+        }
+
+        if first_in_paragraph {
+            body.push_str(&format_timestamp_ms(segment.start_ms()));
+            body.push(' ');
+            first_in_paragraph = false;
+        }
+
+        body.push_str(text);
+        previous_end_ms = segment.end_ms();
+    }
+
+    if !body.is_empty() && !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body
+}
+
+/// Drop runaway identical lines while keeping a short genuine repeat.
+fn cleanup_repeated_lines(segments: &[TranscriptSegment]) -> Vec<TranscriptSegment> {
+    let mut out = Vec::with_capacity(segments.len());
+    let mut last_norm: Option<String> = None;
+    let mut streak = 0_usize;
+
+    for segment in segments {
+        let trimmed = segment.text().trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let norm = normalize_line(trimmed);
+        if last_norm.as_ref() == Some(&norm) {
+            streak = streak.saturating_add(1);
+            if streak > REPEAT_KEEP {
+                continue;
+            }
+        } else {
+            streak = 1;
+            last_norm = Some(norm);
+        }
+        out.push(TranscriptSegment::new(
+            segment.start_ms(),
+            segment.end_ms(),
+            trimmed.to_string(),
+        ));
+    }
+    out
+}
+
+fn normalize_line(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        cleanup_repeated_lines, format_timestamp, format_transcript, plan_windows, stitch_segments,
+        TranscriptSegment, PARAGRAPH_MAX_SPAN, PARAGRAPH_PAUSE, WINDOW_DURATION, WINDOW_OVERLAP,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn formats_timestamp_past_one_hour() {
+        // Arrange
+        let elapsed = Duration::from_secs(3_661);
+
+        // Act
+        let text = format_timestamp(elapsed);
+
+        // Assert
+        assert_eq!(text, "[01:01:01]");
+    }
+
+    #[test]
+    fn plans_streaming_windows_with_fixed_overlap() {
+        // Arrange — just over one window so a second window appears.
+        let total = WINDOW_DURATION + Duration::from_secs(60);
+
+        // Act
+        let windows = plan_windows(total);
+
+        // Assert
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].offset(), Duration::ZERO);
+        assert_eq!(windows[0].end(), WINDOW_DURATION);
+        assert_eq!(windows[0].overlap(), Duration::ZERO);
+        assert_eq!(
+            windows[1].offset(),
+            WINDOW_DURATION.saturating_sub(WINDOW_OVERLAP)
+        );
+        assert_eq!(windows[1].overlap(), WINDOW_OVERLAP);
+        assert_eq!(windows[1].end(), total);
+        assert!(windows[1].duration() < WINDOW_DURATION);
+    }
+
+    #[test]
+    fn plan_windows_does_not_buffer_two_hour_pcm() {
+        // Arrange — only a duration is passed (no sample buffer exists).
+        let two_hours = Duration::from_secs(2 * 60 * 60);
+
+        // Act
+        let windows = plan_windows(two_hours);
+
+        // Assert — hop is 29.5 minutes → several windows, no audio allocation.
+        assert!(windows.len() >= 4);
+        assert_eq!(windows.first().map(|w| w.offset()), Some(Duration::ZERO));
+        assert_eq!(windows.last().map(|w| w.end()), Some(two_hours));
+        for window in &windows {
+            assert!(window.duration() <= WINDOW_DURATION);
+            if window.index() > 0 {
+                assert_eq!(window.overlap(), WINDOW_OVERLAP);
+            }
+        }
+    }
+
+    #[test]
+    fn stitches_overlapping_windows_without_dup_midpoint() {
+        // Arrange
+        let first = vec![
+            TranscriptSegment::new(0, 1_000, "hello"),
+            TranscriptSegment::new(28_000, 29_000, "edge"),
+        ];
+        let second = vec![
+            TranscriptSegment::new(0, 1_000, "dup"),
+            TranscriptSegment::new(3_000, 4_000, "next"),
+        ];
+        let windows = vec![(0_u64, first), (25_000_u64, second)];
+
+        // Act
+        let stitched = stitch_segments(&windows, 5_000);
+
+        // Assert
+        assert_eq!(stitched.len(), 3);
+        assert_eq!(stitched[0].text(), "hello");
+        assert_eq!(stitched[1].text(), "edge");
+        assert_eq!(stitched[2].text(), "next");
+        assert_eq!(stitched[2].start_ms(), 28_000);
+    }
+
+    #[test]
+    fn keeps_genuine_repeat_but_drops_runaway_lines() {
+        // Arrange
+        let segments = vec![
+            TranscriptSegment::new(0, 500, "yes"),
+            TranscriptSegment::new(600, 1_100, "yes"),
+            TranscriptSegment::new(1_200, 1_700, "yes"),
+            TranscriptSegment::new(1_800, 2_300, "yes"),
+            TranscriptSegment::new(2_400, 3_000, "okay"),
+        ];
+
+        // Act
+        let cleaned = cleanup_repeated_lines(&segments);
+
+        // Assert
+        assert_eq!(cleaned.len(), 3);
+        assert_eq!(cleaned[0].text(), "yes");
+        assert_eq!(cleaned[1].text(), "yes");
+        assert_eq!(cleaned[2].text(), "okay");
+    }
+
+    #[test]
+    fn formats_empty_silent_and_unicode() {
+        // Arrange
+        let empty: Vec<TranscriptSegment> = Vec::new();
+        let silent = vec![TranscriptSegment::new(0, 100, "   ")];
+        let unicode = vec![TranscriptSegment::new(0, 500, "café 日本語")];
+
+        // Act
+        let empty_text = format_transcript(&empty);
+        let silent_text = format_transcript(&silent);
+        let unicode_text = format_transcript(&unicode);
+
+        // Assert
+        assert_eq!(empty_text, "");
+        assert_eq!(silent_text, "");
+        assert!(unicode_text.starts_with("[00:00:00] café 日本語"));
+        assert!(unicode_text.ends_with('\n'));
+    }
+
+    #[test]
+    fn paragraph_break_on_pause_or_span() {
+        // Arrange
+        let pause_ms = PARAGRAPH_PAUSE.as_millis() as u64;
+        let span_ms = PARAGRAPH_MAX_SPAN.as_millis() as u64;
+        let with_pause = vec![
+            TranscriptSegment::new(0, 500, "one"),
+            TranscriptSegment::new(500 + pause_ms, 600 + pause_ms, "two"),
+        ];
+        let with_span = vec![
+            TranscriptSegment::new(0, 500, "alpha"),
+            TranscriptSegment::new(span_ms, span_ms + 500, "beta"),
+        ];
+
+        // Act
+        let pause_text = format_transcript(&with_pause);
+        let span_text = format_transcript(&with_span);
+
+        // Assert
+        assert!(pause_text.contains("\n\n["));
+        assert!(span_text.contains("\n\n["));
+        assert!(pause_text.contains("[00:00:00] one"));
+        assert!(span_text.contains("alpha"));
+    }
+}

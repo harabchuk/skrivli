@@ -102,3 +102,29 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 ## D-12 — One platform tree; Windows is the only host
 
 **Outcome:** Every Win32 / COM / `std::os::windows` call lives under `infrastructure/platform/windows/`. `platform/mod.rs` is `cfg(windows)` today and `compile_error!` on other targets. Traits (`DesktopShell`, `Trash`, `DirectoryWatch`, `SingleInstance`, `Tray`, recording clocks/capture) live in `services/ports.rs`. Free functions `replace_file`, `user_paths`, `spawn_device_watch`, `clock`, `disk`, and `performance_counter` are selected in `platform/mod.rs`. flexaudio capture stays in `infrastructure/audio/`; adapters take an injected `PerformanceCounter`. Future OS work follows **Adding a platform** in `skrivli-app-design.md` (§4.4). Product scope stays Windows until another host ships.
+
+## D-07 — whisper.cpp binding pin (CPU, Windows MSVC)
+
+**Outcome:** Pin **`whisper-rs` 0.16** (crates.io semver `0.16`, resolved in `Cargo.lock`) with **default features only** (CPU). No CUDA/Vulkan/Metal/OpenBLAS features. The crate’s `whisper-rs-sys` build script owns the whisper.cpp CMake build; Skrivli does not add a separate FFI crate.
+
+**Adapter boundary:** `infrastructure/ai/whisper.rs` is the only module that holds `WhisperContext` / engine pointers. Services depend on `InferencePort` in `services/ports.rs` (plain `f32` samples, `Arc<AtomicBool>` cancel, `Arc<dyn Fn(u8)>` progress, plain `InferenceSegment` values). `domain/`, `views/`, and other `services/` modules stay free of whisper types and of engine `cfg`.
+
+**Native build requirements (x86_64-pc-windows-msvc):** CMake on `PATH` (VS Build Tools CMake and/or Scoop), a working MSVC toolset (`VsDevCmd -arch=amd64`), and **libclang** for bindgen (`LIBCLANG_PATH` → directory with `libclang.dll`). Machine note: winget `LLVM.LLVM` MSI needed elevation and was cancelled (exit 1602). Successful compile used portable `clang+llvm-18.1.8` under gitignored `.tools/llvm/` (and/or Scoop LLVM). With `LIBCLANG_PATH` set, `whisper-rs` **0.16.0** / `whisper-rs-sys` **0.15.0** built cleanly on this host.
+
+**Licenses / notices:** whisper.cpp and ggml are MIT. Ship whisper.cpp NOTICE/license text with the Windows distribution (M9). Model files are separate downloads (D-08), not bundled.
+
+**Runtime contract:** load one model on the inference worker thread; `FullParams` with `SamplingStrategy::Greedy { best_of: 1 }`; disable engine stdout (`set_print_*` false); progress and abort via safe callbacks; never log transcript text or audio samples. Default `cargo test` uses a fake `InferencePort` and does not download models or run real inference.
+
+## D-08 — Checked-in model manifest (verified HF LFS digests)
+
+**Outcome:** `resources/models/manifest.json` lists the only variants Skrivli offers for download in v1. Source base: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/`. License: **MIT**. Digests were supplied as verified Hugging Face LFS SHA-256 values for this pin:
+
+| Variant id | Filename | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| `tiny-q5_1` | `ggml-tiny-q5_1.bin` | 32152673 | `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7` |
+| `base-q5_1` (DEFAULT) | `ggml-base-q5_1.bin` | 59707625 | `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898` |
+| `small-q5_1` | `ggml-small-q5_1.bin` | 190085487 | `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb` |
+
+**Download policy:** explicit user action only (`infrastructure/ai/models.rs`). Write a temp sibling, report progress, honor cancel, verify size + SHA-256, promote with `platform::replace_file` only on match. Failed or cancelled downloads leave no accepted model. Bootstrap, recording stop, and background retry must not start a download. Discovery also accepts a user-picked `ggml-*.bin` path; missing / unreadable / unsupported are distinct `AppError` contexts.
+
+**Settings:** schema **v4** stores `selected_model` (default `base-q5_1`) and `auto_transcribe` (default `false`). Older schemas migrate with serde defaults; newer `schema_version` still falls back to defaults.
