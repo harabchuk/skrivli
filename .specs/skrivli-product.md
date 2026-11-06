@@ -32,7 +32,7 @@ People who take meetings or calls on Windows and want a private, local recording
 
 1. Install by unzipping a portable package and launching Skrivli.
 2. On first useful transcription, choose or download a speech model (optional until you want text).
-3. On the **Record** tab, pick microphone, system audio source, and save folder if needed.
+3. On the **Record** tab, pick microphone and system audio source if needed.
 4. Start recording (window, tray, or keyboard shortcut). Speak and/or play audio as usual.
 5. Stop recording. A finished audio file appears in the chosen folder and in the **Recordings** tab.
 6. Open a recording, play it back, and optionally create a transcript.
@@ -87,13 +87,12 @@ If only one source is available (for example, no microphone permission or no pla
 Users can:
 
 - Choose microphone and system audio devices from lists of available Windows devices.
-- Choose where recordings are saved (folder picker); the choice is remembered. Default is a Skrivli folder under Documents when writable.
 - See live level meters for microphone and system audio (with clear numeric levels, not color alone).
 - Adjust microphone gain with a manual slider.
 - Start and stop recording; see a clear recording indicator and elapsed timer.
 - Read inline warnings for missing devices, permission problems, or storage issues.
 
-Device and save-folder choices are locked while a recording is active. The gain slider can stay adjustable during capture and is disabled while saving.
+Device choices are locked while a recording is active. The gain slider can stay adjustable during capture and is disabled while saving. Recordings save to the configured directory (default: a Skrivli folder under Documents when writable); the save location is chosen in Settings.
 
 ### Starting and stopping
 
@@ -182,7 +181,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 
 ### Recording
 
-- Default save directory
+- Default save directory (folder picker); the choice is remembered
 - Default microphone and system audio devices
 - Microphone gain, set with the manual slider
 - Optional separate source files (mic / system) — available when enabled; off by default

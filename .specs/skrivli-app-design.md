@@ -476,9 +476,6 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 │ Microphone      [ Default communications      ▾ ]│
 │ System audio    [ Default output device       ▾ ]│
 │                                                  │
-│ OUTPUT                                           │
-│ Save to         [ C:\Users\…\Skrivli ] [Browse] │
-│                                                  │
 │               [ ● Start recording ]              │
 │                     00:12:34                     │
 │                      ● REC                       │
@@ -490,8 +487,8 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 ```
 
 - Compose **GPUI Kit** select/combo, button, input, slider, checkbox, status, and dialog components for the recording form. Implement custom `level_meter` (and specialized recording indicator only if needed) using GPUI primitives and GPUI Kit theme tokens: band fills from `success` / `warning` / `danger`, track from the same color at low opacity (Kit Progress pattern), labels from `foreground` / `muted_foreground`. Do **not** create a parallel theme system; use GPUI Kit tokens and component styling.
-- Choose a folder with a Windows folder-picker adapter; show it in a read-only path field. Default `%USERPROFILE%\Documents\Skrivli\` where writable.
-- Disable source selection and destination changes while recording. The gain slider stays enabled during capture and is disabled only while saving.
+- The Record tab does not show the save path or a Browse control. Folder selection lives in Settings (read-only path plus Browse via the Windows folder-picker adapter). Default `%USERPROFILE%\Documents\Skrivli\` where writable.
+- Disable source selection while recording. The gain slider stays enabled during capture and is disabled only while saving.
 - A red recording state, elapsed timer and status text; ensure information is accessible without relying on red color or a blinking indicator alone.
 - Meter data: during a recording, microphone peak after echo removal and gain, and system peak after the fixed system gain, on −60..0 dBFS, with a green→amber→red range and a ~1 s peak hold. Draw from throttled snapshots. Idle monitoring stays outside the pipeline, uses peak times the slider, and hands the devices to the recording session when capture starts.
 - Missing devices/unwritable destination show inline GPUI Kit feedback; material failures use GPUI Kit dialogs or a Windows TaskDialog through a platform adapter when specifically required.

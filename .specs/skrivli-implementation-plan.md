@@ -145,7 +145,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 - [x] `domain/audio.rs`: `AudioFormat`, frame counts, monotonic session time and sample index conversion with checked integer arithmetic.
 - [x] `infrastructure/audio/devices.rs`: enumerate `eCapture`/`eRender` endpoints via MMDevice; expose stable IDs and friendly display names; select Windows default communications microphone and default render endpoint.
 - [x] Design `DeviceSelection` with explicit/default modes and missing-device fallback notification; persist stable endpoint choices.
-- [x] `infrastructure/platform/windows/shell.rs`: native folder picker; validate write permissions and folder creation. Wire GPUI Kit device selectors and destination read-only field in `views/recording.rs`.
+- [x] `infrastructure/platform/windows/shell.rs`: native folder picker; validate write permissions and folder creation. Wire GPUI Kit device selectors in `views/recording.rs`. Destination Browse moves to Settings (not on the Record tab).
 - [x] Test absent/disabled devices and microphone privacy denied. Do not allow endpoint/path modifications during active recording.
 
 ### M2.2 — Mic capture worker and normalization

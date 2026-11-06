@@ -19,6 +19,8 @@ pub(crate) enum AppCommand {
     StopRecording,
     SelectMicrophone(StoredEndpoint),
     SelectSystem(StoredEndpoint),
+    /// Dispatched from Settings (folder Browse) when that dialog is wired.
+    #[allow(dead_code)]
     BrowseRecordings,
     /// Dispatched from the Recordings pane (M7 UI) and command tests.
     #[allow(dead_code)]

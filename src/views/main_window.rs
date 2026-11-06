@@ -949,7 +949,6 @@ impl Render for MainWindow {
             AppTab::Record => 0,
             AppTab::Recordings => 1,
         };
-        let folder = SharedString::from(self.settings.recordings_directory().display().to_string());
         let locked = self.presentation.inputs_locked();
         let phase = self.presentation.record_phase();
         let show_stop = matches!(
@@ -970,14 +969,12 @@ impl Render for MainWindow {
         };
         let notice = SharedString::from(self.presentation.notice().unwrap_or(""));
         let entity = cx.entity();
-        let browse_entity = entity.clone();
         let toggle_entity = entity.clone();
         let body = match self.presentation.tab() {
             AppTab::Record => record_tab(
                 &self.microphone,
                 &self.system,
                 &self.gain_slider,
-                folder,
                 locked,
                 show_stop,
                 phase == RecordPhase::Stopping,
@@ -989,11 +986,6 @@ impl Render for MainWindow {
                 self.mic_meter.hold,
                 self.system_meter.level,
                 self.system_meter.hold,
-                move |_event, window, cx| {
-                    browse_entity.update(cx, |view, cx| {
-                        view.handle(AppCommand::BrowseRecordings, window, cx);
-                    });
-                },
                 move |_event, window, cx| {
                     toggle_entity.update(cx, |view, cx| {
                         let command = if view.presentation.inputs_locked() {

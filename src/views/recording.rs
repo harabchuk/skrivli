@@ -1,4 +1,4 @@
-//! Record tab: microphone, system audio, destination, gain, and meters.
+//! Record tab: microphone, system audio, gain, and meters.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::select::{SearchableVec, Select, SelectState};
@@ -15,11 +15,10 @@ const START_BUTTON_WIDTH: f32 = 240.;
 const GAIN_SLIDER_WIDTH: f32 = 100.;
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn record_tab<Browse, Toggle>(
+pub(crate) fn record_tab<Toggle>(
     microphone: &Entity<SelectState<SearchableVec<SharedString>>>,
     system: &Entity<SelectState<SearchableVec<SharedString>>>,
     gain: &Entity<SliderState>,
-    destination: SharedString,
     locked: bool,
     show_stop: bool,
     saving: bool,
@@ -31,12 +30,10 @@ pub(crate) fn record_tab<Browse, Toggle>(
     mic_hold: f32,
     system_db: f32,
     system_hold: f32,
-    browse: Browse,
     toggle: Toggle,
     cx: &App,
 ) -> impl IntoElement
 where
-    Browse: Fn(&ClickEvent, &mut gpui_kit::Window, &mut App) + 'static,
     Toggle: Fn(&ClickEvent, &mut gpui_kit::Window, &mut App) + 'static,
 {
     let toggle_label = if show_stop {
@@ -59,15 +56,6 @@ where
                 .disabled(locked)
                 .accessibility_label("System audio"),
         ))
-        .child("Output")
-        .child(
-            h_flex().gap_2().items_center().child(destination).child(
-                Button::new("browse-recordings")
-                    .label("Browse")
-                    .disabled(locked)
-                    .on_click(browse),
-            ),
-        )
         .child(
             h_flex().w_full().justify_center().child(
                 Button::new("toggle-recording")
