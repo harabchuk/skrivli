@@ -18,7 +18,9 @@ pub(crate) mod views;
 pub mod testing {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{self, Receiver, Sender};
     use std::sync::{Arc, Mutex};
+    use std::thread::JoinHandle;
     use std::time::Duration;
 
     pub use crate::services::recording_harness::{
@@ -356,6 +358,267 @@ pub mod testing {
             JobPhase::Done => TranscriptionFlowPhase::Done,
             JobPhase::Failed => TranscriptionFlowPhase::Failed,
             JobPhase::Cancelled => TranscriptionFlowPhase::Cancelled,
+        }
+    }
+
+    /// Where the fake inference blocks. No microphone and no whisper.cpp.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum InferenceHold {
+        /// Block in `load`, before the WAV is opened, so a rename can move the file.
+        BeforeOpen,
+        /// Block inside `transcribe_chunk`. When `honor_cancel` is false the chunk
+        /// still returns text after release (a late completion callback).
+        DuringChunk { honor_cancel: bool },
+    }
+
+    /// Library plus transcription, with a gate on the fake inference port.
+    pub struct IdentitySession {
+        transcription: TranscriptionHost,
+        transcription_thread: Option<JoinHandle<()>>,
+        library: crate::services::library::LibraryHost,
+        library_thread: Option<JoinHandle<()>>,
+        stop: Arc<AtomicBool>,
+        trash: Arc<RecordingTrash>,
+        entered: Mutex<Option<Receiver<()>>>,
+        release: Sender<()>,
+        model: PathBuf,
+        library_snapshots: Arc<Mutex<Vec<crate::services::library::LibrarySnapshot>>>,
+    }
+
+    impl IdentitySession {
+        pub fn start(directory: &Path, hold: InferenceHold) -> Self {
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let engine = HoldEngine {
+                entered: Mutex::new(Some(entered_tx)),
+                release: Mutex::new(Some(release_rx)),
+                hold_before_open: matches!(hold, InferenceHold::BeforeOpen),
+                honor_cancel: matches!(
+                    hold,
+                    InferenceHold::BeforeOpen | InferenceHold::DuringChunk { honor_cancel: true }
+                ),
+                held: false,
+            };
+            let (transcription, transcription_thread) = TranscriptionHost::spawn_with_config(
+                Box::new(engine),
+                TranscriptionConfig {
+                    window: Duration::from_millis(200),
+                    overlap: Duration::from_millis(40),
+                    read_frames: 1_000,
+                },
+                Box::new(|_| {}),
+            );
+            let trash = Arc::new(RecordingTrash {
+                discarded: Mutex::new(Vec::new()),
+            });
+            let library_snapshots = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&library_snapshots);
+            let stop = Arc::new(AtomicBool::new(false));
+            let model = directory.join("ggml-test.bin");
+            let _ = std::fs::write(&model, b"ggml");
+            let (library, library_thread) = crate::services::library::LibraryHost::spawn(
+                directory.to_path_buf(),
+                trash.clone(),
+                Arc::new(QuietWatch),
+                Arc::new(transcription.clone()),
+                Box::new(move |snapshot| {
+                    sink.lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(snapshot);
+                }),
+                Arc::clone(&stop),
+            );
+            Self {
+                transcription,
+                transcription_thread: Some(transcription_thread),
+                library,
+                library_thread: Some(library_thread),
+                stop,
+                trash,
+                entered: Mutex::new(Some(entered_rx)),
+                release: release_tx,
+                model,
+                library_snapshots,
+            }
+        }
+
+        pub fn enqueue(&self, id: u64, wav: &Path) {
+            self.transcription.enqueue(
+                RecordingId::from_raw(id),
+                wav.to_path_buf(),
+                self.model.clone(),
+                "base-q5_1",
+            );
+        }
+
+        pub fn wait_until_held(&self) {
+            let rx = self
+                .entered
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take()
+                .expect("hold gate");
+            rx.recv_timeout(Duration::from_secs(5))
+                .expect("inference did not block");
+        }
+
+        pub fn release(&self) {
+            let _ = self.release.send(());
+        }
+
+        pub fn rename(&self, id: u64, stem: &str) {
+            self.library
+                .rename(RecordingId::from_raw(id), stem.to_string());
+        }
+
+        pub fn delete(&self, id: u64) {
+            self.library.delete(RecordingId::from_raw(id));
+        }
+
+        pub fn wait_for_library_id(&self, id: u64) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while std::time::Instant::now() < deadline {
+                let guard = self
+                    .library_snapshots
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if guard.iter().any(|snapshot| {
+                    snapshot
+                        .catalog
+                        .entries
+                        .iter()
+                        .any(|entry| entry.info.id().raw() == id)
+                }) {
+                    return;
+                }
+                drop(guard);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            panic!("library did not list recording {id}");
+        }
+
+        pub fn discarded(&self) -> Vec<PathBuf> {
+            self.trash
+                .discarded
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        }
+
+        pub fn wait_terminal(&self) {
+            wait_terminal(&self.transcription);
+        }
+
+        pub fn phase(&self) -> TranscriptionFlowPhase {
+            map_phase(self.transcription.snapshot().phase)
+        }
+
+        pub fn shutdown(mut self) {
+            let _ = self.release.send(());
+            self.transcription.shutdown();
+            self.library.shutdown();
+            self.stop.store(true, Ordering::Release);
+            if let Some(handle) = self.transcription_thread.take() {
+                let _ = handle.join();
+            }
+            if let Some(handle) = self.library_thread.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    struct HoldEngine {
+        entered: Mutex<Option<Sender<()>>>,
+        release: Mutex<Option<Receiver<()>>>,
+        hold_before_open: bool,
+        honor_cancel: bool,
+        held: bool,
+    }
+
+    impl HoldEngine {
+        fn block(&mut self) {
+            if self.held {
+                return;
+            }
+            self.held = true;
+            if let Some(tx) = self
+                .entered
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take()
+            {
+                let _ = tx.send(());
+            }
+            if let Some(rx) = self
+                .release
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take()
+            {
+                let _ = rx.recv();
+            }
+        }
+    }
+
+    impl InferencePort for HoldEngine {
+        fn load(&mut self, _model_path: &Path) -> Result<(), AppError> {
+            if self.hold_before_open {
+                self.block();
+            }
+            Ok(())
+        }
+
+        fn unload(&mut self) {}
+
+        fn transcribe_chunk(
+            &mut self,
+            _samples_f32_16k_mono: &[f32],
+            cancel: &Arc<AtomicBool>,
+            on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+        ) -> Result<Vec<InferenceSegment>, AppError> {
+            if !self.hold_before_open {
+                self.block();
+            }
+            if self.honor_cancel && cancel.load(Ordering::Acquire) {
+                return Err(AppError::message("transcription cancelled", "cancel"));
+            }
+            on_progress(50);
+            on_progress(100);
+            Ok(vec![InferenceSegment {
+                start_ms: 0,
+                end_ms: 400,
+                text: "noted".into(),
+            }])
+        }
+    }
+
+    struct RecordingTrash {
+        discarded: Mutex<Vec<PathBuf>>,
+    }
+
+    impl crate::services::ports::Trash for RecordingTrash {
+        fn discard(&self, paths: &[PathBuf]) -> Result<(), AppError> {
+            self.discarded
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .extend_from_slice(paths);
+            Ok(())
+        }
+    }
+
+    struct QuietWatch;
+
+    impl crate::services::ports::DirectoryWatch for QuietWatch {
+        fn spawn(
+            &self,
+            _directory: PathBuf,
+            _stop: Arc<AtomicBool>,
+            _debounce: Duration,
+        ) -> (Receiver<crate::services::ports::WatchEvent>, JoinHandle<()>) {
+            let (tx, rx) = mpsc::channel();
+            drop(tx);
+            let handle = std::thread::spawn(|| {});
+            (rx, handle)
         }
     }
 }

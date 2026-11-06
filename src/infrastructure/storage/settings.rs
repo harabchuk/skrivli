@@ -27,6 +27,10 @@ fn default_auto_transcribe() -> bool {
     false
 }
 
+fn default_notify_on_transcript() -> bool {
+    true
+}
+
 /// Logical-pixel window placement. Zero or negative sizes are rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StoredWindowBounds {
@@ -116,6 +120,9 @@ pub(crate) struct Settings {
     selected_model: String,
     #[serde(default = "default_auto_transcribe")]
     auto_transcribe: bool,
+    /// Balloon when a transcript is ready. Default on. Older files omit the field.
+    #[serde(default = "default_notify_on_transcript")]
+    notify_on_transcript: bool,
 }
 
 impl Settings {
@@ -139,6 +146,7 @@ impl Settings {
             mic_gain: default_mic_gain(),
             selected_model: default_selected_model(),
             auto_transcribe: default_auto_transcribe(),
+            notify_on_transcript: default_notify_on_transcript(),
         })
     }
 
@@ -229,6 +237,15 @@ impl Settings {
     #[allow(dead_code)] // Settings UI / M6.3 auto-transcribe.
     pub(crate) fn set_auto_transcribe(&mut self, enabled: bool) {
         self.auto_transcribe = enabled;
+    }
+
+    pub(crate) fn notify_on_transcript(&self) -> bool {
+        self.notify_on_transcript
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))] // Settings dialog is M8.
+    pub(crate) fn set_notify_on_transcript(&mut self, enabled: bool) {
+        self.notify_on_transcript = enabled;
     }
 
     pub(crate) fn set_recordings_directory(&mut self, directory: PathBuf) -> Result<(), AppError> {
@@ -548,6 +565,35 @@ mod tests {
         assert_eq!(loaded.schema_version, SCHEMA_VERSION);
         assert_eq!(loaded.selected_model(), "tiny-q5_1");
         assert!(loaded.auto_transcribe());
+        assert!(loaded.notify_on_transcript());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn older_json_without_notify_field_defaults_notifications_on() {
+        // Arrange
+        let dir = temp_dir("notify-default");
+        let path = dir.join("settings.json");
+        let meetings = dir.join("Meetings");
+        let body = format!(
+            r#"{{"schema_version":4,"recordings_directory":"{}","close_to_tray":true,"start_hidden":false,"theme":"system","selected_model":"base-q5_1","auto_transcribe":false}}"#,
+            meetings.display().to_string().replace('\\', "\\\\")
+        );
+        fs::write(&path, body).expect("write");
+
+        // Act
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert_eq!(loaded.schema_version, SCHEMA_VERSION);
+        assert!(loaded.notify_on_transcript());
+        assert!(!loaded.auto_transcribe());
+        let mut updated = loaded.clone();
+        updated.set_notify_on_transcript(false);
+        updated.save(&path).expect("save");
+        let saved = Settings::load(&path, sample(&dir));
+        assert!(!saved.notify_on_transcript());
+        assert_eq!(saved.schema_version, SCHEMA_VERSION);
         let _ = fs::remove_dir_all(dir);
     }
 

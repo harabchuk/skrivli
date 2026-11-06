@@ -10,9 +10,12 @@ use std::time::Duration;
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::preserve_selection;
 use crate::infrastructure::storage::library::{
-    associated_paths, rename_recording, scan_library, LibraryCatalog, LibraryEntry, RenameResult,
+    associated_paths, rename_recording, renamed_audio_path, scan_library, LibraryCatalog,
+    LibraryEntry, RenameResult,
 };
-use crate::services::ports::{DirectoryWatch, Trash, WatchEvent, DEFAULT_WATCH_DEBOUNCE};
+use crate::services::ports::{
+    DirectoryWatch, JobIdentity, Trash, WatchEvent, DEFAULT_WATCH_DEBOUNCE,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LibrarySnapshot {
@@ -40,13 +43,14 @@ impl LibraryHost {
         directory: PathBuf,
         trash: Arc<dyn Trash>,
         watch: Arc<dyn DirectoryWatch>,
+        identity: Arc<dyn JobIdentity>,
         on_change: Box<dyn Fn(LibrarySnapshot) + Send>,
         stop: Arc<AtomicBool>,
     ) -> (Self, JoinHandle<()>) {
         let (tx, rx) = mpsc::channel();
         let command_tx = tx.clone();
         let handle = thread::spawn(move || {
-            library_loop(directory, trash, watch, rx, on_change, stop);
+            library_loop(directory, trash, watch, identity, rx, on_change, stop);
         });
         let _ = command_tx.send(LibraryCommand::Refresh);
         (Self { tx }, handle)
@@ -81,6 +85,7 @@ fn library_loop(
     mut directory: PathBuf,
     trash: Arc<dyn Trash>,
     watch: Arc<dyn DirectoryWatch>,
+    identity: Arc<dyn JobIdentity>,
     rx: mpsc::Receiver<LibraryCommand>,
     on_change: Box<dyn Fn(LibrarySnapshot) + Send>,
     stop: Arc<AtomicBool>,
@@ -118,6 +123,11 @@ fn library_loop(
                 publish(&catalog, selected, None, &on_change);
             }
             Ok(LibraryCommand::Rename { id, new_stem }) => {
+                if let Some(entry) = catalog.find(id) {
+                    if let Ok(new_audio) = renamed_audio_path(entry, &new_stem) {
+                        identity.before_rename(id, &new_audio);
+                    }
+                }
                 let notice = match rename_recording(&catalog, id, &new_stem) {
                     Ok(result) => rename_notice(&result),
                     Err(error) => {
@@ -132,6 +142,7 @@ fn library_loop(
                 }
             }
             Ok(LibraryCommand::Delete { id }) => {
+                identity.before_delete(id);
                 let notice = match catalog.find(id) {
                     Some(entry) => delete_entry(entry, trash.as_ref()),
                     None => Some("Could not update the recordings library."),
@@ -232,9 +243,17 @@ mod tests {
 
     use super::LibraryHost;
     use crate::common::error::AppError;
+    use crate::domain::ids::RecordingId;
     use crate::infrastructure::platform;
     use crate::infrastructure::storage::sidecar::{write_sidecar, Sidecar};
-    use crate::services::ports::{DirectoryWatch, Trash, WatchEvent};
+    use crate::services::ports::{DirectoryWatch, JobIdentity, Trash, WatchEvent};
+
+    struct IgnoreJobIdentity;
+
+    impl JobIdentity for IgnoreJobIdentity {
+        fn before_rename(&self, _id: RecordingId, _new_audio: &std::path::Path) {}
+        fn before_delete(&self, _id: RecordingId) {}
+    }
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -302,6 +321,7 @@ mod tests {
             dir.clone(),
             Arc::clone(&host_ports.trash),
             Arc::clone(&host_ports.watch),
+            Arc::new(IgnoreJobIdentity),
             Box::new(move |snapshot| {
                 sink.lock().expect("lock").push(snapshot);
             }),
@@ -365,6 +385,7 @@ mod tests {
             dir.clone(),
             trash,
             Arc::new(SilentWatch),
+            Arc::new(IgnoreJobIdentity),
             Box::new(move |snapshot| {
                 sink.lock().expect("lock").push(snapshot);
             }),

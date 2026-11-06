@@ -5,8 +5,8 @@ mod windows;
 
 #[cfg(windows)]
 pub(crate) use windows::{
-    clock, disk, host, performance_counter, replace_file, spawn_device_watch, user_paths,
-    PlatformHost,
+    clock, completion_notifier, disk, host, performance_counter, replace_file, spawn_device_watch,
+    user_paths, PlatformHost,
 };
 
 #[cfg(not(windows))]

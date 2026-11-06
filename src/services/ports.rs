@@ -16,6 +16,7 @@ use std::time::Duration;
 use crate::common::error::AppError;
 use crate::domain::audio::{AudioBlock, CivilTime, SessionOrigin};
 use crate::domain::audio_frame::AudioFrame;
+use crate::domain::ids::RecordingId;
 use crate::services::audio_pipeline::{Pipeline, PipelineSetup};
 
 /// Debounce used by the production directory watcher.
@@ -177,6 +178,8 @@ pub(crate) enum HostCommand {
     OpenSettings,
     Exit,
     SessionEnding,
+    /// Balloon click: show the window and select this recording when it still exists.
+    ShowRecording(RecordingId),
 }
 
 pub(crate) trait Tray: Send + Sync {
@@ -184,8 +187,21 @@ pub(crate) trait Tray: Send + Sync {
         &self,
         stop: Arc<AtomicBool>,
         recording: Arc<AtomicBool>,
+        notices: Receiver<RecordingId>,
         on_command: Box<dyn Fn(HostCommand) + Send>,
     ) -> Result<(), AppError>;
+}
+
+/// Completion notice. `transcript_ready` only records the id.
+/// The platform thread shows the balloon; this method must not call Win32.
+pub(crate) trait TranscriptNotifier: Send + Sync {
+    fn transcript_ready(&self, recording_id: RecordingId);
+}
+
+/// Library rename/delete tells the transcription host before files change.
+pub(crate) trait JobIdentity: Send + Sync {
+    fn before_rename(&self, id: RecordingId, new_audio: &Path);
+    fn before_delete(&self, id: RecordingId);
 }
 
 /// Result of trying to become the single running instance.

@@ -24,6 +24,7 @@ pub(crate) struct Presentation {
     pending_show: bool,
     record_phase: RecordPhase,
     selected_recording: Option<RecordingId>,
+    known_recordings: Vec<RecordingId>,
     loaded_transcript: String,
     detail_text: String,
     transcript_status: Option<TranscriptStatus>,
@@ -47,6 +48,7 @@ impl Presentation {
             pending_show: false,
             record_phase: RecordPhase::Idle,
             selected_recording: None,
+            known_recordings: Vec::new(),
             loaded_transcript: String::new(),
             detail_text: String::new(),
             transcript_status: None,
@@ -61,6 +63,14 @@ impl Presentation {
 
     pub(crate) fn set_selected_recording(&mut self, id: Option<RecordingId>) {
         self.selected_recording = id;
+    }
+
+    pub(crate) fn set_known_recordings(&mut self, ids: Vec<RecordingId>) {
+        self.known_recordings = ids;
+    }
+
+    pub(crate) fn knows_recording(&self, id: RecordingId) -> bool {
+        self.known_recordings.contains(&id)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

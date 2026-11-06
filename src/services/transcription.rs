@@ -18,14 +18,16 @@ use crate::domain::transcript::{
 use crate::infrastructure::ai::resample::pcm16_to_whisper_mono;
 use crate::infrastructure::files::transcript_reader::{TranscriptWavReader, DEFAULT_CHUNK_FRAMES};
 use crate::infrastructure::storage::sidecar::{
-    update_transcription, write_transcript_text, TranscriptionWrite,
+    load_sidecar, transcript_path_for, update_transcription, write_transcript_text, SidecarLoad,
+    TranscriptionWrite,
 };
-use crate::services::ports::{InferencePort, InferenceSegment};
+use crate::services::ports::{InferencePort, InferenceSegment, JobIdentity, TranscriptNotifier};
 
 pub(crate) const NOTICE_DONE: &str = "Transcript ready.";
 pub(crate) const NOTICE_FAILED: &str = "Transcription failed.";
 pub(crate) const NOTICE_CANCELLED: &str = "Transcription cancelled.";
 pub(crate) const NOTICE_MODEL: &str = "The speech model file is missing or unsupported.";
+const DETAIL_IDENTITY: &str = "The recording changed before the transcript was saved.";
 
 /// Tunables for windowed decode. Production uses domain defaults; tests shrink them.
 #[derive(Clone, Copy, Debug)]
@@ -132,7 +134,94 @@ struct QueuedJob {
     cancel: Arc<AtomicBool>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrackPhase {
+    Queued,
+    Running,
+}
+
+struct TrackedJob {
+    job_id: Option<JobId>,
+    recording_id: RecordingId,
+    audio_path: PathBuf,
+    txt_path: Option<PathBuf>,
+    model_id: String,
+    phase: TrackPhase,
+    cancel: Arc<AtomicBool>,
+    suppress_write: bool,
+}
+
+struct JobLedger {
+    jobs: Vec<TrackedJob>,
+}
+
+struct BoundView {
+    audio: PathBuf,
+    txt: Option<PathBuf>,
+    suppress: bool,
+    cancel: bool,
+}
+
+impl JobLedger {
+    fn new() -> Self {
+        Self { jobs: Vec::new() }
+    }
+
+    fn contains(&self, id: RecordingId) -> bool {
+        self.jobs.iter().any(|job| job.recording_id == id)
+    }
+
+    fn find_mut(&mut self, id: RecordingId) -> Option<&mut TrackedJob> {
+        self.jobs.iter_mut().find(|job| job.recording_id == id)
+    }
+
+    fn remove(&mut self, id: RecordingId) {
+        self.jobs.retain(|job| job.recording_id != id);
+    }
+
+    fn insert_queued(&mut self, recording_id: RecordingId, audio_path: PathBuf, model_id: String) {
+        self.jobs.push(TrackedJob {
+            job_id: None,
+            recording_id,
+            audio_path,
+            txt_path: None,
+            model_id,
+            phase: TrackPhase::Queued,
+            cancel: Arc::new(AtomicBool::new(false)),
+            suppress_write: false,
+        });
+    }
+
+    fn view(&self, id: RecordingId) -> Option<BoundView> {
+        self.jobs
+            .iter()
+            .find(|job| job.recording_id == id)
+            .map(|job| BoundView {
+                audio: job.audio_path.clone(),
+                txt: job.txt_path.clone(),
+                suppress: job.suppress_write,
+                cancel: job.cancel.load(Ordering::Acquire),
+            })
+    }
+}
+
+enum Adopted {
+    Ignore,
+    Suppressed {
+        path: PathBuf,
+        model: String,
+        recording: RecordingId,
+    },
+    Ready(QueuedJob),
+}
+
 type ActiveCancel = Option<(JobId, Arc<AtomicBool>)>;
+
+struct SilentNotifier;
+
+impl TranscriptNotifier for SilentNotifier {
+    fn transcript_ready(&self, _recording_id: RecordingId) {}
+}
 
 /// Owns one inference worker and a FIFO of transcription jobs.
 #[derive(Clone)]
@@ -140,6 +229,7 @@ pub(crate) struct TranscriptionHost {
     tx: Sender<TranscriptionCommand>,
     /// Running job cancel flag; set from [`Self::cancel`] without waiting on the worker.
     active_cancel: Arc<Mutex<ActiveCancel>>,
+    ledger: Arc<Mutex<JobLedger>>,
     phase: Arc<AtomicU8Mirror>,
     progress: Arc<AtomicU8Mirror>,
     job_id: Arc<Mutex<Option<JobId>>>,
@@ -166,6 +256,9 @@ impl AtomicU8Mirror {
 }
 
 impl TranscriptionHost {
+    /// Production startup goes through [`Self::spawn_with_notifier`] so the
+    /// completion port and the user setting are explicit.
+    #[allow(dead_code)]
     pub(crate) fn spawn(
         inference: Box<dyn InferencePort>,
         on_change: Box<dyn Fn(TranscriptionSnapshot) + Send>,
@@ -178,8 +271,25 @@ impl TranscriptionHost {
         config: TranscriptionConfig,
         on_change: Box<dyn Fn(TranscriptionSnapshot) + Send>,
     ) -> (Self, JoinHandle<()>) {
+        Self::spawn_with_notifier(
+            inference,
+            config,
+            Arc::new(SilentNotifier),
+            Arc::new(AtomicBool::new(true)),
+            on_change,
+        )
+    }
+
+    pub(crate) fn spawn_with_notifier(
+        inference: Box<dyn InferencePort>,
+        config: TranscriptionConfig,
+        notifier: Arc<dyn TranscriptNotifier>,
+        notify_enabled: Arc<AtomicBool>,
+        on_change: Box<dyn Fn(TranscriptionSnapshot) + Send>,
+    ) -> (Self, JoinHandle<()>) {
         let (tx, rx) = mpsc::channel();
         let active_cancel = Arc::new(Mutex::new(None));
+        let ledger = Arc::new(Mutex::new(JobLedger::new()));
         let phase = Arc::new(AtomicU8Mirror::new(JobPhase::Queued.as_raw()));
         let progress = Arc::new(AtomicU8Mirror::new(0));
         let job_id = Arc::new(Mutex::new(None));
@@ -193,12 +303,18 @@ impl TranscriptionHost {
         let worker_notice = Arc::clone(&notice);
         let worker_detail = Arc::clone(&detail);
         let worker_active_cancel = Arc::clone(&active_cancel);
+        let worker_ledger = Arc::clone(&ledger);
+        let worker_notifier = Arc::clone(&notifier);
+        let worker_notify = Arc::clone(&notify_enabled);
         let handle = thread::spawn(move || {
             worker_loop(
                 rx,
                 inference,
                 config,
                 worker_active_cancel,
+                worker_ledger,
+                worker_notifier,
+                worker_notify,
                 worker_phase,
                 worker_progress,
                 worker_job,
@@ -212,6 +328,7 @@ impl TranscriptionHost {
             Self {
                 tx,
                 active_cancel,
+                ledger,
                 phase,
                 progress,
                 job_id,
@@ -230,12 +347,65 @@ impl TranscriptionHost {
         model_path: PathBuf,
         model_id: impl Into<String>,
     ) {
+        let model_id = model_id.into();
+        {
+            let mut ledger = self
+                .ledger
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if ledger.contains(recording_id) {
+                return;
+            }
+            ledger.insert_queued(recording_id, audio_path.clone(), model_id.clone());
+        }
         let _ = self.tx.send(TranscriptionCommand::Enqueue(EnqueueRequest {
             recording_id,
             audio_path,
             model_path,
-            model_id: model_id.into(),
+            model_id,
         }));
+    }
+
+    /// Rename of this id. A queued job is cancelled. A running job is retargeted
+    /// so a later write uses `new_audio` when that file still belongs to the id.
+    pub(crate) fn note_rename(&self, id: RecordingId, new_audio: PathBuf) {
+        let action = {
+            let mut ledger = self
+                .ledger
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(job) = ledger.find_mut(id) else {
+                return;
+            };
+            if job.phase == TrackPhase::Running && job.txt_path.is_some() && !job.suppress_write {
+                if let Ok(txt) = transcript_path_for(&new_audio) {
+                    job.audio_path = new_audio;
+                    job.txt_path = Some(txt);
+                    return;
+                }
+            }
+            job.suppress_write = true;
+            job.cancel.store(true, Ordering::Release);
+            (job.audio_path.clone(), job.model_id.clone())
+        };
+        let _ = update_transcription(&action.0, TranscriptionWrite::Cancelled, Some(&action.1));
+    }
+
+    /// Delete of this id. The job must not write a transcript after this returns.
+    pub(crate) fn note_delete(&self, id: RecordingId) {
+        let action = {
+            let mut ledger = self
+                .ledger
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(job) = ledger.find_mut(id) else {
+                return;
+            };
+            job.suppress_write = true;
+            job.cancel.store(true, Ordering::Release);
+            (job.audio_path.clone(), job.model_id.clone())
+        };
+        let _ = update_transcription(&action.0, TranscriptionWrite::Cancelled, Some(&action.1));
     }
 
     pub(crate) fn cancel(&self, job_id: JobId) {
@@ -282,12 +452,25 @@ impl TranscriptionHost {
     }
 }
 
+impl JobIdentity for TranscriptionHost {
+    fn before_rename(&self, id: RecordingId, new_audio: &Path) {
+        self.note_rename(id, new_audio.to_path_buf());
+    }
+
+    fn before_delete(&self, id: RecordingId) {
+        self.note_delete(id);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn worker_loop(
     rx: mpsc::Receiver<TranscriptionCommand>,
     mut inference: Box<dyn InferencePort>,
     config: TranscriptionConfig,
     active_cancel: Arc<Mutex<ActiveCancel>>,
+    ledger: Arc<Mutex<JobLedger>>,
+    notifier: Arc<dyn TranscriptNotifier>,
+    notify_enabled: Arc<AtomicBool>,
     phase: Arc<AtomicU8Mirror>,
     progress: Arc<AtomicU8Mirror>,
     job_id: Arc<Mutex<Option<JobId>>>,
@@ -343,48 +526,67 @@ fn worker_loop(
                     break;
                 }
                 TranscriptionCommand::Enqueue(request) => {
-                    let duplicate = running_id == Some(request.recording_id)
-                        || queue
-                            .iter()
-                            .any(|job| job.request.recording_id == request.recording_id);
-                    if duplicate {
-                        continue;
+                    match accept_enqueue(request, &queue, running_id, &mut next_job, &ledger) {
+                        Adopted::Ignore => {}
+                        Adopted::Suppressed {
+                            path,
+                            model,
+                            recording,
+                        } => {
+                            let _ = update_transcription(
+                                &path,
+                                TranscriptionWrite::Cancelled,
+                                Some(model.as_str()),
+                            );
+                            publish(
+                                &phase,
+                                &progress,
+                                &job_id,
+                                &recording_id,
+                                &notice,
+                                &detail,
+                                JobPhase::Cancelled,
+                                None,
+                                Some(recording),
+                                0,
+                                Some(NOTICE_CANCELLED),
+                                None,
+                                &on_change,
+                            );
+                        }
+                        Adopted::Ready(queued) => {
+                            let id = queued.job_id;
+                            let recording = queued.request.recording_id;
+                            let path = queued.request.audio_path.clone();
+                            let model = queued.request.model_id.clone();
+                            queue.push_back(queued);
+                            let _ = update_transcription(
+                                &path,
+                                TranscriptionWrite::Queued,
+                                Some(model.as_str()),
+                            );
+                            publish(
+                                &phase,
+                                &progress,
+                                &job_id,
+                                &recording_id,
+                                &notice,
+                                &detail,
+                                JobPhase::Queued,
+                                Some(id),
+                                Some(recording),
+                                0,
+                                None,
+                                None,
+                                &on_change,
+                            );
+                        }
                     }
-                    let id = JobId::from_raw(next_job);
-                    next_job = next_job.saturating_add(1);
-                    let cancel = Arc::new(AtomicBool::new(false));
-                    let recording = request.recording_id;
-                    let path = request.audio_path.clone();
-                    let model = request.model_id.clone();
-                    queue.push_back(QueuedJob {
-                        job_id: id,
-                        request,
-                        cancel,
-                    });
-                    let _ = update_transcription(
-                        &path,
-                        TranscriptionWrite::Queued,
-                        Some(model.as_str()),
-                    );
-                    publish(
-                        &phase,
-                        &progress,
-                        &job_id,
-                        &recording_id,
-                        &notice,
-                        &detail,
-                        JobPhase::Queued,
-                        Some(id),
-                        Some(recording),
-                        0,
-                        None,
-                        None,
-                        &on_change,
-                    );
                 }
                 TranscriptionCommand::Cancel { job_id: target } => {
                     if let Some(index) = queue.iter().position(|job| job.job_id == target) {
                         if let Some(job) = queue.remove(index) {
+                            forget_job(&ledger, job.request.recording_id);
                             let _ = update_transcription(
                                 &job.request.audio_path,
                                 TranscriptionWrite::Cancelled,
@@ -421,6 +623,55 @@ fn worker_loop(
         let Some(job) = queue.pop_front() else {
             continue;
         };
+        match begin_running(&ledger, job.request.recording_id) {
+            Start::Cancelled => {
+                let _ = update_transcription(
+                    &job.request.audio_path,
+                    TranscriptionWrite::Cancelled,
+                    Some(job.request.model_id.as_str()),
+                );
+                publish(
+                    &phase,
+                    &progress,
+                    &job_id,
+                    &recording_id,
+                    &notice,
+                    &detail,
+                    JobPhase::Cancelled,
+                    Some(job.job_id),
+                    Some(job.request.recording_id),
+                    0,
+                    Some(NOTICE_CANCELLED),
+                    None,
+                    &on_change,
+                );
+                continue;
+            }
+            Start::Failed => {
+                let _ = update_transcription(
+                    &job.request.audio_path,
+                    TranscriptionWrite::Failed,
+                    Some(job.request.model_id.as_str()),
+                );
+                publish(
+                    &phase,
+                    &progress,
+                    &job_id,
+                    &recording_id,
+                    &notice,
+                    &detail,
+                    JobPhase::Failed,
+                    Some(job.job_id),
+                    Some(job.request.recording_id),
+                    0,
+                    Some(NOTICE_FAILED),
+                    Some(DETAIL_IDENTITY),
+                    &on_change,
+                );
+                continue;
+            }
+            Start::Run => {}
+        }
         let mut last_persisted_progress = 0_u8;
         let snapshot_job = job.job_id;
         let snapshot_recording = job.request.recording_id;
@@ -475,44 +726,62 @@ fn worker_loop(
                     return;
                 }
                 TranscriptionCommand::Enqueue(request) => {
-                    let duplicate = running_id == Some(request.recording_id)
-                        || queue
-                            .iter()
-                            .any(|item| item.request.recording_id == request.recording_id);
-                    if duplicate {
-                        continue;
+                    match accept_enqueue(request, &queue, running_id, &mut next_job, &ledger) {
+                        Adopted::Ignore => {}
+                        Adopted::Suppressed {
+                            path,
+                            model,
+                            recording,
+                        } => {
+                            let _ = update_transcription(
+                                &path,
+                                TranscriptionWrite::Cancelled,
+                                Some(model.as_str()),
+                            );
+                            publish(
+                                &phase,
+                                &progress,
+                                &job_id,
+                                &recording_id,
+                                &notice,
+                                &detail,
+                                JobPhase::Cancelled,
+                                None,
+                                Some(recording),
+                                0,
+                                Some(NOTICE_CANCELLED),
+                                None,
+                                &on_change,
+                            );
+                        }
+                        Adopted::Ready(queued) => {
+                            let id = queued.job_id;
+                            let recording = queued.request.recording_id;
+                            let queued_path = queued.request.audio_path.clone();
+                            let queued_model = queued.request.model_id.clone();
+                            queue.push_back(queued);
+                            let _ = update_transcription(
+                                &queued_path,
+                                TranscriptionWrite::Queued,
+                                Some(queued_model.as_str()),
+                            );
+                            publish(
+                                &phase,
+                                &progress,
+                                &job_id,
+                                &recording_id,
+                                &notice,
+                                &detail,
+                                JobPhase::Queued,
+                                Some(id),
+                                Some(recording),
+                                0,
+                                None,
+                                None,
+                                &on_change,
+                            );
+                        }
                     }
-                    let id = JobId::from_raw(next_job);
-                    next_job = next_job.saturating_add(1);
-                    let cancel = Arc::new(AtomicBool::new(false));
-                    let recording = request.recording_id;
-                    let queued_path = request.audio_path.clone();
-                    let queued_model = request.model_id.clone();
-                    queue.push_back(QueuedJob {
-                        job_id: id,
-                        request,
-                        cancel,
-                    });
-                    let _ = update_transcription(
-                        &queued_path,
-                        TranscriptionWrite::Queued,
-                        Some(queued_model.as_str()),
-                    );
-                    publish(
-                        &phase,
-                        &progress,
-                        &job_id,
-                        &recording_id,
-                        &notice,
-                        &detail,
-                        JobPhase::Queued,
-                        Some(id),
-                        Some(recording),
-                        0,
-                        None,
-                        None,
-                        &on_change,
-                    );
                 }
                 TranscriptionCommand::Cancel { job_id: target } => {
                     if target == job.job_id {
@@ -520,6 +789,7 @@ fn worker_loop(
                     } else if let Some(index) = queue.iter().position(|item| item.job_id == target)
                     {
                         if let Some(queued) = queue.remove(index) {
+                            forget_job(&ledger, queued.request.recording_id);
                             let _ = update_transcription(
                                 &queued.request.audio_path,
                                 TranscriptionWrite::Cancelled,
@@ -550,6 +820,8 @@ fn worker_loop(
             inference.as_mut(),
             &job.request,
             &job.cancel,
+            snapshot_recording,
+            &ledger,
             config,
             |percent| {
                 publish(
@@ -572,8 +844,10 @@ fn worker_loop(
                     || percent.saturating_sub(last_persisted_progress) >= 10
                 {
                     last_persisted_progress = percent;
+                    let progress_path =
+                        bound_audio(&ledger, snapshot_recording).unwrap_or_else(|| path.clone());
                     let _ = update_transcription(
-                        &path,
+                        &progress_path,
                         TranscriptionWrite::Progress(percent),
                         Some(model.as_str()),
                     );
@@ -585,10 +859,12 @@ fn worker_loop(
         }
         running_id = None;
         inference.unload();
+        let status_audio = bound_audio(&ledger, snapshot_recording)
+            .unwrap_or_else(|| job.request.audio_path.clone());
         match outcome {
             JobOutcome::Done => {
                 let _ = update_transcription(
-                    &job.request.audio_path,
+                    &status_audio,
                     TranscriptionWrite::Ready,
                     Some(job.request.model_id.as_str()),
                 );
@@ -607,10 +883,13 @@ fn worker_loop(
                     None,
                     &on_change,
                 );
+                if notify_enabled.load(Ordering::Acquire) {
+                    notifier.transcript_ready(snapshot_recording);
+                }
             }
             JobOutcome::Cancelled => {
                 let _ = update_transcription(
-                    &job.request.audio_path,
+                    &status_audio,
                     TranscriptionWrite::Cancelled,
                     Some(job.request.model_id.as_str()),
                 );
@@ -640,7 +919,7 @@ fn worker_loop(
                     NOTICE_FAILED
                 };
                 let _ = update_transcription(
-                    &job.request.audio_path,
+                    &status_audio,
                     TranscriptionWrite::Failed,
                     Some(job.request.model_id.as_str()),
                 );
@@ -661,6 +940,7 @@ fn worker_loop(
                 );
             }
         }
+        forget_job(&ledger, snapshot_recording);
     }
 }
 
@@ -677,16 +957,18 @@ fn run_job(
     inference: &mut dyn InferencePort,
     request: &EnqueueRequest,
     cancel: &Arc<AtomicBool>,
+    recording_id: RecordingId,
+    ledger: &Mutex<JobLedger>,
     config: TranscriptionConfig,
     mut on_progress: impl FnMut(u8),
 ) -> JobOutcome {
-    if cancel.load(Ordering::Acquire) {
+    if write_blocked(ledger, recording_id, cancel) {
         return JobOutcome::Cancelled;
     }
     on_progress(0);
     if let Err(error) = inference.load(&request.model_path) {
         tracing::error!(error = %error, "transcription model was not loaded");
-        return if cancel.load(Ordering::Acquire) {
+        return if write_blocked(ledger, recording_id, cancel) {
             JobOutcome::Cancelled
         } else {
             JobOutcome::Failed {
@@ -695,38 +977,24 @@ fn run_job(
             }
         };
     }
-    if cancel.load(Ordering::Acquire) {
+    if write_blocked(ledger, recording_id, cancel) {
         inference.unload();
         return JobOutcome::Cancelled;
     }
 
-    let result = transcribe_file(
-        inference,
-        &request.audio_path,
-        cancel,
-        config,
-        &mut on_progress,
-    );
+    let Some(audio) = bound_audio(ledger, recording_id) else {
+        inference.unload();
+        return JobOutcome::Cancelled;
+    };
+    if !audio_belongs(recording_id, &audio) {
+        inference.unload();
+        return identity_failure();
+    }
+
+    let result = transcribe_file(inference, &audio, cancel, config, &mut on_progress);
     match result {
-        Ok(text) => {
-            if cancel.load(Ordering::Acquire) {
-                return JobOutcome::Cancelled;
-            }
-            match write_transcript_text(&request.audio_path, &text) {
-                Ok(_) => {
-                    on_progress(100);
-                    JobOutcome::Done
-                }
-                Err(error) => {
-                    tracing::error!(error = %error, "transcript text was not written");
-                    JobOutcome::Failed {
-                        model_issue: false,
-                        detail: error.user_message(),
-                    }
-                }
-            }
-        }
-        Err(error) if is_cancel_error(&error) || cancel.load(Ordering::Acquire) => {
+        Ok(text) => commit_transcript(ledger, recording_id, cancel, &text, &mut on_progress),
+        Err(error) if is_cancel_error(&error) || write_blocked(ledger, recording_id, cancel) => {
             JobOutcome::Cancelled
         }
         Err(error) => {
@@ -737,6 +1005,165 @@ fn run_job(
             }
         }
     }
+}
+
+fn identity_failure() -> JobOutcome {
+    JobOutcome::Failed {
+        model_issue: false,
+        detail: DETAIL_IDENTITY,
+    }
+}
+
+fn commit_transcript(
+    ledger: &Mutex<JobLedger>,
+    recording_id: RecordingId,
+    cancel: &AtomicBool,
+    text: &str,
+    on_progress: &mut dyn FnMut(u8),
+) -> JobOutcome {
+    if write_blocked(ledger, recording_id, cancel) {
+        return JobOutcome::Cancelled;
+    }
+    let Some(view) = ledger
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .view(recording_id)
+    else {
+        return JobOutcome::Cancelled;
+    };
+    if view.suppress || view.cancel {
+        return JobOutcome::Cancelled;
+    }
+    let Some(txt) = view.txt else {
+        return JobOutcome::Cancelled;
+    };
+    if transcript_path_for(&view.audio).ok().as_ref() != Some(&txt)
+        || !audio_belongs(recording_id, &view.audio)
+    {
+        return identity_failure();
+    }
+    match write_transcript_text(&view.audio, text) {
+        Ok(path) if path == txt => {
+            on_progress(100);
+            JobOutcome::Done
+        }
+        Ok(_) => identity_failure(),
+        Err(error) => {
+            tracing::error!(error = %error, "transcript text was not written");
+            JobOutcome::Failed {
+                model_issue: false,
+                detail: error.user_message(),
+            }
+        }
+    }
+}
+
+fn audio_belongs(id: RecordingId, audio: &Path) -> bool {
+    match load_sidecar(audio) {
+        SidecarLoad::Loaded(doc) => doc.id == id,
+        SidecarLoad::Missing | SidecarLoad::Malformed => false,
+    }
+}
+
+fn write_blocked(ledger: &Mutex<JobLedger>, id: RecordingId, cancel: &AtomicBool) -> bool {
+    if cancel.load(Ordering::Acquire) {
+        return true;
+    }
+    match ledger
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .view(id)
+    {
+        Some(view) => view.suppress || view.cancel,
+        None => true,
+    }
+}
+
+fn bound_audio(ledger: &Mutex<JobLedger>, id: RecordingId) -> Option<PathBuf> {
+    ledger
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .view(id)
+        .map(|view| view.audio)
+}
+
+fn forget_job(ledger: &Mutex<JobLedger>, id: RecordingId) {
+    ledger
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(id);
+}
+
+enum Start {
+    Run,
+    Cancelled,
+    Failed,
+}
+
+fn begin_running(ledger: &Mutex<JobLedger>, id: RecordingId) -> Start {
+    let mut guard = ledger
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(job) = guard.find_mut(id) else {
+        return Start::Cancelled;
+    };
+    if job.suppress_write || job.cancel.load(Ordering::Acquire) {
+        guard.remove(id);
+        return Start::Cancelled;
+    }
+    let Ok(txt) = transcript_path_for(&job.audio_path) else {
+        guard.remove(id);
+        return Start::Failed;
+    };
+    job.txt_path = Some(txt);
+    job.phase = TrackPhase::Running;
+    Start::Run
+}
+
+fn accept_enqueue(
+    request: EnqueueRequest,
+    queue: &VecDeque<QueuedJob>,
+    running_id: Option<RecordingId>,
+    next_job: &mut u64,
+    ledger: &Mutex<JobLedger>,
+) -> Adopted {
+    if running_id == Some(request.recording_id)
+        || queue
+            .iter()
+            .any(|job| job.request.recording_id == request.recording_id)
+    {
+        return Adopted::Ignore;
+    }
+    let mut guard = ledger
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(job) = guard.find_mut(request.recording_id) else {
+        return Adopted::Ignore;
+    };
+    if job.job_id.is_some() {
+        return Adopted::Ignore;
+    }
+    if job.suppress_write || job.cancel.load(Ordering::Acquire) {
+        let path = job.audio_path.clone();
+        let model = job.model_id.clone();
+        let recording = job.recording_id;
+        guard.remove(recording);
+        return Adopted::Suppressed {
+            path,
+            model,
+            recording,
+        };
+    }
+    let id = JobId::from_raw(*next_job);
+    *next_job = next_job.saturating_add(1);
+    job.job_id = Some(id);
+    let cancel = Arc::clone(&job.cancel);
+    drop(guard);
+    Adopted::Ready(QueuedJob {
+        job_id: id,
+        request,
+        cancel,
+    })
 }
 
 fn is_cancel_error(error: &AppError) -> bool {
@@ -945,7 +1372,7 @@ mod tests {
     use crate::infrastructure::storage::sidecar::{
         load_sidecar, write_sidecar, Sidecar, SidecarLoad, TranscriptionWrite,
     };
-    use crate::services::ports::{InferencePort, InferenceSegment};
+    use crate::services::ports::{InferencePort, InferenceSegment, TranscriptNotifier};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1459,5 +1886,110 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
         let _ = NOTICE_DONE;
         let _ = TranscriptionWrite::Ready;
+    }
+
+    struct RecordingNotifier {
+        ids: Arc<Mutex<Vec<RecordingId>>>,
+    }
+
+    impl TranscriptNotifier for RecordingNotifier {
+        fn transcript_ready(&self, recording_id: RecordingId) {
+            self.ids.lock().expect("lock").push(recording_id);
+        }
+    }
+
+    fn notifier_pair() -> (Arc<RecordingNotifier>, Arc<Mutex<Vec<RecordingId>>>) {
+        let ids = Arc::new(Mutex::new(Vec::new()));
+        let notifier = Arc::new(RecordingNotifier {
+            ids: Arc::clone(&ids),
+        });
+        (notifier, ids)
+    }
+
+    #[test]
+    fn completion_notifies_once_when_enabled() {
+        // Arrange
+        let dir = temp_dir("notify-on");
+        let wav = dir.join("meeting.wav");
+        write_pcm_wav(&wav, 8_000);
+        seed_sidecar(&wav, 31);
+        let model = dir.join("ggml-base.bin");
+        fs::write(&model, b"ggml").expect("model");
+        let (notifier, ids) = notifier_pair();
+        let fake = FakeInference {
+            fail_load: false,
+            fail_chunk: false,
+            hold_ms: 0,
+            check_cancel_before_return: false,
+            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
+            calls: Arc::new(Mutex::new(Vec::new())),
+            segments: vec![InferenceSegment {
+                start_ms: 0,
+                end_ms: 400,
+                text: "hello".into(),
+            }],
+        };
+        let (host, handle) = TranscriptionHost::spawn_with_notifier(
+            Box::new(fake),
+            short_config(),
+            notifier,
+            Arc::new(AtomicBool::new(true)),
+            Box::new(|_| {}),
+        );
+
+        // Act
+        host.enqueue(RecordingId::from_raw(31), wav, model, "base-q5_1");
+        wait_until(&host, |snap| snap.phase == JobPhase::Done);
+        host.shutdown();
+        let _ = handle.join();
+        let recorded = ids.lock().expect("lock").clone();
+
+        // Assert — one completion, not one call per progress tick.
+        assert_eq!(recorded, vec![RecordingId::from_raw(31)]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn completion_does_not_notify_when_disabled() {
+        // Arrange
+        let dir = temp_dir("notify-off");
+        let wav = dir.join("meeting.wav");
+        write_pcm_wav(&wav, 8_000);
+        seed_sidecar(&wav, 32);
+        let model = dir.join("ggml-base.bin");
+        fs::write(&model, b"ggml").expect("model");
+        let (notifier, ids) = notifier_pair();
+        let fake = FakeInference {
+            fail_load: false,
+            fail_chunk: false,
+            hold_ms: 0,
+            check_cancel_before_return: false,
+            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
+            calls: Arc::new(Mutex::new(Vec::new())),
+            segments: vec![InferenceSegment {
+                start_ms: 0,
+                end_ms: 400,
+                text: "hello".into(),
+            }],
+        };
+        let enabled = Arc::new(AtomicBool::new(false));
+        let (host, handle) = TranscriptionHost::spawn_with_notifier(
+            Box::new(fake),
+            short_config(),
+            notifier,
+            Arc::clone(&enabled),
+            Box::new(|_| {}),
+        );
+
+        // Act
+        host.enqueue(RecordingId::from_raw(32), wav.clone(), model, "base-q5_1");
+        wait_until(&host, |snap| snap.phase == JobPhase::Done);
+        host.shutdown();
+        let _ = handle.join();
+
+        // Assert
+        assert!(ids.lock().expect("lock").is_empty());
+        assert!(dir.join("meeting.txt").is_file());
+        let _ = fs::remove_dir_all(dir);
     }
 }

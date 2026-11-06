@@ -45,6 +45,8 @@ pub(crate) enum AppCommand {
     /// Windows logoff/shutdown: stop and finalize without a confirm dialog.
     SessionEnding,
     SelectTab(AppTab),
+    /// Show the window and select this recording when the library still has it.
+    ShowRecording(RecordingId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +78,10 @@ pub(crate) enum Effect {
     CancelModelDownload,
     RetryModelDownload,
     BrowseModelFile,
+    /// Show the window. `recording_id` is set only when that row is still in the library.
+    ShowSelect {
+        recording_id: Option<RecordingId>,
+    },
 }
 
 impl From<HostCommand> for AppCommand {
@@ -89,6 +95,7 @@ impl From<HostCommand> for AppCommand {
             HostCommand::OpenSettings => AppCommand::OpenSettings,
             HostCommand::Exit => AppCommand::Exit,
             HostCommand::SessionEnding => AppCommand::SessionEnding,
+            HostCommand::ShowRecording(id) => AppCommand::ShowRecording(id),
         }
     }
 }
@@ -149,6 +156,18 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
             state.set_tab(tab);
             Effect::None
         }
+        AppCommand::ShowRecording(id) => {
+            state.set_visible(true);
+            state.set_pending_show(false);
+            let recording_id = if state.knows_recording(id) {
+                state.set_selected_recording(Some(id));
+                state.set_tab(AppTab::Recordings);
+                Some(id)
+            } else {
+                None
+            };
+            Effect::ShowSelect { recording_id }
+        }
     }
 }
 
@@ -200,7 +219,16 @@ pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentatio
             BridgeMessage::Command(command) => effects.push(apply_command(state, command)),
             BridgeMessage::Recording(snapshot) => recording = Some(snapshot),
             BridgeMessage::Devices(catalog) => devices = Some(catalog),
-            BridgeMessage::Library(snapshot) => library = Some(snapshot),
+            BridgeMessage::Library(snapshot) => {
+                let ids = snapshot
+                    .catalog
+                    .entries
+                    .iter()
+                    .map(|entry| entry.info.id())
+                    .collect();
+                state.set_known_recordings(ids);
+                library = Some(snapshot);
+            }
             BridgeMessage::Player(snapshot) => player = Some(snapshot),
             BridgeMessage::Transcription(snapshot) => transcription = Some(snapshot),
             BridgeMessage::Model(snapshot) => model = Some(snapshot),
@@ -343,6 +371,10 @@ mod tests {
             (HostCommand::OpenSettings, AppCommand::OpenSettings),
             (HostCommand::Exit, AppCommand::Exit),
             (HostCommand::SessionEnding, AppCommand::SessionEnding),
+            (
+                HostCommand::ShowRecording(RecordingId::from_raw(4)),
+                AppCommand::ShowRecording(RecordingId::from_raw(4)),
+            ),
         ];
 
         // Act
@@ -428,5 +460,100 @@ mod tests {
 
         // Assert
         assert_eq!(batch.model.map(|snap| snap.progress_percent), Some(90));
+    }
+
+    #[test]
+    fn show_recording_selects_id_when_library_snapshot_has_the_row() {
+        use std::path::PathBuf;
+
+        use crate::domain::recording::{
+            RecordingContainer, RecordingInfo, SidecarState, TranscriptStatus,
+        };
+        use crate::infrastructure::storage::library::{LibraryCatalog, LibraryEntry};
+        use crate::services::library::LibrarySnapshot;
+
+        // Arrange
+        let id = RecordingId::from_raw(9);
+        let other = RecordingId::from_raw(3);
+        let snapshot = LibrarySnapshot {
+            catalog: LibraryCatalog {
+                entries: vec![LibraryEntry {
+                    info: RecordingInfo::new(
+                        id,
+                        "meeting",
+                        RecordingContainer::Wav,
+                        None,
+                        None,
+                        1,
+                        None,
+                        TranscriptStatus::Ready,
+                        SidecarState::Present,
+                        false,
+                        Vec::new(),
+                    ),
+                    audio_path: PathBuf::from("meeting.wav"),
+                    sidecar_path: None,
+                    transcript_path: None,
+                }],
+                error: None,
+            },
+            selected: Some(other),
+            notice: None,
+        };
+        let (tx, rx) = mpsc::channel();
+        tx.send(BridgeMessage::Library(snapshot)).expect("library");
+        tx.send(BridgeMessage::Command(AppCommand::ShowRecording(id)))
+            .expect("command");
+        let mut state = presentation();
+        state.set_selected_recording(Some(other));
+        state.set_tab(AppTab::Record);
+
+        // Act
+        let batch = drain_bridge(&rx, &mut state);
+
+        // Assert
+        assert_eq!(state.selected_recording(), Some(id));
+        assert_eq!(state.tab(), AppTab::Recordings);
+        assert!(state.visible());
+        assert_eq!(
+            batch.effects,
+            vec![Effect::ShowSelect {
+                recording_id: Some(id)
+            }]
+        );
+    }
+
+    #[test]
+    fn show_recording_leaves_selection_when_the_row_is_gone() {
+        use crate::infrastructure::storage::library::LibraryCatalog;
+        use crate::services::library::LibrarySnapshot;
+
+        // Arrange
+        let missing = RecordingId::from_raw(9);
+        let kept = RecordingId::from_raw(3);
+        let (tx, rx) = mpsc::channel();
+        tx.send(BridgeMessage::Library(LibrarySnapshot {
+            catalog: LibraryCatalog::empty(),
+            selected: Some(kept),
+            notice: None,
+        }))
+        .expect("library");
+        tx.send(BridgeMessage::Command(AppCommand::ShowRecording(missing)))
+            .expect("command");
+        let mut state = presentation();
+        state.set_selected_recording(Some(kept));
+        state.set_tab(AppTab::Record);
+
+        // Act
+        let batch = drain_bridge(&rx, &mut state);
+
+        // Assert
+        assert_eq!(state.selected_recording(), Some(kept));
+        assert_eq!(state.tab(), AppTab::Record);
+        assert!(state.visible());
+        assert_eq!(
+            batch.effects,
+            vec![Effect::ShowSelect { recording_id: None }]
+        );
     }
 }

@@ -1,6 +1,7 @@
 //! Windows host: the only module that may call Win32 / COM in this crate.
 
 mod device_wake;
+mod notify;
 mod paths;
 mod replace;
 mod shell;
@@ -34,6 +35,8 @@ pub(crate) struct PlatformHost {
     pub(crate) single_instance: Arc<dyn SingleInstance>,
     pub(crate) tray: Arc<dyn Tray>,
 }
+
+pub(crate) use notify::completion_notifier;
 
 pub(crate) fn host() -> PlatformHost {
     PlatformHost {

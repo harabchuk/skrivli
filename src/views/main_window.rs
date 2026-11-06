@@ -420,6 +420,15 @@ impl MainWindow {
         match effect {
             Effect::None | Effect::Unavailable => {}
             Effect::Show => self.show_window(window),
+            Effect::ShowSelect { recording_id } => {
+                self.show_window(window);
+                if let Some(id) = recording_id {
+                    if self.library_catalog.find(id).is_some() {
+                        self.presentation.set_tab(AppTab::Recordings);
+                        self.select_library_row(Some(id), window, cx);
+                    }
+                }
+            }
             Effect::Hide { explain } => {
                 self.flush_bounds(window);
                 let _ = self.shell.set_window_visible(false);

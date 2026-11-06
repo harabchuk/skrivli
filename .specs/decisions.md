@@ -192,3 +192,20 @@ Join steps at the change were 0.00348, 0.00012, 0.00488, and 0.00205. The larges
 **Outcome:** The finished transcript is GPUI Kit `Editor` backed by `EditorState`, created once on the recordings view and rendered with `Editor::new(&editor).readonly(true)`. Confirmed against gpui-kit 0.9.0 via Context7 library `/longbridge/gpui-kit` (editor component docs: read-only still focuses, selects, copies, and searches; `set_value` still works) and the pinned crate `gpui-base` 0.9.0 (`EditorState::new` aims at display of large text up to about 50K lines). A meeting transcript stays under that limit, so no substitute widget is used. A plain `div` of the whole text is not acceptable.
 
 **Scroll:** `InputBaseState::set_value` resets selection and scroll. A transcription progress snapshot must not call it and must not recreate the `EditorState` entity. Load `<basename>.txt` with `background_spawn` inside `spawn_in`, then `set_value` only when the selected recording's text actually changes.
+
+## D-15 — M7.2 manual pass not run
+
+**Outcome:** Automated tests cover the completion-notification gate, balloon-click selection, and rename/delete identity safety with a fake inference port, a temp directory, and no toast. The hardware journey was **not run**. Do not treat any of the following as observed:
+
+- Record, then transcribe from the detail pane
+- Auto-transcribe left off, then turned on for one new recording
+- Missing-model prompt satisfied by a verified local file
+- Cancel
+- Retry after Failed
+- Restart with the `.txt` and sidecar Ready still shown
+- Network disconnected after the model is installed
+- Each failure leaves the WAV playable
+
+No pass or fail result is recorded for those checks. The third M7.2 checkbox and the M7 acceptance checkbox stay open.
+
+**Notification mechanism:** a balloon (`NIF_INFO`) on the existing `Shell_NotifyIconW` icon owned by `Skrivli.TrayMessage`. The notifier port only queues a `RecordingId`. The tray thread shows the balloon. WinRT toasts were not added. `notify_on_transcript` defaults on via `serde(default)` and does not bump settings schema v4.

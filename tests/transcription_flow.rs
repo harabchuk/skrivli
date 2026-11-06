@@ -332,3 +332,255 @@ fn host_fifo_two_queued_recordings() {
     assert!(dir.join("b.txt").is_file());
     let _ = fs::remove_dir_all(dir);
 }
+
+fn wait_for_file(path: &Path) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < deadline {
+        if path.is_file() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("missing {}", path.display());
+}
+
+fn file_names(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .filter_map(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn queued_rename_cancels_and_writes_no_transcript() {
+    use skrivli::testing::{IdentitySession, InferenceHold};
+
+    // Arrange
+    let dir = temp_dir("queued-rename");
+    let blocker = dir.join("blocker.wav");
+    let clip = dir.join("clip.wav");
+    write_pcm_wav(&blocker, 4_000);
+    write_pcm_wav(&clip, 4_000);
+    seed_sidecar(&blocker, 1);
+    seed_sidecar(&clip, 2);
+    let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
+    session.wait_for_library_id(1);
+    session.wait_for_library_id(2);
+    session.enqueue(1, &blocker);
+    session.wait_until_held();
+    session.enqueue(2, &clip);
+
+    // Act
+    session.rename(2, "renamed");
+    wait_for_file(&dir.join("renamed.wav"));
+    session.release();
+    session.shutdown();
+
+    // Assert
+    assert!(!dir.join("clip.txt").exists());
+    assert!(!dir.join("renamed.txt").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn queued_delete_cancels_and_writes_no_transcript() {
+    use skrivli::testing::{IdentitySession, InferenceHold};
+
+    // Arrange
+    let dir = temp_dir("queued-delete");
+    let blocker = dir.join("blocker.wav");
+    let clip = dir.join("clip.wav");
+    write_pcm_wav(&blocker, 4_000);
+    write_pcm_wav(&clip, 4_000);
+    seed_sidecar(&blocker, 1);
+    seed_sidecar(&clip, 2);
+    let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
+    session.wait_for_library_id(2);
+    session.enqueue(1, &blocker);
+    session.wait_until_held();
+    session.enqueue(2, &clip);
+
+    // Act
+    session.delete(2);
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < deadline && session.discarded().is_empty() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    session.release();
+    session.shutdown();
+
+    // Assert
+    assert!(!session_paths_include_txt(&dir));
+    assert!(!dir.join("clip.txt").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+fn session_paths_include_txt(dir: &Path) -> bool {
+    dir.join("clip.txt").exists() || dir.join("renamed.txt").exists()
+}
+
+#[test]
+fn running_delete_cancels_before_write_and_keeps_wav() {
+    use skrivli::testing::{IdentitySession, InferenceHold};
+
+    // Arrange
+    let dir = temp_dir("running-delete");
+    let wav = dir.join("clip.wav");
+    write_pcm_wav(&wav, 4_000);
+    seed_sidecar(&wav, 5);
+    let before = fs::read(&wav).expect("before");
+    let session = IdentitySession::start(&dir, InferenceHold::DuringChunk { honor_cancel: true });
+    session.wait_for_library_id(5);
+    session.enqueue(5, &wav);
+    session.wait_until_held();
+
+    // Act
+    session.delete(5);
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < deadline && session.discarded().is_empty() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    session.release();
+    session.shutdown();
+
+    // Assert
+    assert_eq!(fs::read(&wav).expect("after"), before);
+    assert!(!dir.join("clip.txt").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn rename_before_write_retargets_transcript_beside_new_audio() {
+    use skrivli::testing::{IdentitySession, InferenceHold};
+
+    // Arrange
+    let dir = temp_dir("retarget");
+    let wav = dir.join("meeting.wav");
+    write_pcm_wav(&wav, 4_000);
+    seed_sidecar(&wav, 6);
+    let before = fs::read(&wav).expect("before");
+    let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
+    session.wait_for_library_id(6);
+    session.enqueue(6, &wav);
+    session.wait_until_held();
+
+    // Act
+    session.rename(6, "notes");
+    wait_for_file(&dir.join("notes.wav"));
+    session.release();
+    session.wait_terminal();
+    let phase = session.phase();
+    session.shutdown();
+
+    // Assert
+    assert_eq!(phase, skrivli::testing::TranscriptionFlowPhase::Done);
+    assert_eq!(fs::read(dir.join("notes.wav")).expect("moved"), before);
+    let text = fs::read_to_string(dir.join("notes.txt")).expect("txt");
+    assert!(text.contains("noted"));
+    assert!(!dir.join("meeting.txt").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn rename_of_a_different_id_does_not_cancel() {
+    use skrivli::testing::{IdentitySession, InferenceHold};
+
+    // Arrange
+    let dir = temp_dir("other-rename");
+    let keep = dir.join("keep.wav");
+    let other = dir.join("other.wav");
+    write_pcm_wav(&keep, 4_000);
+    write_pcm_wav(&other, 4_000);
+    seed_sidecar(&keep, 7);
+    seed_sidecar(&other, 8);
+    let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
+    session.wait_for_library_id(7);
+    session.wait_for_library_id(8);
+    session.enqueue(7, &keep);
+    session.wait_until_held();
+
+    // Act
+    session.rename(8, "moved");
+    wait_for_file(&dir.join("moved.wav"));
+    session.release();
+    session.wait_terminal();
+    let phase = session.phase();
+    session.shutdown();
+
+    // Assert
+    assert_eq!(phase, skrivli::testing::TranscriptionFlowPhase::Done);
+    assert!(dir.join("keep.txt").is_file());
+    assert!(!dir.join("moved.txt").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn delete_ready_recording_trashes_audio_sidecar_and_transcript() {
+    use skrivli::testing::{write_transcript_text, IdentitySession, InferenceHold};
+
+    // Arrange
+    let dir = temp_dir("ready-delete");
+    let wav = dir.join("clip.wav");
+    write_pcm_wav(&wav, 4_000);
+    seed_sidecar(&wav, 9);
+    write_transcript_text(&wav, "already promoted\n").expect("txt");
+    let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
+    session.wait_for_library_id(9);
+
+    // Act
+    session.delete(9);
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut names = Vec::new();
+    while std::time::Instant::now() < deadline {
+        names = file_names(&session.discarded());
+        if names.iter().any(|name| name == "clip.txt") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    session.shutdown();
+
+    // Assert
+    assert!(names.iter().any(|name| name == "clip.wav"), "{names:?}");
+    assert!(names.iter().any(|name| name == "clip.json"), "{names:?}");
+    assert!(names.iter().any(|name| name == "clip.txt"), "{names:?}");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn late_completion_after_delete_does_not_write_transcript() {
+    use skrivli::testing::{IdentitySession, InferenceHold};
+
+    // Arrange
+    let dir = temp_dir("late-delete");
+    let wav = dir.join("clip.wav");
+    write_pcm_wav(&wav, 4_000);
+    seed_sidecar(&wav, 10);
+    let before = fs::read(&wav).expect("before");
+    let session = IdentitySession::start(
+        &dir,
+        InferenceHold::DuringChunk {
+            honor_cancel: false,
+        },
+    );
+    session.wait_for_library_id(10);
+    session.enqueue(10, &wav);
+    session.wait_until_held();
+
+    // Act
+    session.delete(10);
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < deadline && session.discarded().is_empty() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    session.release();
+    session.shutdown();
+
+    // Assert
+    assert_eq!(fs::read(&wav).expect("after"), before);
+    assert!(!dir.join("clip.txt").exists());
+    let _ = fs::remove_dir_all(dir);
+}

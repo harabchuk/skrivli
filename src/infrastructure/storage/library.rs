@@ -138,16 +138,12 @@ pub(crate) fn scan_library(directory: &Path) -> LibraryCatalog {
     }
 }
 
-/// Rename audio + sidecar + transcript as a group. Partial failures are reported.
-pub(crate) fn rename_recording(
-    catalog: &LibraryCatalog,
-    id: RecordingId,
+/// Audio path a rename would use, before any file moves.
+pub(crate) fn renamed_audio_path(
+    entry: &LibraryEntry,
     new_stem: &str,
-) -> Result<RenameResult, AppError> {
+) -> Result<PathBuf, AppError> {
     let stem = sanitize_stem(new_stem)?;
-    let entry = catalog
-        .find(id)
-        .ok_or_else(|| AppError::message("library", "recording was not found"))?;
     let directory = entry
         .audio_path
         .parent()
@@ -160,6 +156,27 @@ pub(crate) fn rename_recording(
             "a recording with that name already exists",
         ));
     }
+    Ok(new_audio)
+}
+
+/// Rename audio + sidecar + transcript as a group. Partial failures are reported.
+pub(crate) fn rename_recording(
+    catalog: &LibraryCatalog,
+    id: RecordingId,
+    new_stem: &str,
+) -> Result<RenameResult, AppError> {
+    let entry = catalog
+        .find(id)
+        .ok_or_else(|| AppError::message("library", "recording was not found"))?;
+    let new_audio = renamed_audio_path(entry, new_stem)?;
+    let stem = new_audio
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| AppError::message("library", "name is invalid"))?
+        .to_string();
+    let directory = new_audio
+        .parent()
+        .ok_or_else(|| AppError::message("library", "recording path has no folder"))?;
     let mut result = RenameResult {
         id,
         new_stem: stem.clone(),
@@ -223,15 +240,33 @@ impl RenameResult {
 }
 
 /// Paths that belong to a recording and should go to the Recycle Bin together.
+///
+/// A `.txt` or sidecar that exists beside the audio is included even when the
+/// catalog row was scanned before that file was promoted.
 pub(crate) fn associated_paths(entry: &LibraryEntry) -> Vec<PathBuf> {
     let mut paths = vec![entry.audio_path.clone()];
-    if let Some(path) = &entry.sidecar_path {
-        paths.push(path.clone());
+    push_unique(&mut paths, entry.sidecar_path.clone());
+    if let Ok(path) = sidecar_path_for(&entry.audio_path) {
+        if path.is_file() {
+            push_unique(&mut paths, Some(path));
+        }
     }
-    if let Some(path) = &entry.transcript_path {
-        paths.push(path.clone());
+    push_unique(&mut paths, entry.transcript_path.clone());
+    if let Ok(path) = transcript_path_for(&entry.audio_path) {
+        if path.is_file() {
+            push_unique(&mut paths, Some(path));
+        }
     }
     paths
+}
+
+fn push_unique(paths: &mut Vec<PathBuf>, path: Option<PathBuf>) {
+    let Some(path) = path else {
+        return;
+    };
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
 }
 
 /// Detect duplicate recording ids after a scan (sidecar collisions).

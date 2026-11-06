@@ -123,6 +123,7 @@ pub(crate) fn run() -> i32 {
         paths.rescue_dir(),
         paths.models_dir(),
         settings.recordings_directory().to_path_buf(),
+        settings.notify_on_transcript(),
         activation,
     );
 
@@ -175,6 +176,7 @@ fn spawn_workers(
     rescue_dir: std::path::PathBuf,
     models_dir: std::path::PathBuf,
     recordings_dir: std::path::PathBuf,
+    notify_on_transcript: bool,
     activation: Box<dyn ActivationWatch>,
 ) -> ShellWorkers {
     let performance = Arc::from(platform::performance_counter());
@@ -244,12 +246,30 @@ fn spawn_workers(
         activation_shutdown.acknowledge();
     }));
 
+    let (notice_tx, notice_rx) = mpsc::channel();
+    let notifier = platform::completion_notifier(notice_tx);
+    let transcription_tx = tx.clone();
+    let (transcription, transcription_thread) = TranscriptionHost::spawn_with_notifier(
+        Box::new(WhisperInference::new()),
+        crate::services::transcription::TranscriptionConfig::default(),
+        notifier,
+        Arc::new(AtomicBool::new(notify_on_transcript)),
+        Box::new(move |snapshot| {
+            let _ = transcription_tx.send(BridgeMessage::Transcription(snapshot));
+        }),
+    );
+    let stop_transcription = transcription.clone();
+    shutdown.on_stop(move || stop_transcription.shutdown());
+    shutdown.track(transcription_thread);
+
     let library_tx = tx.clone();
     let library_stop = shutdown.flag();
+    let library_identity = transcription.clone();
     let (library, library_thread) = LibraryHost::spawn(
         recordings_dir,
         Arc::clone(&host.trash),
         Arc::clone(&host.watch),
+        Arc::new(library_identity),
         Box::new(move |snapshot| {
             let _ = library_tx.send(BridgeMessage::Library(snapshot));
         }),
@@ -266,17 +286,6 @@ fn spawn_workers(
     let stop_player = player.clone();
     shutdown.on_stop(move || stop_player.shutdown());
     shutdown.track(player_thread);
-
-    let transcription_tx = tx.clone();
-    let (transcription, transcription_thread) = TranscriptionHost::spawn(
-        Box::new(WhisperInference::new()),
-        Box::new(move |snapshot| {
-            let _ = transcription_tx.send(BridgeMessage::Transcription(snapshot));
-        }),
-    );
-    let stop_transcription = transcription.clone();
-    shutdown.on_stop(move || stop_transcription.shutdown());
-    shutdown.track(transcription_thread);
 
     let model_tx = tx.clone();
     let (model_host, model_thread) = ModelHost::spawn(
@@ -299,6 +308,7 @@ fn spawn_workers(
         if let Err(error) = tray.run(
             tray_stop,
             recording_flag,
+            notice_rx,
             Box::new(move |command: HostCommand| {
                 let _ = sender.send(BridgeMessage::Command(AppCommand::from(command)));
             }),

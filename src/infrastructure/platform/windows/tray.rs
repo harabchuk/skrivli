@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,8 +17,9 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_GUID, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
-    NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICON_VERSION_4,
+    Shell_NotifyIconW, NIF_GUID, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_INFO,
+    NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONUSERCLICK, NOTIFYICONDATAW,
+    NOTIFYICON_VERSION_4,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
@@ -30,7 +32,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::common::error::AppError;
+use crate::domain::ids::RecordingId;
 use crate::services::ports::{HostCommand, Tray};
+
+const BALLOON_TITLE: &str = "Transcript ready";
+const BALLOON_BODY: &str = "A recording has a transcript.";
 
 /// Stable notify-icon GUID. Do not change it across builds.
 const TRAY_GUID: GUID = GUID::from_u128(0x7c3e_8a21_4b6d_4e91_9f2a_1d5c_8b0e_6a44);
@@ -52,9 +58,10 @@ impl Tray for WindowsTray {
         &self,
         stop: Arc<AtomicBool>,
         recording: Arc<AtomicBool>,
+        notices: Receiver<RecordingId>,
         on_command: Box<dyn Fn(HostCommand) + Send>,
     ) -> Result<(), AppError> {
-        run_tray(stop, recording, on_command)
+        run_tray(stop, recording, notices, on_command)
     }
 }
 
@@ -74,6 +81,8 @@ struct TrayState {
     on_command: Box<dyn Fn(HostCommand) + Send>,
     stop: Arc<AtomicBool>,
     recording: Arc<AtomicBool>,
+    notices: Receiver<RecordingId>,
+    balloon_id: Option<RecordingId>,
     taskbar_created: u32,
     last_toggle: Instant,
 }
@@ -86,6 +95,7 @@ thread_local! {
 fn run_tray(
     stop: Arc<AtomicBool>,
     recording: Arc<AtomicBool>,
+    notices: Receiver<RecordingId>,
     on_command: Box<dyn Fn(HostCommand) + Send>,
 ) -> Result<(), AppError> {
     let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
@@ -94,6 +104,8 @@ fn run_tray(
             on_command,
             stop: Arc::clone(&stop),
             recording,
+            notices,
+            balloon_id: None,
             taskbar_created,
             last_toggle: Instant::now() - Duration::from_secs(1),
         });
@@ -257,6 +269,7 @@ unsafe extern "system" fn tray_wndproc(
         return LRESULT(0);
     }
     if message == WM_TIMER {
+        drain_notices(hwnd);
         let stop = TRAY.with(|slot| {
             slot.borrow()
                 .as_ref()
@@ -268,14 +281,25 @@ unsafe extern "system" fn tray_wndproc(
         return LRESULT(0);
     }
     if message == TRAY_CALLBACK {
-        handle_callback(hwnd, lparam);
+        let event = event_from_callback(wparam.0, lparam.0);
+        handle_callback(hwnd, event);
         return LRESULT(0);
     }
     DefWindowProcW(hwnd, message, wparam, lparam)
 }
 
-fn handle_callback(hwnd: HWND, lparam: LPARAM) {
-    let event = (lparam.0 as u32) & 0xFFFF;
+fn handle_callback(hwnd: HWND, event: u32) {
+    if event == NIN_BALLOONUSERCLICK {
+        let id = TRAY.with(|slot| {
+            slot.borrow_mut()
+                .as_mut()
+                .and_then(|state| state.balloon_id.take())
+        });
+        if let Some(command) = command_for_balloon(event, id) {
+            emit(command);
+        }
+        return;
+    }
     if event == WM_LBUTTONUP || event == WM_LBUTTONDBLCLK || event == WM_USER {
         toggle_once();
         return;
@@ -299,6 +323,65 @@ fn toggle_once() {
         state.last_toggle = Instant::now();
         (state.on_command)(HostCommand::ToggleVisibility);
     });
+}
+
+fn drain_notices(hwnd: HWND) {
+    let ids = TRAY.with(|slot| {
+        let mut borrow = slot.borrow_mut();
+        let Some(state) = borrow.as_mut() else {
+            return Vec::new();
+        };
+        let mut ids = Vec::new();
+        while let Ok(id) = state.notices.try_recv() {
+            ids.push(id);
+        }
+        if let Some(id) = ids.last().copied() {
+            state.balloon_id = Some(id);
+        }
+        ids
+    });
+    for _id in &ids {
+        show_completion_balloon(hwnd);
+    }
+}
+
+fn show_completion_balloon(hwnd: HWND) {
+    let mut data = icon_data(hwnd);
+    data.uFlags |= NIF_INFO;
+    data.dwInfoFlags = NIIF_INFO;
+    write_wide(&mut data.szInfoTitle, BALLOON_TITLE);
+    write_wide(&mut data.szInfo, BALLOON_BODY);
+    let shown = unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
+    if !shown.as_bool() {
+        tracing::warn!("completion balloon was not shown");
+    }
+}
+
+/// Version-4 packs the event in the high word of `wparam`. Older shells use `lparam`.
+fn event_from_callback(wparam: usize, lparam: isize) -> u32 {
+    let version4 = ((wparam >> 16) & 0xFFFF) as u32;
+    if is_known_tray_event(version4) {
+        version4
+    } else {
+        (lparam as u32) & 0xFFFF
+    }
+}
+
+fn is_known_tray_event(event: u32) -> bool {
+    event == WM_LBUTTONUP
+        || event == WM_LBUTTONDBLCLK
+        || event == WM_RBUTTONUP
+        || event == WM_CONTEXTMENU
+        || event == WM_USER
+        || event == NIN_BALLOONUSERCLICK
+}
+
+fn command_for_balloon(event: u32, balloon: Option<RecordingId>) -> Option<HostCommand> {
+    if event == NIN_BALLOONUSERCLICK {
+        balloon.map(HostCommand::ShowRecording)
+    } else {
+        None
+    }
 }
 
 fn emit(command: HostCommand) {
@@ -351,8 +434,11 @@ fn append(
 
 #[cfg(test)]
 mod tests {
-    use super::command_from_menu_id;
+    use super::{command_for_balloon, command_from_menu_id, event_from_callback};
+    use crate::domain::ids::RecordingId;
     use crate::services::ports::HostCommand;
+    use windows::Win32::UI::Shell::NIN_BALLOONUSERCLICK;
+    use windows::Win32::UI::WindowsAndMessaging::WM_LBUTTONUP;
 
     #[test]
     fn menu_ids_map_to_host_commands() {
@@ -375,5 +461,20 @@ mod tests {
                 None,
             ]
         );
+    }
+
+    #[test]
+    fn balloon_click_becomes_show_recording() {
+        // Arrange
+        let id = RecordingId::from_raw(7);
+        let event = event_from_callback((NIN_BALLOONUSERCLICK as usize) << 16, 0);
+
+        // Act
+        let command = command_for_balloon(event, Some(id));
+        let ignored = command_for_balloon(event_from_callback(0, WM_LBUTTONUP as isize), Some(id));
+
+        // Assert
+        assert_eq!(command, Some(HostCommand::ShowRecording(id)));
+        assert_eq!(ignored, None);
     }
 }
