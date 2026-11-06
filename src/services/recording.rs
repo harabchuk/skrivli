@@ -461,6 +461,7 @@ fn session_body(
     let mut last_reopen = Instant::now();
     let mut stall_noted = false;
     let mut wrote_any = false;
+    let mut drained = false;
     loop {
         let stopping = stop.load(Ordering::Acquire);
         if !stopping && !limited {
@@ -484,6 +485,33 @@ fn session_body(
             }
             if let Some(stream) = system.as_mut() {
                 stream.close();
+            }
+            // A closed stream still holds its last blocks. A forced stop
+            // skips them because the destination is already failing or full.
+            if stopping && !limited && !drained {
+                drained = true;
+                while let Some(block) = pull_alive(
+                    &mut mic,
+                    &mut problems,
+                    "capture",
+                    NOTICE_MIC_MISSING,
+                    &mut degraded,
+                    id,
+                    emit,
+                ) {
+                    mixer.push_mic(block);
+                }
+                while let Some(block) = pull_alive(
+                    &mut system,
+                    &mut problems,
+                    "loopback",
+                    NOTICE_SYSTEM_MISSING,
+                    &mut degraded,
+                    id,
+                    emit,
+                ) {
+                    mixer.push_system(block);
+                }
             }
         } else {
             let mic_before = mic.is_some();
@@ -1104,6 +1132,100 @@ mod tests {
         assert!(!system_opened.load(std::sync::atomic::Ordering::Acquire));
         assert!(capture_notice(CaptureError::PrivacyDenied).contains("privacy"));
         assert!(ensure_writable(&dir).is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Yields its block only after `close`, like a worker's final chunks.
+    struct TailPort {
+        block: Option<AudioBlock>,
+    }
+
+    struct TailStream {
+        block: Option<AudioBlock>,
+        closed: bool,
+    }
+
+    impl super::CapturePort for TailPort {
+        fn open(
+            &mut self,
+            _: &str,
+            _: crate::domain::audio::SessionOrigin,
+            _: Arc<AtomicI64>,
+        ) -> Result<Box<dyn super::CaptureStream>, CaptureError> {
+            Ok(Box::new(TailStream {
+                block: self.block.take(),
+                closed: false,
+            }))
+        }
+    }
+
+    impl super::CaptureStream for TailStream {
+        fn pull(&mut self) -> Result<Option<AudioBlock>, CaptureError> {
+            if self.closed {
+                Ok(self.block.take())
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn close(&mut self) {
+            self.closed = true;
+        }
+
+        fn overruns(&self) -> u64 {
+            0
+        }
+    }
+
+    #[test]
+    fn stop_writes_blocks_that_are_still_queued_when_the_stream_closes() {
+        // Arrange
+        let dir = std::env::temp_dir().join(format!("skrivli-tail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let stop = AtomicBool::new(true);
+        let request = StartRequest {
+            directory: dir.clone(),
+            endpoint_id: "mic".to_string(),
+            microphone_id: "mic".to_string(),
+            system_endpoint_id: None,
+            system_audio_id: "unavailable".to_string(),
+            open_microphone: true,
+            degraded_notice: None,
+        };
+        let mut engine = super::RecordingEngine {
+            mic: Box::new(TailPort {
+                block: Some(AudioBlock {
+                    samples: vec![0.25; 960],
+                    timeline_frame: None,
+                    discontinuity: false,
+                }),
+            }),
+            system: Box::new(TailPort { block: None }),
+            clock: Box::new(Clock),
+            space: Box::new(Space(u64::MAX)),
+            performance: Box::new(FixedCounter),
+            levels: Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
+            gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(
+                1.0, false,
+            )),
+            lease: Arc::new(crate::services::lease::EndpointLease::new()),
+            rescue_dir: dir.join("rescue"),
+            space_check_every: Duration::from_secs(30),
+            write_fault: Arc::new(AtomicBool::new(false)),
+            folder_fault: Arc::new(AtomicBool::new(false)),
+            device_wake: Arc::new(AtomicBool::new(false)),
+            stall_after: Duration::from_secs(8),
+        };
+
+        // Act
+        let snapshot = run_session(&mut engine, &request, &stop, &|_| {});
+
+        // Assert
+        let path = snapshot.finalized_path.expect("saved recording");
+        let bytes = std::fs::read(path).expect("wav");
+        let data = u32::from_le_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]);
+        assert_eq!(data, 480 * 4);
         let _ = std::fs::remove_dir_all(dir);
     }
 

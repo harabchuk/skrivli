@@ -26,6 +26,8 @@ pub(crate) enum CaptureError {
 }
 
 pub(crate) trait CaptureStream: Send {
+    /// The next block, if any. After `close`, this returns the blocks still
+    /// buffered and then `Ok(None)` without waiting.
     fn pull(&mut self) -> Result<Option<AudioBlock>, CaptureError>;
     fn close(&mut self);
     fn overruns(&self) -> u64;

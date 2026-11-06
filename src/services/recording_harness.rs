@@ -89,7 +89,7 @@ impl CapturePort for SharedCapture {
 impl CaptureStream for FakeStream {
     fn pull(&mut self) -> Result<Option<AudioBlock>, CaptureError> {
         if self.worker.is_none() {
-            return Ok(None);
+            return Ok(self.blocks.pop_front());
         }
         {
             let mut state = lock_fake(&self.shared);

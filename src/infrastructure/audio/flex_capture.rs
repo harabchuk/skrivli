@@ -166,63 +166,113 @@ fn run_flex_worker(
         return;
     }
 
-    let mut resampler = StereoResampler::new(INTERNAL_SAMPLE_RATE, INTERNAL_SAMPLE_RATE);
-    let mut session_base: Option<u64> = None;
-    let mut pending_gap = false;
-
+    let mut forwarder = BlockForwarder::new(origin, drift_error, tx, overruns, clock);
+    let mut fatal = None;
     while !stop.load(Ordering::Acquire) {
         if let Some(error) = drain_events(&mut stream) {
-            let _ = offer_result(&tx, Err(error));
+            fatal = Some(error);
             break;
         }
         match stream.poll_chunk() {
-            Some(chunk) => {
-                let drops = u64::from(chunk.dropped_before);
-                if drops > 0 {
-                    overruns.fetch_add(drops, Ordering::Relaxed);
-                    pending_gap = true;
-                }
-                let timeline =
-                    map_timeline(origin, clock.as_ref(), &mut session_base, chunk.frame_index);
-                let discontinuity = chunk_discontinuity(&chunk) || pending_gap;
-                resampler.set_drift_error(drift_error.load(Ordering::Relaxed));
-                let samples = resampler.process(&chunk.data);
-                if samples.is_empty() {
-                    continue;
-                }
-                let block = AudioBlock {
-                    samples,
-                    timeline_frame: timeline,
-                    discontinuity,
-                };
-                // Queue carries Result so fatal errors can share the channel.
-                if offer_result(&tx, Ok(block)) {
-                    pending_gap = false;
-                } else if stop.load(Ordering::Acquire) {
-                    break;
-                } else {
-                    overruns.fetch_add(1, Ordering::Relaxed);
-                    pending_gap = true;
-                }
-            }
-            None => {
-                thread::sleep(Duration::from_millis(5));
-            }
+            Some(chunk) => forwarder.forward(&chunk),
+            None => thread::sleep(Duration::from_millis(5)),
         }
     }
 
-    let flushed = resampler.flush();
-    if !flushed.is_empty() {
-        let _ = offer_result(
-            &tx,
-            Ok(AudioBlock {
-                samples: flushed,
-                timeline_frame: None,
-                discontinuity: false,
-            }),
-        );
-    }
     stream.stop();
+    forwarder.finish_after_stop(|| stream.poll_chunk(), fatal);
+}
+
+/// Turns flexaudio chunks into timeline blocks on the bounded queue.
+struct BlockForwarder {
+    origin: SessionOrigin,
+    drift_error: Arc<AtomicI64>,
+    tx: SyncSender<Result<AudioBlock, CaptureError>>,
+    overruns: Arc<AtomicU64>,
+    clock: Arc<dyn PerformanceCounter>,
+    resampler: StereoResampler,
+    session_base: Option<u64>,
+    pending_gap: bool,
+}
+
+impl BlockForwarder {
+    fn new(
+        origin: SessionOrigin,
+        drift_error: Arc<AtomicI64>,
+        tx: SyncSender<Result<AudioBlock, CaptureError>>,
+        overruns: Arc<AtomicU64>,
+        clock: Arc<dyn PerformanceCounter>,
+    ) -> Self {
+        Self {
+            origin,
+            drift_error,
+            tx,
+            overruns,
+            clock,
+            resampler: StereoResampler::new(INTERNAL_SAMPLE_RATE, INTERNAL_SAMPLE_RATE),
+            session_base: None,
+            pending_gap: false,
+        }
+    }
+
+    fn forward(&mut self, chunk: &AudioChunk) {
+        let drops = u64::from(chunk.dropped_before);
+        if drops > 0 {
+            self.overruns.fetch_add(drops, Ordering::Relaxed);
+            self.pending_gap = true;
+        }
+        let timeline = map_timeline(
+            self.origin,
+            self.clock.as_ref(),
+            &mut self.session_base,
+            chunk.frame_index,
+        );
+        let discontinuity = chunk_discontinuity(chunk) || self.pending_gap;
+        self.resampler
+            .set_drift_error(self.drift_error.load(Ordering::Relaxed));
+        let samples = self.resampler.process(&chunk.data);
+        if samples.is_empty() {
+            return;
+        }
+        let block = AudioBlock {
+            samples,
+            timeline_frame: timeline,
+            discontinuity,
+        };
+        // Queue carries Result so fatal errors can share the channel.
+        if offer_result(&self.tx, Ok(block)) {
+            self.pending_gap = false;
+        } else {
+            self.overruns.fetch_add(1, Ordering::Relaxed);
+            self.pending_gap = true;
+        }
+    }
+
+    /// Queues everything left after the device stopped. A fatal error goes
+    /// last because the session stops reading a stream once it sees one.
+    fn finish_after_stop(
+        mut self,
+        mut poll_buffered: impl FnMut() -> Option<AudioChunk>,
+        fatal: Option<CaptureError>,
+    ) {
+        while let Some(chunk) = poll_buffered() {
+            self.forward(&chunk);
+        }
+        let flushed = self.resampler.flush();
+        if !flushed.is_empty() {
+            let _ = offer_result(
+                &self.tx,
+                Ok(AudioBlock {
+                    samples: flushed,
+                    timeline_frame: None,
+                    discontinuity: false,
+                }),
+            );
+        }
+        if let Some(error) = fatal {
+            let _ = offer_result(&self.tx, Err(error));
+        }
+    }
 }
 
 fn offer_result(
@@ -329,7 +379,11 @@ impl Drop for FlexCaptureStream {
 
 #[cfg(test)]
 mod tests {
-    use super::{chunk_discontinuity, map_flex_error, map_timeline};
+    use std::sync::atomic::{AtomicI64, AtomicU64};
+    use std::sync::mpsc::{sync_channel, Receiver};
+    use std::sync::Arc;
+
+    use super::{chunk_discontinuity, map_flex_error, map_timeline, BlockForwarder};
     use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_SAMPLE_RATE};
     use crate::infrastructure::audio::resampler::StereoResampler;
     use crate::services::ports::{CaptureError, PerformanceCounter};
@@ -420,6 +474,70 @@ mod tests {
         // Assert
         assert!(block.discontinuity);
         assert_eq!(block.timeline_frame, Some(100));
+    }
+
+    fn audio_chunk(frame_index: u64, frames: usize) -> AudioChunk {
+        AudioChunk {
+            data: vec![0.25; frames * 2],
+            frames,
+            frame_index,
+            pts_ns: 0,
+            seq: 0,
+            flags: ChunkFlags::empty(),
+            dropped_before: 0,
+            peak: 0.25,
+            rms: 0.25,
+        }
+    }
+
+    fn forwarder(capacity: usize) -> (BlockForwarder, Receiver<Result<AudioBlock, CaptureError>>) {
+        let (tx, rx) = sync_channel(capacity);
+        let forwarder = BlockForwarder::new(
+            SessionOrigin::new(0, 48_000, 48_000).expect("origin"),
+            Arc::new(AtomicI64::new(0)),
+            tx,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(FixedClock {
+                ticks: 0,
+                frequency: 48_000,
+            }),
+        );
+        (forwarder, rx)
+    }
+
+    #[test]
+    fn chunks_still_buffered_at_stop_reach_the_queue() {
+        // Arrange
+        let (forwarder, rx) = forwarder(8);
+        let mut buffered = vec![audio_chunk(960, 960), audio_chunk(0, 960)];
+
+        // Act
+        forwarder.finish_after_stop(|| buffered.pop(), None);
+        let frames: usize = rx
+            .try_iter()
+            .map(|block| block.expect("audio").samples.len() / 2)
+            .sum();
+
+        // Assert
+        assert!(frames >= 1_920, "frames={frames}");
+    }
+
+    #[test]
+    fn a_fatal_error_is_reported_after_the_buffered_audio() {
+        // Arrange
+        let (forwarder, rx) = forwarder(8);
+        let mut buffered = vec![audio_chunk(0, 960)];
+
+        // Act
+        forwarder.finish_after_stop(|| buffered.pop(), Some(CaptureError::Unavailable));
+        let received: Vec<_> = rx.try_iter().collect();
+
+        // Assert
+        assert!(received.first().expect("first").is_ok());
+        assert_eq!(
+            received.last().expect("last").as_ref().err(),
+            Some(&CaptureError::Unavailable)
+        );
     }
 
     #[test]
