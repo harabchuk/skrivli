@@ -55,6 +55,9 @@ impl AppError {
             }
             "playback" => "Could not play the recording.",
             "transcription" | "save transcript" => "Could not prepare the transcript.",
+            "transcript missing" => "The transcript file is missing.",
+            "read transcript" => "The transcript file could not be read.",
+            "choose model" => "Could not choose a speech model file.",
             "model missing" => "The speech model file is missing.",
             "model unreadable" => "The speech model file could not be read.",
             "model unsupported" => "The speech model file is not supported.",

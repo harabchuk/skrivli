@@ -8,9 +8,10 @@ use gpui_kit::component::empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitl
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::table::{Column, ColumnSort, DataTable, TableDelegate, TableState};
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, WindowExt as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, App, AppContext as _, ClickEvent, Context, Entity, IntoElement, ParentElement,
-    SharedString, Styled, Window,
+    div, px, AnyElement, App, AppContext as _, ClickEvent, Context, Entity, IntoElement,
+    ParentElement, SharedString, Styled, Window,
 };
 
 use crate::domain::ids::RecordingId;
@@ -69,6 +70,18 @@ pub(crate) struct RecordingsDelegate {
 }
 
 impl RecordingsDelegate {
+    pub(crate) fn set_transcript_display(
+        &mut self,
+        id: RecordingId,
+        display: impl Into<SharedString>,
+    ) -> bool {
+        let Some(row) = self.rows.iter_mut().find(|row| row.id == id) else {
+            return false;
+        };
+        row.transcript = display.into();
+        true
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             rows: Vec::new(),
@@ -196,6 +209,13 @@ pub(crate) fn recordings_tab(
     stop: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     rename: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     delete: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    transcript_view: AnyElement,
+    controls: TranscriptControls,
+    failure: Option<SharedString>,
+    transcribe: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cancel_job: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    open_model: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let _ = cx;
@@ -232,6 +252,8 @@ pub(crate) fn recordings_tab(
             .child(format!("Date {}", row.date))
             .child(format!("Duration {}", row.duration))
             .child(format!("Transcript {}", row.transcript))
+            .child(failure.unwrap_or_else(|| SharedString::from("")))
+            .child(transcript_view)
             .child(if playing {
                 SharedString::from("Playing")
             } else {
@@ -251,6 +273,34 @@ pub(crate) fn recordings_tab(
                             .label("Stop")
                             .disabled(!playing)
                             .on_click(stop),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("transcribe-recording")
+                            .label("Transcribe")
+                            .disabled(!controls.transcribe_enabled)
+                            .on_click(transcribe),
+                    )
+                    .child(
+                        Button::new("cancel-transcription")
+                            .label("Cancel")
+                            .disabled(!controls.cancel_enabled)
+                            .on_click(cancel_job),
+                    )
+                    .when(controls.retry_enabled, |row| {
+                        row.child(
+                            Button::new("retry-transcription")
+                                .label("Retry")
+                                .on_click(retry),
+                        )
+                    })
+                    .child(
+                        Button::new("speech-model")
+                            .label("Model")
+                            .on_click(open_model),
                     ),
             )
             .child(
@@ -401,6 +451,32 @@ pub(crate) fn rows_from_catalog(catalog: &LibraryCatalog) -> Vec<RecordingRow> {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TranscriptControls {
+    pub(crate) transcribe_enabled: bool,
+    pub(crate) cancel_enabled: bool,
+    pub(crate) retry_enabled: bool,
+}
+
+/// Transcribe is off while that row is queued or running. Cancel is on only then.
+/// Retry is the Transcribe action for a Failed row.
+pub(crate) fn transcript_controls(
+    status: crate::domain::recording::TranscriptStatus,
+    job_active: bool,
+) -> TranscriptControls {
+    use crate::domain::recording::TranscriptStatus;
+    let active = job_active
+        || matches!(
+            status,
+            TranscriptStatus::Queued | TranscriptStatus::Progress(_)
+        );
+    TranscriptControls {
+        transcribe_enabled: !active && status != TranscriptStatus::Failed,
+        cancel_enabled: active,
+        retry_enabled: status == TranscriptStatus::Failed && !active,
+    }
+}
+
 pub(crate) fn play_button_label(phase: PlayerPhase) -> SharedString {
     match phase {
         PlayerPhase::Playing => SharedString::from("Playing…"),
@@ -467,5 +543,114 @@ mod tests {
         assert_eq!(row.transcript.as_ref(), "Ready");
         assert!(row.detail.as_ref().contains("Recovered"));
         assert_eq!(format_unix_ms(0), "1970-01-01 00:00");
+    }
+
+    #[test]
+    fn transcript_controls_follow_row_status() {
+        use super::{transcript_controls, TranscriptControls};
+        use crate::domain::recording::TranscriptStatus;
+
+        // Arrange
+        let idle = TranscriptStatus::None;
+        let queued = TranscriptStatus::Queued;
+        let running = TranscriptStatus::Progress(42);
+        let failed = TranscriptStatus::Failed;
+
+        // Act
+        let idle_controls = transcript_controls(idle, false);
+        let queued_controls = transcript_controls(queued, true);
+        let running_controls = transcript_controls(running, true);
+        let failed_controls = transcript_controls(failed, false);
+
+        // Assert
+        assert_eq!(
+            idle_controls,
+            TranscriptControls {
+                transcribe_enabled: true,
+                cancel_enabled: false,
+                retry_enabled: false,
+            }
+        );
+        assert_eq!(
+            queued_controls,
+            TranscriptControls {
+                transcribe_enabled: false,
+                cancel_enabled: true,
+                retry_enabled: false,
+            }
+        );
+        assert_eq!(
+            running_controls,
+            TranscriptControls {
+                transcribe_enabled: false,
+                cancel_enabled: true,
+                retry_enabled: false,
+            }
+        );
+        assert_eq!(
+            failed_controls,
+            TranscriptControls {
+                transcribe_enabled: false,
+                cancel_enabled: false,
+                retry_enabled: true,
+            }
+        );
+    }
+
+    #[test]
+    fn progress_tick_updates_transcript_cell_without_reordering_rows() {
+        use super::RecordingsDelegate;
+        use crate::domain::recording::{
+            RecordingContainer, RecordingInfo, SidecarState, TranscriptStatus,
+        };
+
+        // Arrange
+        let mut delegate = RecordingsDelegate::new();
+        let first = RecordingRow::from_info(&RecordingInfo::new(
+            RecordingId::from_raw(1),
+            "alpha",
+            RecordingContainer::Wav,
+            Some(2),
+            Some(1),
+            1,
+            None,
+            TranscriptStatus::None,
+            SidecarState::Present,
+            false,
+            Vec::new(),
+        ));
+        let second = RecordingRow::from_info(&RecordingInfo::new(
+            RecordingId::from_raw(2),
+            "beta",
+            RecordingContainer::Wav,
+            Some(1),
+            Some(1),
+            1,
+            None,
+            TranscriptStatus::None,
+            SidecarState::Present,
+            false,
+            Vec::new(),
+        ));
+        delegate.set_rows(vec![first, second]);
+        let names_before: Vec<_> = delegate
+            .rows()
+            .iter()
+            .map(|row| row.name.to_string())
+            .collect();
+
+        // Act
+        let updated = delegate.set_transcript_display(RecordingId::from_raw(2), "42%");
+
+        // Assert
+        assert!(updated);
+        let names_after: Vec<_> = delegate
+            .rows()
+            .iter()
+            .map(|row| row.name.to_string())
+            .collect();
+        assert_eq!(names_after, names_before);
+        assert_eq!(delegate.rows()[0].transcript.as_ref(), "—");
+        assert_eq!(delegate.rows()[1].transcript.as_ref(), "42%");
     }
 }

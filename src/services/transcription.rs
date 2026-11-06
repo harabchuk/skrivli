@@ -86,6 +86,8 @@ pub(crate) struct TranscriptionSnapshot {
     pub(crate) phase: JobPhase,
     pub(crate) progress_percent: u8,
     pub(crate) notice: Option<&'static str>,
+    /// Detail-pane text. Failures store [`AppError::user_message`], never engine logs.
+    pub(crate) detail: Option<&'static str>,
 }
 
 impl TranscriptionSnapshot {
@@ -96,10 +98,10 @@ impl TranscriptionSnapshot {
             phase: JobPhase::Queued,
             progress_percent: 0,
             notice: None,
+            detail: None,
         }
     }
 
-    #[allow(dead_code)] // Reduced into Presentation / library rows in M7.
     pub(crate) fn transcript_status(&self) -> TranscriptStatus {
         match self.phase {
             JobPhase::Queued => TranscriptStatus::Queued,
@@ -143,6 +145,7 @@ pub(crate) struct TranscriptionHost {
     job_id: Arc<Mutex<Option<JobId>>>,
     recording_id: Arc<Mutex<Option<RecordingId>>>,
     notice: Arc<Mutex<Option<&'static str>>>,
+    detail: Arc<Mutex<Option<&'static str>>>,
 }
 
 /// Thin AtomicU8 wrapper so snapshot helpers stay local to this module.
@@ -182,11 +185,13 @@ impl TranscriptionHost {
         let job_id = Arc::new(Mutex::new(None));
         let recording_id = Arc::new(Mutex::new(None));
         let notice = Arc::new(Mutex::new(None));
+        let detail = Arc::new(Mutex::new(None));
         let worker_phase = Arc::clone(&phase);
         let worker_progress = Arc::clone(&progress);
         let worker_job = Arc::clone(&job_id);
         let worker_recording = Arc::clone(&recording_id);
         let worker_notice = Arc::clone(&notice);
+        let worker_detail = Arc::clone(&detail);
         let worker_active_cancel = Arc::clone(&active_cancel);
         let handle = thread::spawn(move || {
             worker_loop(
@@ -199,6 +204,7 @@ impl TranscriptionHost {
                 worker_job,
                 worker_recording,
                 worker_notice,
+                worker_detail,
                 on_change,
             );
         });
@@ -211,6 +217,7 @@ impl TranscriptionHost {
                 job_id,
                 recording_id,
                 notice,
+                detail,
             },
             handle,
         )
@@ -260,12 +267,17 @@ impl TranscriptionHost {
             .notice
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let detail = *self
+            .detail
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         TranscriptionSnapshot {
             job_id,
             recording_id,
             phase,
             progress_percent: self.progress.load(),
             notice,
+            detail,
         }
     }
 }
@@ -281,6 +293,7 @@ fn worker_loop(
     job_id: Arc<Mutex<Option<JobId>>>,
     recording_id: Arc<Mutex<Option<RecordingId>>>,
     notice: Arc<Mutex<Option<&'static str>>>,
+    detail: Arc<Mutex<Option<&'static str>>>,
     on_change: Box<dyn Fn(TranscriptionSnapshot) + Send>,
 ) {
     let mut queue: VecDeque<QueuedJob> = VecDeque::new();
@@ -318,10 +331,12 @@ fn worker_loop(
                         &job_id,
                         &recording_id,
                         &notice,
+                        &detail,
                         JobPhase::Cancelled,
                         None,
                         None,
                         0,
+                        None,
                         None,
                         &on_change,
                     );
@@ -357,10 +372,12 @@ fn worker_loop(
                         &job_id,
                         &recording_id,
                         &notice,
+                        &detail,
                         JobPhase::Queued,
                         Some(id),
                         Some(recording),
                         0,
+                        None,
                         None,
                         &on_change,
                     );
@@ -379,11 +396,13 @@ fn worker_loop(
                                 &job_id,
                                 &recording_id,
                                 &notice,
+                                &detail,
                                 JobPhase::Cancelled,
                                 Some(job.job_id),
                                 Some(job.request.recording_id),
                                 0,
                                 Some(NOTICE_CANCELLED),
+                                None,
                                 &on_change,
                             );
                         }
@@ -417,10 +436,12 @@ fn worker_loop(
             &job_id,
             &recording_id,
             &notice,
+            &detail,
             JobPhase::Preparing,
             Some(snapshot_job),
             Some(snapshot_recording),
             0,
+            None,
             None,
             &on_change,
         );
@@ -442,10 +463,12 @@ fn worker_loop(
                         &job_id,
                         &recording_id,
                         &notice,
+                        &detail,
                         JobPhase::Cancelled,
                         None,
                         None,
                         0,
+                        None,
                         None,
                         &on_change,
                     );
@@ -481,10 +504,12 @@ fn worker_loop(
                         &job_id,
                         &recording_id,
                         &notice,
+                        &detail,
                         JobPhase::Queued,
                         Some(id),
                         Some(recording),
                         0,
+                        None,
                         None,
                         &on_change,
                     );
@@ -506,11 +531,13 @@ fn worker_loop(
                                 &job_id,
                                 &recording_id,
                                 &notice,
+                                &detail,
                                 JobPhase::Cancelled,
                                 Some(queued.job_id),
                                 Some(queued.request.recording_id),
                                 0,
                                 Some(NOTICE_CANCELLED),
+                                None,
                                 &on_change,
                             );
                         }
@@ -531,10 +558,12 @@ fn worker_loop(
                     &job_id,
                     &recording_id,
                     &notice,
+                    &detail,
                     JobPhase::Transcribing,
                     Some(snapshot_job),
                     Some(snapshot_recording),
                     percent,
+                    None,
                     None,
                     &on_change,
                 );
@@ -569,11 +598,13 @@ fn worker_loop(
                     &job_id,
                     &recording_id,
                     &notice,
+                    &detail,
                     JobPhase::Done,
                     Some(job.job_id),
                     Some(job.request.recording_id),
                     100,
                     Some(NOTICE_DONE),
+                    None,
                     &on_change,
                 );
             }
@@ -589,15 +620,20 @@ fn worker_loop(
                     &job_id,
                     &recording_id,
                     &notice,
+                    &detail,
                     JobPhase::Cancelled,
                     Some(job.job_id),
                     Some(job.request.recording_id),
                     progress.load(),
                     Some(NOTICE_CANCELLED),
+                    None,
                     &on_change,
                 );
             }
-            JobOutcome::Failed { model_issue } => {
+            JobOutcome::Failed {
+                model_issue,
+                detail: failure_detail,
+            } => {
                 let notice_text = if model_issue {
                     NOTICE_MODEL
                 } else {
@@ -614,11 +650,13 @@ fn worker_loop(
                     &job_id,
                     &recording_id,
                     &notice,
+                    &detail,
                     JobPhase::Failed,
                     Some(job.job_id),
                     Some(job.request.recording_id),
                     progress.load(),
                     Some(notice_text),
+                    Some(failure_detail),
                     &on_change,
                 );
             }
@@ -629,7 +667,10 @@ fn worker_loop(
 enum JobOutcome {
     Done,
     Cancelled,
-    Failed { model_issue: bool },
+    Failed {
+        model_issue: bool,
+        detail: &'static str,
+    },
 }
 
 fn run_job(
@@ -650,6 +691,7 @@ fn run_job(
         } else {
             JobOutcome::Failed {
                 model_issue: is_model_error(&error),
+                detail: error.user_message(),
             }
         };
     }
@@ -677,7 +719,10 @@ fn run_job(
                 }
                 Err(error) => {
                     tracing::error!(error = %error, "transcript text was not written");
-                    JobOutcome::Failed { model_issue: false }
+                    JobOutcome::Failed {
+                        model_issue: false,
+                        detail: error.user_message(),
+                    }
                 }
             }
         }
@@ -686,7 +731,10 @@ fn run_job(
         }
         Err(error) => {
             tracing::error!(error = %error, "transcription job failed");
-            JobOutcome::Failed { model_issue: false }
+            JobOutcome::Failed {
+                model_issue: false,
+                detail: error.user_message(),
+            }
         }
     }
 }
@@ -852,11 +900,13 @@ fn publish(
     job_id: &Arc<Mutex<Option<JobId>>>,
     recording_id: &Arc<Mutex<Option<RecordingId>>>,
     notice: &Arc<Mutex<Option<&'static str>>>,
+    detail_slot: &Arc<Mutex<Option<&'static str>>>,
     next: JobPhase,
     id: Option<JobId>,
     recording: Option<RecordingId>,
     percent: u8,
     message: Option<&'static str>,
+    detail: Option<&'static str>,
     on_change: &dyn Fn(TranscriptionSnapshot),
 ) {
     phase.store(next.as_raw());
@@ -870,12 +920,16 @@ fn publish(
     if let Ok(mut guard) = notice.lock() {
         *guard = message;
     }
+    if let Ok(mut guard) = detail_slot.lock() {
+        *guard = detail;
+    }
     on_change(TranscriptionSnapshot {
         job_id: id,
         recording_id: recording,
         phase: next,
         progress_percent: percent,
         notice: message,
+        detail,
     });
 }
 
@@ -1113,6 +1167,44 @@ mod tests {
             SidecarLoad::Loaded(doc) => assert_eq!(doc.transcript, TranscriptStatus::Failed),
             other => panic!("{other:?}"),
         }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn failed_snapshot_detail_is_user_message_not_engine_text() {
+        // Arrange
+        let dir = temp_dir("fail-detail");
+        let wav = dir.join("clip.wav");
+        write_pcm_wav(&wav, 8_000);
+        seed_sidecar(&wav, 22);
+        let model = dir.join("ggml-base.bin");
+        fs::write(&model, b"ggml").expect("model");
+        let fake = FakeInference {
+            fail_load: false,
+            fail_chunk: true,
+            hold_ms: 0,
+            check_cancel_before_return: false,
+            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
+            calls: Arc::new(Mutex::new(Vec::new())),
+            segments: Vec::new(),
+        };
+        let (host, handle) =
+            TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
+
+        // Act
+        host.enqueue(RecordingId::from_raw(22), wav, model, "base-q5_1");
+        wait_until(&host, |snap| snap.phase == JobPhase::Failed);
+        let snap = host.snapshot();
+        host.shutdown();
+        let _ = handle.join();
+
+        // Assert
+        assert_eq!(snap.notice, Some(NOTICE_FAILED));
+        assert_eq!(snap.detail, Some("Could not run speech recognition."));
+        assert_eq!(
+            AppError::message("inference", "engine boom transcript line").user_message(),
+            snap.detail.unwrap_or("")
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

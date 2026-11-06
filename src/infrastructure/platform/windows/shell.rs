@@ -8,9 +8,10 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
     COINIT_APARTMENTTHREADED,
 };
+use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
-    FileOpenDialog, IFileOpenDialog, ShellExecuteW, FILEOPENDIALOGOPTIONS, FOS_FORCEFILESYSTEM,
-    FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+    FileOpenDialog, IFileOpenDialog, ShellExecuteW, FILEOPENDIALOGOPTIONS, FOS_FILEMUSTEXIST,
+    FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_HIDE, SW_SHOW, SW_SHOWNORMAL,
@@ -53,6 +54,10 @@ impl DesktopShell for WindowsShell {
 
     fn pick_recordings_folder(&self) -> Result<Option<PathBuf>, AppError> {
         pick_recordings_folder()
+    }
+
+    fn pick_model_file(&self) -> Result<Option<PathBuf>, AppError> {
+        pick_model_file()
     }
 
     fn open_recordings_folder(&self, path: &Path) -> Result<(), AppError> {
@@ -107,6 +112,49 @@ fn pick_recordings_folder() -> Result<Option<PathBuf>, AppError> {
     let path = PathBuf::from(take_pwstr(name));
     ensure_writable(&path)?;
     Ok(Some(path))
+}
+
+fn pick_model_file() -> Result<Option<PathBuf>, AppError> {
+    let _apartment = sta_guard()?;
+    let dialog: IFileOpenDialog =
+        unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }
+            .map_err(|error| AppError::message("choose model", error.to_string()))?;
+    let title = wide("Choose a speech model");
+    let filter_name = wide("Speech models");
+    let filter_spec = wide("*.bin");
+    unsafe {
+        let current = dialog
+            .GetOptions()
+            .map_err(|error| AppError::message("choose model", error.to_string()))?;
+        let flags = FILEOPENDIALOGOPTIONS(
+            current.0 | FOS_FORCEFILESYSTEM.0 | FOS_PATHMUSTEXIST.0 | FOS_FILEMUSTEXIST.0,
+        );
+        dialog
+            .SetOptions(flags)
+            .map_err(|error| AppError::message("choose model", error.to_string()))?;
+        let types = [COMDLG_FILTERSPEC {
+            pszName: PCWSTR(filter_name.as_ptr()),
+            pszSpec: PCWSTR(filter_spec.as_ptr()),
+        }];
+        dialog
+            .SetFileTypes(&types)
+            .map_err(|error| AppError::message("choose model", error.to_string()))?;
+        dialog
+            .SetTitle(PCWSTR(title.as_ptr()))
+            .map_err(|error| AppError::message("choose model", error.to_string()))?;
+    }
+    let owner = main_window_hwnd().unwrap_or_default();
+    if let Err(error) = unsafe { dialog.Show(owner) } {
+        if cancelled(&error) {
+            return Ok(None);
+        }
+        return Err(AppError::message("choose model", error.to_string()));
+    }
+    let item = unsafe { dialog.GetResult() }
+        .map_err(|error| AppError::message("choose model", error.to_string()))?;
+    let name = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }
+        .map_err(|error| AppError::message("choose model", error.to_string()))?;
+    Ok(Some(PathBuf::from(take_pwstr(name))))
 }
 
 fn open_recordings_folder(path: &Path) -> Result<(), AppError> {

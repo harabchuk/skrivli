@@ -72,7 +72,11 @@ impl ManifestEntry {
 
 impl ModelManifest {
     pub(crate) fn load_bundled() -> Result<Self, AppError> {
-        serde_json::from_str(MANIFEST_JSON)
+        Self::parse(MANIFEST_JSON)
+    }
+
+    pub(crate) fn parse(json: &str) -> Result<Self, AppError> {
+        serde_json::from_str(json)
             .map_err(|error| AppError::message("model manifest", error.to_string()))
     }
 
@@ -161,6 +165,38 @@ pub(crate) fn validate_model_file(path: &Path) -> Result<(), AppError> {
         ));
     }
     Ok(())
+}
+
+/// Copy a user-picked GGML file into `models_dir` after [`validate_model_file`].
+/// A file that is already in that directory is accepted in place.
+pub(crate) fn install_picked_file(source: &Path, models_dir: &Path) -> Result<PathBuf, AppError> {
+    validate_model_file(source)?;
+    if !is_ggml_filename(source) {
+        return Err(AppError::message(
+            "model unsupported",
+            format!("name {}", source.display()),
+        ));
+    }
+    fs::create_dir_all(models_dir).map_err(|err| AppError::io("download model", err))?;
+    let Some(name) = source.file_name() else {
+        return Err(AppError::message(
+            "model unsupported",
+            "picked path has no file name",
+        ));
+    };
+    let destination = models_dir.join(name);
+    if source == destination {
+        return Ok(destination);
+    }
+    let temp = temp_sibling(&destination);
+    fs::copy(source, &temp).map_err(|err| AppError::io("model unreadable", err))?;
+    match platform::replace_file(&temp, &destination, "download model") {
+        Ok(()) => Ok(destination),
+        Err(error) => {
+            let _ = fs::remove_file(&temp);
+            Err(error)
+        }
+    }
 }
 
 /// Resolve the on-disk path for a manifest variant under `models_dir`.

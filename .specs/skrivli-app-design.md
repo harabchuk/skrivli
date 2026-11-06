@@ -247,6 +247,7 @@ skrivli/
 │   │   ├── playback.rs             # PlayerHost command loop
 │   │   ├── level_monitor.rs
 │   │   ├── transcription.rs        # queued jobs
+│   │   ├── models.rs               # user-initiated model download host
 │   │   └── ports.rs                # external capability traits, as needed
 │   ├── infrastructure/
 │   │   ├── mod.rs
@@ -260,7 +261,8 @@ skrivli/
 │   │   ├── ai/
 │   │   │   ├── mod.rs
 │   │   │   ├── whisper.rs
-│   │   │   └── models.rs
+│   │   │   ├── models.rs
+│   │   │   └── fetch.rs            # HTTP ModelSource; tests never construct it
 │   │   ├── storage/
 │   │   │   ├── mod.rs
 │   │   │   ├── settings.rs
@@ -324,7 +326,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | --- | --- |
 | `app/` | Process composition root: GPUI Kit bootstrap, worker wiring, shutdown, settings writer |
 | `domain/` | Audio formats, `AudioBlock`, `RecordPhase`, `ThemePreference`, timeline, recording metadata |
-| `services/` | Recording sessions, playback host, idle level monitoring, transcription jobs |
+| `services/` | Recording sessions, playback host, idle level monitoring, transcription jobs, model download host |
 | `infrastructure/audio/` | flexaudio capture adapters, device catalog, the 48 kHz drift resampler, and the sonora echo and gain steps (no OS APIs). Production code imports `sonora` only in `sonora_steps.rs` |
 | `infrastructure/ai/` | Whisper engine integration and local model management |
 | `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
@@ -422,7 +424,9 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 
 - Discover `ggml-*.bin` in `%LOCALAPPDATA%\Skrivli\models\` plus explicitly chosen user paths.
 - On first use without a model, show a GPUI Kit dialog/model-choice prompt: download the default quantized multilingual base model or browse for a local model file.
-- Downloads must be **user-initiated only**, with progress, resumability where supported, and **SHA-256 verification against a maintained trusted manifest** before a file is accepted. Download to a temporary file and rename after verification.
+- `services/models.rs` `ModelHost` owns that download. `app/bootstrap.rs` spawns it and `app/shutdown.rs` joins it, same as `TranscriptionHost`. The view never hashes a file or opens a socket. Bytes come through `ModelSource` on `services/ports.rs`; `infrastructure/ai/fetch.rs` is the HTTP adapter and tests inject a reader. Progress is one coalesced `ModelSnapshot` on the bridge (latest wins), reduced into `Presentation`.
+- Browse calls `DesktopShell::pick_model_file` in `infrastructure/platform/windows/shell.rs`. The host then validates and copies off the GPUI thread. Missing, hash-mismatch (`verify model`), and unsupported files each surface `AppError::user_message()` in a Kit alert.
+- Downloads must be **user-initiated only**, with progress, resumability where supported, and **SHA-256 verification against a maintained trusted manifest** before a file is accepted. Download to a temporary file and rename after verification. M7.1 downloads the default manifest variant and states the file size and that a network is required. Choosing another variant in Settings is M8.
 - Provide tiny/base/small and suitable English/multilingual options only when the pinned engine supports the selected model files. Do not hardcode unverified model sizes or hashes.
 - Language, model and CPU thread count are configurable. A local-model workflow is fully offline after installation.
 
@@ -449,7 +453,9 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - FIFO queue; one job in inference at a time; cancellation is cooperative.
 - Persist significant job transitions (and final status) to sidecar; progress snapshots are ephemeral and throttled for UI.
 - If auto-transcribe is enabled, enqueue after a recording has finalized; otherwise only on user request. Default **off**.
-- On completion, show a Windows notification/tray signal when supported and update GPUI library state. Clicking a relevant notification selects that recording if possible.
+- `views/state.rs` `Presentation` reduces `TranscriptionSnapshot` into the status strip and the selected row. A progress tick keeps the loaded transcript string and the selected `RecordingId`. Completion sets `TranscriptStatus::Ready` and the detail text without changing the tab. Playback still stops only when the selection changes.
+- Failed detail in the pane is `AppError::user_message()`. The status strip may keep the existing static notices (`Transcription failed.`, and the rest).
+- On completion, show a Windows notification/tray signal when supported and update GPUI library state. Clicking a relevant notification selects that recording if possible. The notification adapter is M7.2; M7.1 updates library state through the existing bridge.
 - Model missing/corrupt, decode error, OOM and cancellation are represented as distinct user-facing results. Preserve audio on all errors.
 
 ---
@@ -499,15 +505,15 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Responsive **split-pane** layout: recording list left, selected detail right. At narrow widths, a stacked/detail-navigation fallback is acceptable.
 - List columns: **Name | Date | Duration | Size | Transcript**. Sort newest first; clickable sorting, keyboard selection, stable selection keyed by recording ID/path.
 - Transcript statuses: `—`, `Queued`, `42%`, `Ready`, `Failed`.
-- Right pane: empty state until selected; then **Play / Stop**, file metadata, plain-text transcript in a selectable and copyable read-only text view; or **Create transcript** button if absent. Prefer a GPUI Kit read-only editor/text component, and verify selection, clipboard, keyboard scrolling and large-text performance; a plain `div().child(text)` is not an adequate substitute.
-- Actions: Play, Transcribe, Open folder, Rename, Delete, Refresh. Delete goes to the Windows Recycle Bin through a Windows Shell adapter and includes associated audio/`.txt`/`.json`; ask for confirmation and handle partial failures.
+- Right pane: empty state until selected; then **Play / Stop**, file metadata, and a finished transcript in GPUI Kit `Editor` with `readonly(true)` (`EditorState`, gpui-kit 0.9.0). That editor can select, select-all, copy, and move by keyboard. `<basename>.txt` is read on `background_spawn` and stored on the entity. A progress tick does not recreate the entity or call `set_value` (that call resets scroll). A missing `.txt` on a Ready row shows `user_message`, not a panic. A plain `div().child(text)` is not the transcript view.
+- Actions: Play, Transcribe, Cancel, Retry, Model, Open folder, Rename, Delete, Refresh. Transcribe is disabled while that recording is queued or running. Cancel is enabled only then. Retry is a `Transcribe` command for a row whose status is Failed. The table transcript cell and the status strip update in place; the `DataTable` entity, sort, and selection stay. Delete goes to the Windows Recycle Bin through a Windows Shell adapter and includes associated audio/`.txt`/`.json`; ask for confirmation and handle partial failures. Rename and delete do not yet cancel an in-flight job (M7.2).
 - Double-click/Enter can start playback; selection change stops playback by design.
 - Background directory watcher debounces changes; the library scans WAV/FLAC files and matches sidecars/transcripts. Preserve selected recording after refresh.
 - Playback audio runs through `services/playback` and the cpal session in `files/player`; never decode files or drive playback from GPUI rendering.
 
 ### 8.4 Model prompt and settings
 
-**Model prompt:** available installed models, browse button, explicit download action, verification/progress/cancel feedback, errors and retry.
+**Model prompt:** `views/model_prompt.rs`, opened from the Recordings detail pane. Lists models `discover` has already accepted. Browse, Download (default manifest variant, with size and a network notice), Cancel, and Retry. Download, cancel, and retry are `AppCommand` effects the window hands to `ModelHost` off `render`. Browse is `DesktopShell::pick_model_file`. Verification errors use Kit alerts.
 
 **Settings:** recording directory, default endpoints, microphone gain, optional stems, FLAC and WAV retention; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
 

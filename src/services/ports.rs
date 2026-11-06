@@ -5,6 +5,7 @@
 //! `infrastructure::platform`.
 
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
@@ -140,6 +141,7 @@ pub(crate) trait DesktopShell: Send + Sync {
     fn set_window_visible(&self, visible: bool) -> bool;
     fn window_is_minimized(&self) -> bool;
     fn pick_recordings_folder(&self) -> Result<Option<PathBuf>, AppError>;
+    fn pick_model_file(&self) -> Result<Option<PathBuf>, AppError>;
     fn open_recordings_folder(&self, path: &Path) -> Result<(), AppError>;
 }
 
@@ -232,6 +234,12 @@ pub(crate) trait InferencePort: Send {
         cancel: &Arc<AtomicBool>,
         on_progress: Arc<dyn Fn(u8) + Send + Sync>,
     ) -> Result<Vec<InferenceSegment>, AppError>;
+}
+
+/// Byte source for a user-initiated model download.
+/// Production uses HTTP. Tests supply an in-memory reader. `cargo test` must not call the network.
+pub(crate) trait ModelSource: Send {
+    fn open(&mut self, url: &str) -> Result<Box<dyn Read + Send>, AppError>;
 }
 
 #[cfg(test)]

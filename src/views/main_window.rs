@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -19,8 +20,8 @@ use gpui_kit::{
 
 use crate::domain::audio::format_elapsed;
 use crate::domain::gain::{db_fs, format_gain};
-use crate::domain::ids::RecordingId;
-use crate::domain::recording::RecordPhase;
+use crate::domain::ids::{JobId, RecordingId};
+use crate::domain::recording::{RecordPhase, TranscriptStatus};
 use crate::domain::theme::ThemePreference;
 use crate::domain::window_frame::LogicalRect;
 use crate::infrastructure::ai::models::{path_for_variant, validate_model_file, ModelManifest};
@@ -28,26 +29,29 @@ use crate::infrastructure::audio::devices::DeviceCatalog;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::storage::library::LibraryCatalog;
 use crate::infrastructure::storage::settings::{Settings, StoredEndpoint, StoredWindowBounds};
+use crate::infrastructure::storage::sidecar::transcript_path_for;
 use crate::services::level_monitor::MonitorTargets;
 use crate::services::library::{LibraryHost, LibrarySnapshot};
+use crate::services::models::{ModelHost, ModelSnapshot};
 use crate::services::playback::{PlayerHost, PlayerPhase, PlayerSnapshot};
 use crate::services::ports::DesktopShell;
 use crate::services::recording::{
     build_start_request, RecordSnapshot, RecordingHost, StartRequestBuild, NOTICE_FALLBACK,
     NOTICE_SYSTEM_FALLBACK,
 };
-use crate::services::transcription::{
-    JobPhase, TranscriptionHost, TranscriptionSnapshot, NOTICE_MODEL,
-};
+use crate::services::transcription::{JobPhase, TranscriptionHost, TranscriptionSnapshot};
 use crate::ui::theme::{apply_theme, theme_icon};
 use crate::views::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
 use crate::views::hooks::ShellHooks;
 use crate::views::state::{AppTab, Presentation};
 
+use super::model_prompt::{
+    download_button_label, open_model_alert, open_model_prompt, ModelPromptView,
+};
 use super::recording::record_tab;
 use super::recordings::{
     open_delete_dialog, open_rename_dialog, play_button_label, recordings_tab, rows_from_catalog,
-    RecordingsDelegate,
+    transcript_controls, RecordingsDelegate,
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
@@ -66,11 +70,17 @@ pub(crate) struct MainWindow {
     library: LibraryHost,
     player: PlayerHost,
     transcription: TranscriptionHost,
+    model_host: ModelHost,
     models_dir: PathBuf,
     library_catalog: LibraryCatalog,
     library_selected: Option<RecordingId>,
     player_snapshot: PlayerSnapshot,
     transcription_snapshot: TranscriptionSnapshot,
+    transcript_editor: Entity<EditorState>,
+    transcript_generation: u64,
+    transcript_error: Option<&'static str>,
+    transcript_load: Option<Task<()>>,
+    download_label: SharedString,
     recordings_table: Entity<TableState<RecordingsDelegate>>,
     _table_sub: Subscription,
     levels: Arc<LevelSnapshot>,
@@ -110,6 +120,7 @@ impl MainWindow {
         library: LibraryHost,
         player: PlayerHost,
         transcription: TranscriptionHost,
+        model_host: ModelHost,
         models_dir: PathBuf,
         levels: Arc<LevelSnapshot>,
         gain_control: Arc<GainControl>,
@@ -127,10 +138,10 @@ impl MainWindow {
         let table_sub = cx.subscribe_in(
             &recordings_table,
             window,
-            |this, table, event: &TableEvent, _window, cx| {
+            |this, table, event: &TableEvent, window, cx| {
                 if let TableEvent::SelectRow(row) = event {
                     let id = table.read(cx).delegate().row_id(*row);
-                    this.select_library_row(id, cx);
+                    this.select_library_row(id, window, cx);
                 }
             },
         );
@@ -219,6 +230,7 @@ impl MainWindow {
         window.on_window_should_close(cx, move |window, cx| {
             session.update(cx, |view, cx| view.on_close_requested(window, cx))
         });
+        let transcript_editor = cx.new(|cx| EditorState::new(window, cx).line_number(false));
         let appearance_entity = cx.weak_entity();
         let appearance = window.observe_window_appearance(move |window, cx| {
             let Some(entity) = appearance_entity.upgrade() else {
@@ -242,6 +254,7 @@ impl MainWindow {
             library,
             player,
             transcription,
+            model_host,
             models_dir,
             library_catalog: LibraryCatalog::empty(),
             library_selected: None,
@@ -251,6 +264,11 @@ impl MainWindow {
                 notice: None,
             },
             transcription_snapshot: TranscriptionSnapshot::idle(),
+            transcript_editor,
+            transcript_generation: 0,
+            transcript_error: None,
+            transcript_load: None,
+            download_label: SharedString::from(default_download_label()),
             recordings_table,
             _table_sub: table_sub,
             levels,
@@ -350,7 +368,7 @@ impl MainWindow {
         let batch = drain_bridge(&self.commands, &mut self.presentation);
         let mut changed = !batch.effects.is_empty();
         if let Some(snapshot) = batch.recording {
-            self.apply_snapshot(snapshot, window);
+            self.apply_snapshot(snapshot, window, cx);
             changed = true;
         }
         if let Some(catalog) = batch.devices {
@@ -366,7 +384,11 @@ impl MainWindow {
             changed = true;
         }
         if let Some(snapshot) = batch.transcription {
-            self.apply_transcription(snapshot);
+            self.apply_transcription(snapshot, window, cx);
+            changed = true;
+        }
+        if let Some(snapshot) = batch.model {
+            self.apply_model(snapshot, window, cx);
             changed = true;
         }
         for effect in batch.effects {
@@ -431,7 +453,9 @@ impl MainWindow {
             Effect::StopRecording => self.recording.stop(),
             Effect::BrowseRecordings => self.browse_folder(),
             Effect::RefreshLibrary => self.library.refresh(),
-            Effect::Transcribe { recording_id } => self.begin_transcription(recording_id),
+            Effect::Transcribe { recording_id } => {
+                self.begin_transcription(recording_id, window, cx)
+            }
             Effect::CancelTranscription { job_id } => self.transcription.cancel(job_id),
             Effect::ConfirmExit => {
                 let entity = cx.entity();
@@ -445,6 +469,10 @@ impl MainWindow {
                 });
             }
             Effect::Quit => self.quit_now(window),
+            Effect::DownloadModel => self.model_host.download_default(),
+            Effect::CancelModelDownload => self.model_host.cancel(),
+            Effect::RetryModelDownload => self.model_host.retry(),
+            Effect::BrowseModelFile => self.browse_model_file(window, cx),
         }
         cx.notify();
     }
@@ -552,7 +580,12 @@ impl MainWindow {
         );
     }
 
-    fn apply_snapshot(&mut self, snapshot: RecordSnapshot, window: &mut Window) {
+    fn apply_snapshot(
+        &mut self,
+        snapshot: RecordSnapshot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let phase = snapshot.phase;
         if phase == RecordPhase::Recording && self.started.is_none() {
             self.started = Some(Instant::now());
@@ -568,7 +601,7 @@ impl MainWindow {
             self.library.refresh();
             if phase == RecordPhase::Idle && self.settings.auto_transcribe() {
                 if let (Some(id), Some(path)) = (snapshot.id, snapshot.finalized_path.clone()) {
-                    self.enqueue_transcription(id, path);
+                    self.enqueue_transcription(id, path, window, cx);
                 }
             }
         }
@@ -578,29 +611,71 @@ impl MainWindow {
         }
     }
 
-    fn apply_transcription(&mut self, snapshot: TranscriptionSnapshot) {
-        self.transcription_snapshot = snapshot;
-        if let Some(notice) = self.transcription_snapshot.notice {
-            self.presentation.set_notice(Some(notice));
+    fn apply_transcription(
+        &mut self,
+        snapshot: TranscriptionSnapshot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tab = self.presentation.tab();
+        self.transcription_snapshot = snapshot.clone();
+        self.presentation.apply_transcription(snapshot.clone());
+        self.presentation.set_tab(tab);
+        if let Some(id) = snapshot.recording_id {
+            let display = snapshot.transcript_status().display();
+            self.recordings_table.update(cx, |table, cx| {
+                if table.delegate_mut().set_transcript_display(id, display) {
+                    cx.notify();
+                }
+            });
         }
         if matches!(
-            self.transcription_snapshot.phase,
+            snapshot.phase,
             JobPhase::Done | JobPhase::Failed | JobPhase::Cancelled | JobPhase::Queued
         ) {
             self.library.refresh();
         }
+        if snapshot.phase == JobPhase::Done && snapshot.recording_id == self.library_selected {
+            self.load_selected_transcript(window, cx);
+        }
     }
 
-    fn begin_transcription(&mut self, recording_id: RecordingId) {
+    fn apply_model(
+        &mut self,
+        snapshot: ModelSnapshot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous = self.presentation.model_failure();
+        self.presentation.apply_model(snapshot);
+        if let Some(message) = self.presentation.model_failure() {
+            if previous != Some(message) && is_distinct_model_message(message) {
+                open_model_alert(window, cx, message);
+            }
+        }
+    }
+
+    fn begin_transcription(
+        &mut self,
+        recording_id: RecordingId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(entry) = self.library_catalog.find(recording_id) else {
             self.presentation
                 .set_notice(Some("Could not find that recording."));
             return;
         };
-        self.enqueue_transcription(recording_id, entry.audio_path.clone());
+        self.enqueue_transcription(recording_id, entry.audio_path.clone(), window, cx);
     }
 
-    fn enqueue_transcription(&mut self, recording_id: RecordingId, audio_path: PathBuf) {
+    fn enqueue_transcription(
+        &mut self,
+        recording_id: RecordingId,
+        audio_path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match resolve_model_path(&self.models_dir, self.settings.selected_model()) {
             Ok((model_path, model_id)) => {
                 self.transcription
@@ -608,13 +683,165 @@ impl MainWindow {
             }
             Err(error) => {
                 tracing::error!(error = %error, "transcription model was not resolved");
+                self.report_model_error(error.user_message(), window, cx);
+            }
+        }
+    }
+
+    fn report_model_error(
+        &mut self,
+        message: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if message == "The speech model file is missing." {
+            self.open_model_prompt(window, cx);
+            return;
+        }
+        if is_distinct_model_message(message) {
+            open_model_alert(window, cx, message);
+            return;
+        }
+        self.presentation.set_notice(Some(message));
+    }
+
+    fn row_transcript_status(&self, id: RecordingId) -> TranscriptStatus {
+        if let Some(status) = self.presentation.status_for(id) {
+            return status;
+        }
+        self.library_catalog
+            .find(id)
+            .map(|entry| entry.info.transcript())
+            .unwrap_or(TranscriptStatus::None)
+    }
+
+    fn job_active_for(&self, id: Option<RecordingId>) -> bool {
+        let Some(id) = id else {
+            return false;
+        };
+        self.presentation
+            .active_job()
+            .is_some_and(|(recording, _)| recording == id)
+    }
+
+    fn load_selected_transcript(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.library_selected else {
+            self.clear_transcript_editor(window, cx);
+            return;
+        };
+        if self.row_transcript_status(id) != TranscriptStatus::Ready {
+            self.transcript_error = None;
+            self.clear_transcript_editor(window, cx);
+            return;
+        }
+        let Some(entry) = self.library_catalog.find(id) else {
+            self.clear_transcript_editor(window, cx);
+            return;
+        };
+        let path = transcript_path_for(&entry.audio_path);
+        self.transcript_generation = self.transcript_generation.saturating_add(1);
+        let generation = self.transcript_generation;
+        self.transcript_load = Some(cx.spawn_in(window, async move |this, async_cx| {
+            let loaded = async_cx
+                .background_spawn(async move { read_transcript_file(path) })
+                .await;
+            let _ = this.update_in(async_cx, |view, window, cx| {
+                if view.transcript_generation != generation || view.library_selected != Some(id) {
+                    return;
+                }
+                match loaded {
+                    Ok(text) => {
+                        view.transcript_error = None;
+                        view.presentation.set_loaded_transcript(text.clone());
+                        view.transcript_editor.update(cx, |editor, cx| {
+                            editor.set_value(text, window, cx);
+                        });
+                    }
+                    Err(message) => {
+                        view.transcript_error = Some(message);
+                        view.presentation.set_loaded_transcript(String::new());
+                        view.transcript_editor.update(cx, |editor, cx| {
+                            editor.set_value(String::new(), window, cx);
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn clear_transcript_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.transcript_generation = self.transcript_generation.saturating_add(1);
+        self.presentation.set_loaded_transcript(String::new());
+        self.transcript_editor.update(cx, |editor, cx| {
+            editor.set_value(String::new(), window, cx);
+        });
+    }
+
+    fn open_model_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.model_host.refresh();
+        let read_entity = cx.entity();
+        let browse_entity = read_entity.clone();
+        let download_entity = read_entity.clone();
+        let cancel_entity = read_entity.clone();
+        let retry_entity = read_entity.clone();
+        open_model_prompt(
+            window,
+            cx,
+            move |cx| read_entity.read(cx).model_prompt_view(),
+            move |_event, window, cx| {
+                browse_entity.update(cx, |view, cx| {
+                    view.handle(AppCommand::BrowseModelFile, window, cx);
+                });
+            },
+            move |_event, window, cx| {
+                download_entity.update(cx, |view, cx| {
+                    view.handle(AppCommand::DownloadModel, window, cx);
+                });
+            },
+            move |_event, window, cx| {
+                cancel_entity.update(cx, |view, cx| {
+                    view.handle(AppCommand::CancelModelDownload, window, cx);
+                });
+            },
+            move |_event, window, cx| {
+                retry_entity.update(cx, |view, cx| {
+                    view.handle(AppCommand::RetryModelDownload, window, cx);
+                });
+            },
+        );
+    }
+
+    fn model_prompt_view(&self) -> ModelPromptView {
+        ModelPromptView {
+            files: self
+                .presentation
+                .model_files()
+                .iter()
+                .map(|file| match &file.variant_id {
+                    Some(id) => SharedString::from(format!("{} ({id})", file.filename)),
+                    None => SharedString::from(file.filename.clone()),
+                })
+                .collect(),
+            download_label: self.download_label.clone(),
+            progress: self.presentation.model_progress(),
+            failure: self.presentation.model_failure(),
+            phase: self.presentation.model_phase(),
+        }
+    }
+
+    fn browse_model_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.shell.pick_model_file() {
+            Ok(Some(path)) => self.model_host.accept_file(path),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, "speech model file was not chosen");
                 let message = error.user_message();
-                self.presentation
-                    .set_notice(Some(if message.starts_with("The speech model") {
-                        NOTICE_MODEL
-                    } else {
-                        message
-                    }));
+                if is_distinct_model_message(message) {
+                    open_model_alert(window, cx, message);
+                } else {
+                    self.presentation.set_notice(Some(message));
+                }
             }
         }
     }
@@ -625,18 +852,29 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.library_selected != snapshot.selected {
+        let selection_changed = self.library_selected != snapshot.selected;
+        if selection_changed {
             self.player.stop();
         }
         self.library_catalog = snapshot.catalog;
         self.library_selected = snapshot.selected;
+        self.presentation.set_selected_recording(snapshot.selected);
         if let Some(notice) = snapshot.notice {
             self.presentation.set_notice(Some(notice));
         }
         let rows = rows_from_catalog(&self.library_catalog);
         let selected = self.library_selected;
+        let overlay = self
+            .presentation
+            .transcript_recording()
+            .zip(self.presentation.transcript_status());
         self.recordings_table.update(cx, |table, cx| {
             table.delegate_mut().set_rows(rows);
+            if let Some((id, status)) = overlay {
+                let _ = table
+                    .delegate_mut()
+                    .set_transcript_display(id, status.display());
+            }
             // Rebuild column layout after row data changes (Kit TableState contract).
             table.refresh(cx);
             if let Some(id) = selected {
@@ -646,7 +884,9 @@ impl MainWindow {
             }
             cx.notify();
         });
-        let _ = window;
+        if selection_changed {
+            self.load_selected_transcript(window, cx);
+        }
     }
 
     fn apply_player(&mut self, snapshot: PlayerSnapshot) {
@@ -656,12 +896,19 @@ impl MainWindow {
         }
     }
 
-    fn select_library_row(&mut self, id: Option<RecordingId>, cx: &mut Context<Self>) {
+    fn select_library_row(
+        &mut self,
+        id: Option<RecordingId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.library_selected != id {
             self.player.stop();
         }
         self.library_selected = id;
+        self.presentation.set_selected_recording(id);
         self.library.select(id);
+        self.load_selected_transcript(window, cx);
         cx.notify();
     }
 
@@ -880,6 +1127,39 @@ fn apply(state: &mut Presentation, command: AppCommand) -> Effect {
     crate::views::actions::apply_command(state, command)
 }
 
+fn default_download_label() -> String {
+    let Ok(manifest) = ModelManifest::load_bundled() else {
+        return download_button_label("base-q5_1", 0);
+    };
+    let Some(entry) = manifest.default_entry() else {
+        return download_button_label("base-q5_1", 0);
+    };
+    download_button_label(entry.id(), entry.bytes())
+}
+
+fn read_transcript_file(
+    path: Result<PathBuf, crate::common::error::AppError>,
+) -> Result<String, &'static str> {
+    use crate::common::error::AppError;
+    let path = path.map_err(|error| error.user_message())?;
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(AppError::message("transcript missing", "not found").user_message())
+        }
+        Err(error) => Err(AppError::io("read transcript", error).user_message()),
+    }
+}
+
+fn is_distinct_model_message(message: &str) -> bool {
+    matches!(
+        message,
+        "The speech model file is missing."
+            | "The speech model file is not supported."
+            | "The downloaded speech model could not be verified."
+    )
+}
+
 fn resolve_model_path(
     models_dir: &std::path::Path,
     selected_id: &str,
@@ -1011,12 +1291,48 @@ impl Render for MainWindow {
                 });
                 let playing = self.player_snapshot.phase == PlayerPhase::Playing;
                 let error = self.library_catalog.error.map(SharedString::from);
+                let selected_id = self.library_selected;
+                let status = selected_id
+                    .map(|id| self.row_transcript_status(id))
+                    .unwrap_or(TranscriptStatus::None);
+                let controls = transcript_controls(status, self.job_active_for(selected_id));
+                let failure = if status == TranscriptStatus::Failed {
+                    let detail = self.presentation.detail_text();
+                    if detail.is_empty() {
+                        None
+                    } else if self.presentation.transcript_recording() == selected_id {
+                        Some(SharedString::from(detail.to_string()))
+                    } else {
+                        None
+                    }
+                } else {
+                    self.transcript_error.map(SharedString::from)
+                };
+                let transcript_view =
+                    if status == TranscriptStatus::Ready && self.transcript_error.is_none() {
+                        Editor::new(&self.transcript_editor)
+                            .readonly(true)
+                            .h(px(220.))
+                            .into_any_element()
+                    } else {
+                        div().into_any_element()
+                    };
+                let job_id = self
+                    .presentation
+                    .active_job()
+                    .filter(|(recording, _)| Some(*recording) == selected_id)
+                    .map(|(_, job)| job)
+                    .unwrap_or_else(|| JobId::from_raw(0));
                 let refresh_entity = entity.clone();
                 let folder_entity = entity.clone();
                 let play_entity = entity.clone();
                 let stop_entity = entity.clone();
                 let rename_entity = entity.clone();
                 let delete_entity = entity.clone();
+                let transcribe_entity = entity.clone();
+                let cancel_entity = entity.clone();
+                let retry_entity = entity.clone();
+                let model_entity = entity.clone();
                 recordings_tab(
                     &self.recordings_table,
                     &self.library_catalog,
@@ -1051,6 +1367,33 @@ impl Render for MainWindow {
                     },
                     move |_event, window, cx| {
                         delete_entity.update(cx, |view, cx| view.delete_selected(window, cx));
+                    },
+                    transcript_view,
+                    controls,
+                    failure,
+                    move |_event, window, cx| {
+                        let Some(id) = selected_id else {
+                            return;
+                        };
+                        transcribe_entity.update(cx, |view, cx| {
+                            view.handle(AppCommand::Transcribe { recording_id: id }, window, cx);
+                        });
+                    },
+                    move |_event, window, cx| {
+                        cancel_entity.update(cx, |view, cx| {
+                            view.handle(AppCommand::CancelTranscription { job_id }, window, cx);
+                        });
+                    },
+                    move |_event, window, cx| {
+                        let Some(id) = selected_id else {
+                            return;
+                        };
+                        retry_entity.update(cx, |view, cx| {
+                            view.handle(AppCommand::Transcribe { recording_id: id }, window, cx);
+                        });
+                    },
+                    move |_event, window, cx| {
+                        model_entity.update(cx, |view, cx| view.open_model_prompt(window, cx));
                     },
                     cx,
                 )

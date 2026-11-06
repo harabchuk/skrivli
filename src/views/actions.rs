@@ -22,17 +22,19 @@ pub(crate) enum AppCommand {
     /// Dispatched from Settings (folder Browse) when that dialog is wired.
     #[allow(dead_code)]
     BrowseRecordings,
-    /// Dispatched from the Recordings pane (M7 UI) and command tests.
-    #[allow(dead_code)]
     Transcribe {
         recording_id: RecordingId,
     },
-    /// Dispatched from the Recordings pane (M7 UI) and command tests.
-    #[allow(dead_code)]
     CancelTranscription {
         job_id: JobId,
     },
     RefreshLibrary,
+    /// Download the default manifest speech model. User-initiated only.
+    DownloadModel,
+    CancelModelDownload,
+    RetryModelDownload,
+    /// File dialog for a local GGML model. The window runs it off `render`.
+    BrowseModelFile,
     Show,
     Hide,
     ToggleVisibility,
@@ -70,6 +72,10 @@ pub(crate) enum Effect {
     CancelTranscription {
         job_id: JobId,
     },
+    DownloadModel,
+    CancelModelDownload,
+    RetryModelDownload,
+    BrowseModelFile,
 }
 
 impl From<HostCommand> for AppCommand {
@@ -110,6 +116,10 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
         AppCommand::Transcribe { recording_id } => Effect::Transcribe { recording_id },
         AppCommand::CancelTranscription { job_id } => Effect::CancelTranscription { job_id },
         AppCommand::RefreshLibrary => Effect::RefreshLibrary,
+        AppCommand::DownloadModel => Effect::DownloadModel,
+        AppCommand::CancelModelDownload => Effect::CancelModelDownload,
+        AppCommand::RetryModelDownload => Effect::RetryModelDownload,
+        AppCommand::BrowseModelFile => Effect::BrowseModelFile,
         AppCommand::Show => {
             state.set_visible(true);
             state.set_pending_show(false);
@@ -160,6 +170,7 @@ pub(crate) enum BridgeMessage {
     Library(LibrarySnapshot),
     Player(PlayerSnapshot),
     Transcription(TranscriptionSnapshot),
+    Model(crate::services::models::ModelSnapshot),
 }
 
 pub(crate) struct BridgeBatch {
@@ -169,6 +180,7 @@ pub(crate) struct BridgeBatch {
     pub(crate) library: Option<LibrarySnapshot>,
     pub(crate) player: Option<PlayerSnapshot>,
     pub(crate) transcription: Option<TranscriptionSnapshot>,
+    pub(crate) model: Option<crate::services::models::ModelSnapshot>,
 }
 
 /// Coalesce pulses and keep only the latest recording, device, library, player,
@@ -181,6 +193,7 @@ pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentatio
     let mut library = None;
     let mut player = None;
     let mut transcription = None;
+    let mut model = None;
     while let Ok(message) = rx.try_recv() {
         match message {
             BridgeMessage::ShellPulse => pulses = pulses.saturating_add(1),
@@ -190,6 +203,7 @@ pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentatio
             BridgeMessage::Library(snapshot) => library = Some(snapshot),
             BridgeMessage::Player(snapshot) => player = Some(snapshot),
             BridgeMessage::Transcription(snapshot) => transcription = Some(snapshot),
+            BridgeMessage::Model(snapshot) => model = Some(snapshot),
         }
     }
     if pulses > 0 {
@@ -202,6 +216,7 @@ pub(crate) fn drain_bridge(rx: &Receiver<BridgeMessage>, state: &mut Presentatio
         library,
         player,
         transcription,
+        model,
     }
 }
 
@@ -362,5 +377,56 @@ mod tests {
         assert!(again.effects.is_empty());
         assert_eq!(state.shell_pulses(), 5);
         assert_eq!(state.status_line(), "Shell ready (5)");
+    }
+
+    #[test]
+    fn model_commands_return_host_effects() {
+        // Arrange
+        let mut state = presentation();
+
+        // Act
+        let download = apply_command(&mut state, AppCommand::DownloadModel);
+        let cancel = apply_command(&mut state, AppCommand::CancelModelDownload);
+        let retry = apply_command(&mut state, AppCommand::RetryModelDownload);
+        let browse = apply_command(&mut state, AppCommand::BrowseModelFile);
+
+        // Assert
+        assert_eq!(download, Effect::DownloadModel);
+        assert_eq!(cancel, Effect::CancelModelDownload);
+        assert_eq!(retry, Effect::RetryModelDownload);
+        assert_eq!(browse, Effect::BrowseModelFile);
+    }
+
+    #[test]
+    fn model_snapshots_coalesce_to_the_latest() {
+        use crate::services::models::{ModelPhase, ModelSnapshot};
+
+        // Arrange
+        let (tx, rx) = mpsc::channel();
+        tx.send(BridgeMessage::Model(ModelSnapshot {
+            phase: ModelPhase::Downloading,
+            progress_percent: 10,
+            failure: None,
+            notice: None,
+            total_bytes: 100,
+            models: Vec::new(),
+        }))
+        .expect("send");
+        tx.send(BridgeMessage::Model(ModelSnapshot {
+            phase: ModelPhase::Downloading,
+            progress_percent: 90,
+            failure: None,
+            notice: None,
+            total_bytes: 100,
+            models: Vec::new(),
+        }))
+        .expect("send");
+        let mut state = presentation();
+
+        // Act
+        let batch = drain_bridge(&rx, &mut state);
+
+        // Assert
+        assert_eq!(batch.model.map(|snap| snap.progress_percent), Some(90));
     }
 }

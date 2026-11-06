@@ -15,6 +15,7 @@ use crate::common::error::AppError;
 use crate::common::logging;
 use crate::common::paths::AppPaths;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
+use crate::infrastructure::ai::fetch::UreqModelSource;
 use crate::infrastructure::ai::whisper::WhisperInference;
 use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
@@ -25,6 +26,7 @@ use crate::infrastructure::storage::settings::Settings;
 use crate::services::lease::EndpointLease;
 use crate::services::level_monitor::{spawn_level_monitor, MonitorTargets};
 use crate::services::library::LibraryHost;
+use crate::services::models::ModelHost;
 use crate::services::playback::PlayerHost;
 use crate::services::ports::{ActivationWatch, HostCommand, InstanceAcquire};
 use crate::services::recording::{
@@ -156,6 +158,7 @@ struct ShellWorkers {
     library: LibraryHost,
     player: PlayerHost,
     transcription: TranscriptionHost,
+    model_host: ModelHost,
     models_dir: std::path::PathBuf,
 }
 
@@ -275,6 +278,18 @@ fn spawn_workers(
     shutdown.on_stop(move || stop_transcription.shutdown());
     shutdown.track(transcription_thread);
 
+    let model_tx = tx.clone();
+    let (model_host, model_thread) = ModelHost::spawn(
+        models_dir.clone(),
+        Box::new(UreqModelSource),
+        Box::new(move |snapshot| {
+            let _ = model_tx.send(BridgeMessage::Model(snapshot));
+        }),
+    );
+    let stop_model = model_host.clone();
+    shutdown.on_stop(move || stop_model.shutdown());
+    shutdown.track(model_thread);
+
     let tray = Arc::clone(&host.tray);
     let tray_worker = shutdown.clone();
     let tray_tx = tx;
@@ -297,6 +312,7 @@ fn spawn_workers(
         library,
         player,
         transcription,
+        model_host,
         models_dir,
     }
 }
@@ -356,6 +372,7 @@ fn open_shell(
             let window_library = workers.library;
             let window_player = workers.player;
             let window_transcription = workers.transcription;
+            let window_model_host = workers.model_host;
             let window_models_dir = workers.models_dir;
             let window_levels = levels;
             let window_gain = gain;
@@ -387,6 +404,7 @@ fn open_shell(
                         window_library,
                         window_player,
                         window_transcription,
+                        window_model_host,
                         window_models_dir,
                         window_levels,
                         window_gain,
