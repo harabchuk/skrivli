@@ -7,7 +7,7 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -16,11 +16,12 @@ use std::time::{Duration, Instant};
 use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_SAMPLE_RATE};
 use crate::domain::ids::RecordingId;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-use crate::infrastructure::audio::mixer::Mixer;
 use crate::infrastructure::files::rescue::rescue_partial;
 use crate::infrastructure::files::wav::{WavWrite, WavWriter};
 use crate::infrastructure::files::writable::ensure_writable;
 use crate::infrastructure::storage::sidecar::{write_sidecar, Sidecar};
+use crate::services::audio_pipeline::{AudioSource, EchoStats, Pipeline, PipelineSetup};
+use crate::services::ports::PipelineFactory;
 
 use super::lease::EndpointLease;
 
@@ -191,6 +192,7 @@ pub(crate) struct RecordingEngine {
     pub(crate) performance: Box<dyn PerformanceCounter>,
     pub(crate) levels: Arc<LevelSnapshot>,
     pub(crate) gain: Arc<GainControl>,
+    pub(crate) pipeline: Box<dyn PipelineFactory>,
     pub(crate) lease: Arc<EndpointLease>,
     /// Destination for bounded rescue copies when the recordings folder fails.
     pub(crate) rescue_dir: PathBuf,
@@ -386,17 +388,13 @@ fn session_body(
             return Err(NOTICE_START);
         }
     };
-    let mic_drift = Arc::new(AtomicI64::new(0));
-    let system_drift = Arc::new(AtomicI64::new(0));
     let mic_result = if request.open_microphone {
-        engine
-            .mic
-            .open(&request.endpoint_id, origin, Arc::clone(&mic_drift))
+        engine.mic.open(&request.endpoint_id, origin)
     } else {
         Err(CaptureError::Unavailable)
     };
     let system_result = match &request.system_endpoint_id {
-        Some(id) => engine.system.open(id, origin, Arc::clone(&system_drift)),
+        Some(id) => engine.system.open(id, origin),
         None => Err(CaptureError::Unavailable),
     };
     let mut degraded = request.degraded_notice;
@@ -445,13 +443,26 @@ fn session_body(
         id: Some(id),
         finalized_path: None,
     });
-    let mut mixer = Mixer::new(
-        want_system,
-        Arc::clone(&engine.gain),
-        Arc::clone(&engine.levels),
-        Arc::clone(&mic_drift),
-        Arc::clone(&system_drift),
-    );
+    let mut pipeline = match engine.pipeline.build(PipelineSetup {
+        system_active: want_system,
+        gain: Arc::clone(&engine.gain),
+        levels: Arc::clone(&engine.levels),
+    }) {
+        Ok(pipeline) => pipeline,
+        Err(error) => {
+            tracing::error!(error = %error, "audio pipeline was not built");
+            if let Some(stream) = mic.as_mut() {
+                stream.close();
+            }
+            if let Some(stream) = system.as_mut() {
+                stream.close();
+            }
+            if let Err(abandon) = wav.abandon() {
+                tracing::error!(error = %abandon, "partial recording was not removed");
+            }
+            return Err(NOTICE_START);
+        }
+    };
     let mut frames = 0_u64;
     let mut problems = Vec::new();
     let mut failed: Option<&'static str> = None;
@@ -499,7 +510,7 @@ fn session_body(
                     id,
                     emit,
                 ) {
-                    mixer.push_mic(block);
+                    pipeline.push_mic(block);
                 }
                 while let Some(block) = pull_alive(
                     &mut system,
@@ -510,8 +521,9 @@ fn session_body(
                     id,
                     emit,
                 ) {
-                    mixer.push_system(block);
+                    pipeline.push_system(block);
                 }
+                pipeline.finish_input();
             }
         } else {
             let mic_before = mic.is_some();
@@ -534,16 +546,22 @@ fn session_body(
                 id,
                 emit,
             );
+            if mic_before && mic.is_none() {
+                pipeline.flush_source(AudioSource::Mic);
+            }
+            if system_before && system.is_none() {
+                pipeline.flush_source(AudioSource::System);
+            }
             let lost_source = (mic_before && mic.is_none()) || (system_before && system.is_none());
             if lost_source {
                 note(&mut problems, "gap");
             }
             if let Some(block) = mic_packet {
-                mixer.push_mic(block);
+                pipeline.push_mic(block);
                 last_progress = Instant::now();
             }
             if let Some(block) = system_packet {
-                mixer.push_system(block);
+                pipeline.push_system(block);
                 last_progress = Instant::now();
             }
             let wake = engine.device_wake.swap(false, Ordering::AcqRel);
@@ -553,8 +571,7 @@ fn session_body(
                 try_reopen_sources(
                     engine,
                     origin,
-                    &mic_drift,
-                    &system_drift,
+                    &mut pipeline,
                     want_mic,
                     want_system,
                     &mut mic,
@@ -585,9 +602,8 @@ fn session_body(
         }
         let now = frame_now(origin, engine.performance.as_ref());
         let mut wrote = false;
-        while let Some(mixed) = mixer.pull(now, stopping || limited) {
-            debug_assert_eq!(mixed.frames as usize * 2, mixed.samples.len());
-            match wav.write_samples(&mixed.samples) {
+        while let Some(mixed) = pipeline.pull(now, stopping || limited) {
+            match wav.write_samples(mixed) {
                 Ok(WavWrite::Wrote { frames: written }) => {
                     frames = frames.saturating_add(written);
                     wrote = true;
@@ -633,7 +649,11 @@ fn session_body(
         id: Some(id),
         finalized_path: None,
     });
-    let diagnostics = mixer.diagnostics();
+    let diagnostics = pipeline.diagnostics();
+    if diagnostics.audio_processing {
+        note(&mut problems, "audio_processing");
+    }
+    log_echo_statistics(diagnostics.echo_stats);
     if diagnostics.gaps > 0 {
         note(&mut problems, "gap");
     }
@@ -759,8 +779,7 @@ fn pull_alive(
 fn try_reopen_sources(
     engine: &mut RecordingEngine,
     origin: SessionOrigin,
-    mic_drift: &Arc<AtomicI64>,
-    system_drift: &Arc<AtomicI64>,
+    pipeline: &mut Pipeline,
     want_mic: bool,
     want_system: bool,
     mic: &mut Option<Box<dyn CaptureStream>>,
@@ -774,9 +793,10 @@ fn try_reopen_sources(
 ) {
     let mut changed = false;
     if want_mic && mic.is_none() {
-        match engine.mic.open("", origin, Arc::clone(mic_drift)) {
+        match engine.mic.open("", origin) {
             Ok(stream) => {
                 *mic = Some(stream);
+                pipeline.source_reopened(AudioSource::Mic);
                 *microphone_id = "default".to_string();
                 note(problems, "source_change");
                 *degraded = if system.is_some() {
@@ -794,9 +814,10 @@ fn try_reopen_sources(
         }
     }
     if want_system && system.is_none() {
-        match engine.system.open("", origin, Arc::clone(system_drift)) {
+        match engine.system.open("", origin) {
             Ok(stream) => {
                 *system = Some(stream);
+                pipeline.source_reopened(AudioSource::System);
                 *system_audio_id = "default".to_string();
                 note(problems, "source_change");
                 *degraded = if mic.is_some() {
@@ -992,9 +1013,34 @@ fn note(problems: &mut Vec<String>, code: &str) {
     problems.push(code.to_string());
 }
 
+/// Logs the capped internal statistic once. Skips the line when the canceller
+/// was not built or never completed a capture, and does not invent a zero for
+/// a missing estimate. The fields are not full-band ERLE. Samples are not logged.
+fn log_echo_statistics(stats: Option<EchoStats>) {
+    let Some(stats) = stats else {
+        return;
+    };
+    match (stats.echo_return_loss_enhancement, stats.delay_ms) {
+        (Some(echo_return_loss_enhancement), Some(delay_ms)) => {
+            tracing::info!(
+                echo_return_loss_enhancement,
+                delay_ms,
+                "echo canceller statistics"
+            );
+        }
+        (Some(echo_return_loss_enhancement), None) => {
+            tracing::info!(echo_return_loss_enhancement, "echo canceller statistics");
+        }
+        (None, Some(delay_ms)) => {
+            tracing::info!(delay_ms, "echo canceller statistics");
+        }
+        (None, None) => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, AtomicI64};
+    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -1004,6 +1050,7 @@ mod tests {
     };
     use crate::domain::audio::AudioBlock;
     use crate::infrastructure::files::writable::ensure_writable;
+    use crate::services::audio_pipeline::PassThroughPipelineFactory;
 
     struct OneShot {
         block: Option<AudioBlock>,
@@ -1015,7 +1062,6 @@ mod tests {
             &mut self,
             _: &str,
             _: crate::domain::audio::SessionOrigin,
-            _: Arc<AtomicI64>,
         ) -> Result<Box<dyn super::CaptureStream>, CaptureError> {
             self.opened
                 .store(true, std::sync::atomic::Ordering::Release);
@@ -1110,9 +1156,8 @@ mod tests {
             space: Box::new(Space(1024)),
             performance: Box::new(FixedCounter),
             levels: std::sync::Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
-            gain: std::sync::Arc::new(crate::infrastructure::audio::levels::GainControl::new(
-                1.0, false,
-            )),
+            gain: std::sync::Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
+            pipeline: Box::new(PassThroughPipelineFactory),
             lease: std::sync::Arc::new(crate::services::lease::EndpointLease::new()),
             rescue_dir: dir.join("rescue"),
             space_check_every: Duration::from_secs(30),
@@ -1150,7 +1195,6 @@ mod tests {
             &mut self,
             _: &str,
             _: crate::domain::audio::SessionOrigin,
-            _: Arc<AtomicI64>,
         ) -> Result<Box<dyn super::CaptureStream>, CaptureError> {
             Ok(Box::new(TailStream {
                 block: self.block.take(),
@@ -1206,9 +1250,8 @@ mod tests {
             space: Box::new(Space(u64::MAX)),
             performance: Box::new(FixedCounter),
             levels: Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
-            gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(
-                1.0, false,
-            )),
+            gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
+            pipeline: Box::new(PassThroughPipelineFactory),
             lease: Arc::new(crate::services::lease::EndpointLease::new()),
             rescue_dir: dir.join("rescue"),
             space_check_every: Duration::from_secs(30),
@@ -1394,5 +1437,76 @@ mod tests {
             StartRequestBuild::Refused { notice } => assert_eq!(notice, NOTICE_MIC),
             StartRequestBuild::Ready(_) => panic!("expected refuse"),
         }
+    }
+
+    fn saved_sidecar(
+        label: &str,
+        pipeline: Box<dyn crate::services::ports::PipelineFactory>,
+    ) -> String {
+        let dir = std::env::temp_dir().join(format!("skrivli-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let stop = AtomicBool::new(true);
+        let request = StartRequest {
+            directory: dir.clone(),
+            endpoint_id: "mic".to_string(),
+            microphone_id: "mic".to_string(),
+            system_endpoint_id: None,
+            system_audio_id: "unavailable".to_string(),
+            open_microphone: true,
+            degraded_notice: None,
+        };
+        let mut engine = super::RecordingEngine {
+            mic: Box::new(TailPort {
+                block: Some(AudioBlock {
+                    samples: vec![0.2; 960],
+                    timeline_frame: Some(0),
+                    discontinuity: false,
+                }),
+            }),
+            system: Box::new(TailPort { block: None }),
+            clock: Box::new(Clock),
+            space: Box::new(Space(u64::MAX)),
+            performance: Box::new(FixedCounter),
+            levels: Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
+            gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
+            pipeline,
+            lease: Arc::new(crate::services::lease::EndpointLease::new()),
+            rescue_dir: dir.join("rescue"),
+            space_check_every: Duration::from_secs(30),
+            write_fault: Arc::new(AtomicBool::new(false)),
+            folder_fault: Arc::new(AtomicBool::new(false)),
+            device_wake: Arc::new(AtomicBool::new(false)),
+            stall_after: Duration::from_secs(8),
+        };
+        let snapshot = run_session(&mut engine, &request, &stop, &|_| {});
+        let path = snapshot.finalized_path.expect("saved recording");
+        let text = std::fs::read_to_string(path.with_extension("json")).expect("sidecar");
+        let _ = std::fs::remove_dir_all(dir);
+        text
+    }
+
+    #[test]
+    fn skipped_sonora_constructor_records_audio_processing_once() {
+        // Arrange
+        use crate::infrastructure::audio::sonora_steps::FailedMicGainFactory;
+
+        // Act
+        let sidecar = saved_sidecar("gain-skip", Box::new(FailedMicGainFactory));
+
+        // Assert
+        assert_eq!(sidecar.matches("audio_processing").count(), 1);
+    }
+
+    #[test]
+    fn system_audio_off_omits_audio_processing() {
+        // Arrange
+        use crate::infrastructure::audio::sonora_steps::SonoraPipelineFactory;
+
+        // Act
+        let sidecar = saved_sidecar("system-off", Box::new(SonoraPipelineFactory));
+
+        // Assert
+        assert!(!sidecar.contains("audio_processing"));
     }
 }

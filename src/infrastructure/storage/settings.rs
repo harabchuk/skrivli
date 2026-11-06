@@ -112,8 +112,6 @@ pub(crate) struct Settings {
     system_audio: StoredEndpoint,
     #[serde(default = "default_mic_gain")]
     mic_gain: f32,
-    #[serde(default)]
-    agc_enabled: bool,
     #[serde(default = "default_selected_model")]
     selected_model: String,
     #[serde(default = "default_auto_transcribe")]
@@ -139,7 +137,6 @@ impl Settings {
             microphone: StoredEndpoint::Default,
             system_audio: StoredEndpoint::Default,
             mic_gain: default_mic_gain(),
-            agc_enabled: false,
             selected_model: default_selected_model(),
             auto_transcribe: default_auto_transcribe(),
         })
@@ -207,14 +204,6 @@ impl Settings {
 
     pub(crate) fn set_mic_gain(&mut self, gain: f32) {
         self.mic_gain = crate::domain::gain::clamp_slider_gain(gain);
-    }
-
-    pub(crate) fn agc_enabled(&self) -> bool {
-        self.agc_enabled
-    }
-
-    pub(crate) fn set_agc_enabled(&mut self, enabled: bool) {
-        self.agc_enabled = enabled;
     }
 
     #[allow(dead_code)] // Settings UI / M6.3 auto-transcribe.
@@ -505,7 +494,6 @@ mod tests {
         assert_eq!(loaded.microphone(), &StoredEndpoint::Default);
         assert_eq!(loaded.system_audio(), &StoredEndpoint::Default);
         assert!((loaded.mic_gain() - 1.0).abs() < 0.001);
-        assert!(!loaded.agc_enabled());
         assert_eq!(loaded.selected_model(), DEFAULT_MODEL_ID);
         assert!(!loaded.auto_transcribe());
         let mut updated = loaded.clone();
@@ -518,6 +506,28 @@ mod tests {
         assert!(!loaded.close_to_tray);
         assert!(loaded.start_hidden);
         assert_eq!(loaded.theme, ThemePreference::Light);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn saved_agc_enabled_is_ignored_and_mic_gain_is_kept() {
+        // Arrange
+        // `Settings` has no `deny_unknown_fields`, so a removed `agc_enabled` loads.
+        let dir = temp_dir("legacy-agc");
+        let path = dir.join("settings.json");
+        let meetings = dir.join("Meetings");
+        let body = format!(
+            r#"{{"schema_version":4,"recordings_directory":"{}","close_to_tray":true,"start_hidden":false,"theme":"system","mic_gain":1.7,"agc_enabled":true}}"#,
+            meetings.display().to_string().replace('\\', "\\\\")
+        );
+        fs::write(&path, body).expect("write");
+
+        // Act
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert!((loaded.mic_gain() - 1.7).abs() < 0.001);
+        assert_eq!(loaded.recordings_directory(), meetings.as_path());
         let _ = fs::remove_dir_all(dir);
     }
 

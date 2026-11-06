@@ -7,9 +7,9 @@
 //! Packet placement:
 //! - A sudden hole of at least 1 ms (the 5 ms case included) becomes silence.
 //! - A sudden overlap is discarded from the front of the late packet.
-//! - Gradual clock error is tracked in [`AlignState::last_error`] and fed to
-//!   each capture stream's Rubato async resampler (D-06). This module does
-//!   not drop or duplicate frames for gradual drift.
+//! - Gradual clock error is tracked in [`AlignState::last_error`]. The pipeline
+//!   reads it on the session thread and nudges that source's resampler (D-06).
+//!   This module does not drop or duplicate frames for gradual drift.
 
 use super::audio::SessionOrigin;
 

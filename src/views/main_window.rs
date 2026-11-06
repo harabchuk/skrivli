@@ -538,13 +538,6 @@ impl MainWindow {
         cx.notify();
     }
 
-    fn set_agc(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.gain_control.set_agc_enabled(enabled);
-        self.settings.set_agc_enabled(enabled);
-        self.hooks.save_settings(self.settings.clone());
-        cx.notify();
-    }
-
     fn sample_meters(&mut self) -> bool {
         let mic = self.mic_meter.update(self.levels.take_mic());
         let system = self.system_meter.update(self.levels.take_system());
@@ -979,14 +972,6 @@ impl Render for MainWindow {
         let entity = cx.entity();
         let browse_entity = entity.clone();
         let toggle_entity = entity.clone();
-        let agc_entity = entity.clone();
-        let gain_value = if self.settings.agc_enabled()
-            && matches!(phase, RecordPhase::Recording | RecordPhase::Starting)
-        {
-            self.gain_control.effective()
-        } else {
-            self.settings.mic_gain()
-        };
         let body = match self.presentation.tab() {
             AppTab::Record => record_tab(
                 &self.microphone,
@@ -996,8 +981,7 @@ impl Render for MainWindow {
                 locked,
                 show_stop,
                 phase == RecordPhase::Stopping,
-                self.settings.agc_enabled(),
-                SharedString::from(format_gain(gain_value)),
+                SharedString::from(format_gain(self.settings.mic_gain())),
                 SharedString::from(elapsed),
                 SharedString::from(phase_label),
                 notice,
@@ -1019,9 +1003,6 @@ impl Render for MainWindow {
                         };
                         view.handle(command, window, cx);
                     });
-                },
-                move |checked, _window, cx| {
-                    agc_entity.update(cx, |view, cx| view.set_agc(*checked, cx));
                 },
                 cx,
             )

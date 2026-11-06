@@ -1,14 +1,15 @@
 //! Rubato asynchronous stereo resampler into 48 kHz interleaved `f32`.
 //!
-//! Each capture stream owns one [`StereoResampler`]. Nominal conversion uses
+//! The pipeline owns one [`StereoResampler`] per source. Nominal conversion uses
 //! `out_rate / in_rate`. Gradual clock drift is corrected by nudging that ratio
-//! from the mixer's timeline error (D-06). Sudden holes and overlaps stay in
-//! the mixer; this type only stretches or compresses the continuous stream.
+//! from the aligner's timeline error (D-06). Sudden holes and overlaps stay in
+//! the aligner; this type only stretches or compresses the continuous stream.
 
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Adjustable, Async, FixedAsync, Indexing, PolynomialDegree, Resampler};
 
 use crate::domain::audio::INTERNAL_CHANNELS;
+use crate::services::ports::DriftResampler;
 
 /// Fixed input chunk: about 10 ms at 48 kHz.
 const CHUNK_FRAMES: usize = 480;
@@ -71,6 +72,22 @@ impl StereoResampler {
     /// Consume leftovers and flush Rubato's delay line (end of stream).
     pub(crate) fn flush(&mut self) -> Vec<f32> {
         self.drain(true)
+    }
+
+    /// Drop buffered input and the filter delay. The ratio nudge is unchanged:
+    /// the next [`set_drift_error`](Self::set_drift_error) applies it again.
+    pub(crate) fn reset(&mut self) {
+        self.pending.clear();
+        self.out_scratch.clear();
+        self.inner = Async::<f32>::new_poly(
+            self.base_ratio,
+            MAX_RATIO_RELATIVE,
+            PolynomialDegree::Cubic,
+            CHUNK_FRAMES,
+            INTERNAL_CHANNELS as usize,
+            FixedAsync::Input,
+        )
+        .expect("positive rates and chunk size are valid for Rubato Async");
     }
 
     fn drain(&mut self, flush: bool) -> Vec<f32> {
@@ -142,6 +159,24 @@ impl StereoResampler {
             return Vec::new();
         };
         self.out_scratch[..produced.saturating_mul(channels)].to_vec()
+    }
+}
+
+impl DriftResampler for StereoResampler {
+    fn set_drift_error(&mut self, frames: i64) {
+        StereoResampler::set_drift_error(self, frames);
+    }
+
+    fn process(&mut self, interleaved: &[f32]) -> Vec<f32> {
+        StereoResampler::process(self, interleaved)
+    }
+
+    fn flush(&mut self) -> Vec<f32> {
+        StereoResampler::flush(self)
+    }
+
+    fn reset(&mut self) {
+        StereoResampler::reset(self);
     }
 }
 
@@ -227,5 +262,25 @@ mod tests {
             slow_out.len(),
             fast_out.len()
         );
+    }
+
+    #[test]
+    fn reset_restores_a_fresh_resampler() {
+        // Arrange
+        let input = tone(CHUNK_FRAMES * 4, 0.2, 0.2);
+        let mut drifted = StereoResampler::new(48_000, 48_000);
+        drifted.set_drift_error(2_000);
+        let _ = drifted.process(&input);
+
+        // Act
+        drifted.reset();
+        let mut after = drifted.process(&input);
+        after.extend(drifted.flush());
+        let mut fresh = StereoResampler::new(48_000, 48_000);
+        let mut expected = fresh.process(&input);
+        expected.extend(fresh.flush());
+
+        // Assert
+        assert_eq!(after.len(), expected.len());
     }
 }

@@ -3,7 +3,9 @@
 //! It opens those devices only while nothing is recording. Before a recording
 //! starts, the recording thread takes the endpoint lease and this monitor
 //! closes its clients. It opens them again after the recording releases the
-//! lease, including after a failed start.
+//! lease, including after a failed start. Idle meters stay outside the
+//! recording pipeline: microphone peak times the slider, system peak times
+//! the fixed system gain.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -94,20 +96,8 @@ fn monitor_loop(
             continue;
         }
         let (mic_id, system_id, generation) = targets.snapshot();
-        let mut mic = mic_port
-            .open(
-                &mic_id,
-                origin,
-                Arc::new(std::sync::atomic::AtomicI64::new(0)),
-            )
-            .ok();
-        let mut system = system_port
-            .open(
-                &system_id,
-                origin,
-                Arc::new(std::sync::atomic::AtomicI64::new(0)),
-            )
-            .ok();
+        let mut mic = mic_port.open(&mic_id, origin).ok();
+        let mut system = system_port.open(&system_id, origin).ok();
         if mic.is_none() && system.is_none() {
             lease.end_monitor();
             thread::sleep(Duration::from_millis(200));
@@ -198,7 +188,6 @@ mod tests {
             &mut self,
             _: &str,
             _: SessionOrigin,
-            _: Arc<std::sync::atomic::AtomicI64>,
         ) -> Result<Box<dyn CaptureStream>, CaptureError> {
             self.opened.fetch_add(1, Ordering::AcqRel);
             self.live.fetch_add(1, Ordering::AcqRel);
@@ -256,7 +245,7 @@ mod tests {
             Box::new(system),
             Arc::clone(&lease),
             Arc::new(LevelSnapshot::new()),
-            Arc::new(GainControl::new(1.0, false)),
+            Arc::new(GainControl::new(1.0)),
             Arc::new(MonitorTargets::new()),
             Arc::clone(&stop),
         );
@@ -309,7 +298,7 @@ mod tests {
             }),
             Arc::clone(&lease),
             Arc::new(LevelSnapshot::new()),
-            Arc::new(GainControl::new(1.0, false)),
+            Arc::new(GainControl::new(1.0)),
             Arc::new(MonitorTargets::new()),
             Arc::clone(&stop),
         );

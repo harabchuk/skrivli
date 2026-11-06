@@ -76,9 +76,9 @@ After a model is installed, the record → save → transcribe → copy path wor
 
 ### What is captured
 
-- **Microphone** — your voice (defaults to the Windows communications microphone).
-- **System audio** — what plays through the selected output device (meetings, browser, apps).
-- Both sources are combined into **one** continuous recording. Quiet periods on either side do not shrink or skip the timeline; silence is preserved so timing stays natural.
+- **Microphone** — your voice (defaults to the Windows communications microphone). The microphone is recorded as mono: both channels of the file carry the same microphone signal. A true stereo microphone loses its stereo image. A signal that is only on one side is about 6 dB quieter.
+- **System audio** — what plays through the selected output device (meetings, browser, apps). When system audio is captured, speaker echo is removed from the microphone automatically. That removal is always on. There is no setting to turn it off.
+- Both sources are combined into **one** continuous recording. Quiet periods on either side do not shrink or skip the timeline; silence is preserved so timing stays natural. The saved file is that mix, with the microphone gain applied.
 
 If only one source is available (for example, no microphone permission or no playback device), recording can continue with that source and the UI makes the limitation clear.
 
@@ -89,11 +89,11 @@ Users can:
 - Choose microphone and system audio devices from lists of available Windows devices.
 - Choose where recordings are saved (folder picker); the choice is remembered. Default is a Skrivli folder under Documents when writable.
 - See live level meters for microphone and system audio (with clear numeric levels, not color alone).
-- Adjust microphone gain, optionally with automatic gain (off by default).
+- Adjust microphone gain with a manual slider.
 - Start and stop recording; see a clear recording indicator and elapsed timer.
 - Read inline warnings for missing devices, permission problems, or storage issues.
 
-Device and save-folder choices are locked while a recording is active. Gain controls can stay adjustable during capture.
+Device and save-folder choices are locked while a recording is active. The gain slider can stay adjustable during capture and is disabled while saving.
 
 ### Starting and stopping
 
@@ -184,7 +184,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 
 - Default save directory
 - Default microphone and system audio devices
-- Microphone gain and automatic gain
+- Microphone gain, set with the manual slider
 - Optional separate source files (mic / system) — available when enabled; off by default
 - Optional lossless FLAC retention alongside or instead of WAV after a successful conversion — optional; WAV is never discarded on a failed conversion
 
@@ -252,7 +252,6 @@ A new user can: unzip → launch → record microphone and system audio → stop
 - Lossless FLAC post-processing
 - Separate mic/system stem files
 - Voice activity detection for transcription
-- Advanced automatic gain behavior
 - Expanded theming and a full installer
 
 ### Out of v1

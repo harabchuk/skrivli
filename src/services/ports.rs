@@ -4,6 +4,7 @@
 //! Callers depend on these traits and on the free functions re-exported from
 //! `infrastructure::platform`.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
@@ -13,6 +14,8 @@ use std::time::Duration;
 
 use crate::common::error::AppError;
 use crate::domain::audio::{AudioBlock, CivilTime, SessionOrigin};
+use crate::domain::audio_frame::AudioFrame;
+use crate::services::audio_pipeline::{Pipeline, PipelineSetup};
 
 /// Debounce used by the production directory watcher.
 pub(crate) const DEFAULT_WATCH_DEBOUNCE: Duration = Duration::from_millis(350);
@@ -38,8 +41,85 @@ pub(crate) trait CapturePort: Send {
         &mut self,
         endpoint_id: &str,
         origin: SessionOrigin,
-        drift_error: Arc<std::sync::atomic::AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError>;
+}
+
+/// Per-source input stage. Output length varies, so this is not an [`AudioProcessor`].
+///
+/// The pipeline calls it on the session thread before alignment. Positive
+/// `frames` means the source is running slow.
+pub(crate) trait DriftResampler: Send {
+    /// Timeline error in frames. Positive means the source is running slow.
+    fn set_drift_error(&mut self, frames: i64);
+    /// Takes any block size and returns whatever output is ready, possibly none.
+    fn process(&mut self, interleaved: &[f32]) -> Vec<f32>;
+    /// Audio still held. Called once at a normal stop, after the queues are empty.
+    fn flush(&mut self) -> Vec<f32>;
+    /// Drops all state. Called when a source is reopened.
+    fn reset(&mut self);
+}
+
+/// Failure from one audio processor. The chain logs `step` and continues.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProcessError {
+    step: &'static str,
+    message: &'static str,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl ProcessError {
+    pub(crate) fn new(step: &'static str, message: &'static str) -> Self {
+        Self { step, message }
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl fmt::Display for ProcessError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.step, self.message)
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl std::error::Error for ProcessError {}
+
+/// Passed to every processor. `echo_reference` is set only for the mic chain.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ProcessContext<'a> {
+    /// Raw system audio for this 10 ms. The echo canceller reads it. `None`
+    /// means this call has no reference, and the canceller leaves the mic as it is.
+    pub(crate) echo_reference: Option<&'a AudioFrame>,
+}
+
+/// A step that may change a 10 ms frame. On `Err`, the frame is left unchanged.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) trait AudioProcessor: Send {
+    fn name(&self) -> &'static str;
+
+    fn process(
+        &mut self,
+        frame: &mut AudioFrame,
+        context: &ProcessContext<'_>,
+    ) -> Result<(), ProcessError>;
+}
+
+/// A read-only view of the frame at one point in a chain.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) trait AudioTap: Send {
+    fn observe(&mut self, frame: &AudioFrame);
+}
+
+/// Combines the mic and system frames. It is not a chain step.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) trait AudioMixer: Send {
+    fn mix(&mut self, mic: &AudioFrame, system: &AudioFrame, output: &mut AudioFrame);
+}
+
+/// Builds the session [`Pipeline`]. Injected into `RecordingEngine` like [`CapturePort`].
+pub(crate) trait PipelineFactory: Send {
+    fn build(&self, setup: PipelineSetup) -> Result<Pipeline, ProcessError>;
 }
 
 /// High-resolution ticks used to build the session origin and to decide mix lateness.

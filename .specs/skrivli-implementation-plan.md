@@ -179,13 +179,13 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 ### M3.1 — Loopback worker and per-source transport
 
 - [x] `FlexSystemCapture`: flexaudio `SourceKind::SystemLoopback` with classic silent-render keepalive; separate worker from the mic stream.
-- [x] Idle silence is delivered as keepalive packets; remaining gaps still filled by the mixer from the session clock.
+- [x] Idle silence is delivered as keepalive packets; remaining gaps still filled from the session clock. M3.4 moved that fill into the aligner.
 - [x] Select a proven bounded SPSC queue for each source. Define timestamped packet/block representation, maximum queue latency and overflow/drop/gap accounting. Do not invent a custom lock-free queue unless necessary.
 
 ### M3.2 — Deterministic mixer and drift correction
 
 - [x] `domain/chunk_plan.rs`: pure mapping from QPC ticks to 48 kHz sample indices, with integer/rational conversion that avoids cumulative floating-point drift. Define session origin `t0` and treatment of latency, missing packets, overlaps and discontinuities.
-- [x] `infrastructure/audio/mixer.rs`: emit 480-frame (10 ms) stereo blocks; wait for input until data available or block lags real time by about 150 ms, then fill absent source with zeros.
+- [x] `infrastructure/audio/mixer.rs`: emit 480-frame (10 ms) stereo blocks; wait for input until data available or block lags real time by about 150 ms, then fill absent source with zeros. M3.4 deleted this file. The aligner emits the blocks.
 - [x] Implement source-specific gains (mic `1.0`, system `0.8` initially), stable summation and tested soft limiter. Capture gaps and overruns in diagnostics and sidecar metadata.
 - [x] Handle clocks that drift apart (test ±100 ppm); gradual drift uses Rubato adaptive resample ratio on each capture stream (D-06); sudden holes/overlaps stay sparse silence/skip.
 - [x] Add synthetic tests: different start times, silent output for 30 s, 5 ms gaps, overlapping/late packets, discontinuity, queue overrun, drift, clipping, missing source, and final tail drain.
@@ -194,10 +194,24 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 - [x] `services/level_monitor.rs`: monitors selected devices while idle, stopping and fully releasing handles before a recording starts; resumes after save. Share underlying device-opening policy without parallel capture sessions fighting over endpoints.
 - [x] Expose atomic peak snapshots for microphone, loopback and mixed output plus gain; GPUI polls near 30 Hz and renders in custom `ui/components/level_meter.rs` using GPUI Kit tokens.
-- [x] Wire live mic gain slider, automatic gain toggle and system level display; ensure gain changes are applied to worker-owned processing state safely. Implement AGC only if enabled, initially off; target values per design document with smooth updates.
+- [x] Wire live mic gain slider, automatic gain toggle and system level display; ensure gain changes are applied to worker-owned processing state safely. Implement AGC only if enabled, initially off; target values per design document with smooth updates. **Superseded by M3.4:** the Auto checkbox was removed and `Agc` is gone. This box stays checked as the historical M3.3 completion. Microphone gain is the manual slider.
 - [x] UI readouts use dBFS (−60 to 0), peak hold and clear text indication not color alone.
 
-**Validate:** 10-minute manual two-source recording with intermittent silence, headphone mic and shared sync cue; document sync offset/drift, meter overhead, no timeline contraction during system silence.
+### M3.4 — Audio pipeline (echo removal, manual gain, session resampler)
+
+Landed after M3.3. `Pipeline` and `Aligner` replace the all-in-one mixer. The M3 acceptance box above stays checked. The hardware gate for this package stays open.
+
+- [x] `mixer.rs` is deleted. The production factory is `SonoraPipelineFactory` in `infrastructure/audio/sonora_steps.rs`. Production code imports `sonora` only in that file (`sonora = "=0.2.0"`). `sonora_spike.rs` is `#[cfg(test)]` measurement code, also imports `sonora`, and stays.
+- [x] When system audio is on, the microphone chain is echo cancellation, then sonora microphone gain, then the microphone peak tap. When system audio is off, there is no canceller. The system chain is fixed gain 0.8, then the system peak tap. The mix chain is the soft limiter, then the mixed peak tap. The microphone is downmixed to mono before that chain and copied to both WAV channels.
+- [x] Drift resampling is 48 kHz to 48 kHz on the session thread. The aligner exposes the error as a value. `CapturePort::open` has no drift argument. Capture workers have no Rubato. flexaudio converts the device rate.
+- [x] Automatic gain is removed. An old settings file that still contains `agc_enabled` loads, and `mic_gain` applies. The settings schema stays 4.
+- [x] Sidecar code `audio_processing` is written once at session end. The sidecar schema stays 3. When the canceller ran, session end logs `echo_return_loss_enhancement` and `delay_ms`. That enhancement is the capped internal statistic, not full-band ERLE.
+- [x] `StatsTap` and `ChannelTap` exist and are not in the production factory. `LinearGain` remains on `PassThroughPipelineFactory` for the harness. It is not the production microphone step.
+- [x] Tests cover these behaviors, without hardware: steps run in order and a tap sees the audio at its position; a failed or panicking step leaves the recording running; a short tail is not lengthened by padding; a mono microphone is copied to both channels; the echo reference is system audio before system gain; delayed system audio is reduced and near speech survives; speech with a silent reference is nearly unchanged; the slider level follows, including a change during the stream, and zero gain is silent; an old `agc_enabled` file loads and keeps `mic_gain`; `audio_processing` is noted once when a sonora constructor is skipped, and omitted when system audio is off; the aligner's drift error reaches the resampler; reopening resets that source's resampler only; a discontinuity survives an empty resampler output; a resampler panic passes that source through and the other source still resamples; the closed drift loop settles under a steady timeline error; timeline tests still cover a start offset, 30 s of silent system audio, gaps, overlaps, late blocks, the tail, overrun, and 100 ppm.
+- [x] Sonora's BSD-3-Clause text is in `licenses/sonora-BSD-3-Clause.txt`, copied from the crates.io registry file `sonora-0.2.0/LICENSE`. M9 still copies that file into the ZIP.
+- [ ] Hardware gate stays open. Not run: laptop speakers, wired headphones, Bluetooth headphones, a Bluetooth speaker, a selected output that is not the device actually playing, unplug and reopen during a session, and a one-hour session. No listening comparison, no laptop ERLE, and no ppm number. S9's 30-minute drift measurement was not run. The drift algorithm was not changed. If a later 30-minute run shows the loop cannot see real clock drift, that fix is a separate change. It is not part of this refactor.
+
+**Validate:** 10-minute manual two-source recording with intermittent silence, headphone mic and shared sync cue; document sync offset/drift, meter overhead, no timeline contraction during system silence. The section 11 checks in `.specs/skrivli-audio-pipeline-plan.md` are the open hardware gate for M3.4 and were not run. Phase 8 `cargo test`: 220 passed, 0 failed, 3 ignored (spike S6, S8, and the 10-second S9 probe).
 
 ### M3 acceptance
 
@@ -331,8 +345,8 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M8.1 — Settings and live configuration
 
-- [ ] Extend `views/settings.rs`. The dialog already has the close-to-tray checkbox and an About button, opened from the tab-bar gear. Add Kit controls for recordings directory (read-only text plus Browse), default microphone and system endpoints (`StoredEndpoint`), mic gain and AGC, optional stems, WAV and FLAC retention, transcription model, language, CPU thread count, optional VAD, auto-transcribe, and start-hidden. Theme stays on the tab-bar `ThemePreference` cycle so the dialog cannot show a second, disagreeing value. Browse uses `DesktopShell`. Saves go through `ShellHooks::save_settings` into `app/settings_writer`, which already writes a temp sibling, `sync_all`, and `platform::replace_file`. `render` does not write the file.
-- [ ] Validate in the `Settings` constructor: non-empty directory, gain inside the range the recording service already applies, and a thread count the machine can honor. Apply gain, AGC, theme, and close-to-tray on the running session. Hold directory, endpoints, model, language, threads, and VAD until the next recording or the next job. While `Presentation::inputs_locked()` is true, disable directory and device controls the same way the Record tab does. Hotkey and autostart apply immediately and report a failure inline in the dialog.
+- [ ] Extend `views/settings.rs`. The dialog already has the close-to-tray checkbox and an About button, opened from the tab-bar gear. Add Kit controls for recordings directory (read-only text plus Browse), default microphone and system endpoints (`StoredEndpoint`), microphone gain (the manual slider), optional stems, WAV and FLAC retention, transcription model, language, CPU thread count, optional VAD, auto-transcribe, and start-hidden. Theme stays on the tab-bar `ThemePreference` cycle so the dialog cannot show a second, disagreeing value. Browse uses `DesktopShell`. Saves go through `ShellHooks::save_settings` into `app/settings_writer`, which already writes a temp sibling, `sync_all`, and `platform::replace_file`. `render` does not write the file.
+- [ ] Validate in the `Settings` constructor: non-empty directory, gain inside the range the recording service already applies, and a thread count the machine can honor. Apply gain, theme, and close-to-tray on the running session. Hold directory, endpoints, model, language, threads, and VAD until the next recording or the next job. While `Presentation::inputs_locked()` is true, disable directory and device controls the same way the Record tab does. Hotkey and autostart apply immediately and report a failure inline in the dialog.
 - [ ] Bump the `Settings` schema in `infrastructure/storage/settings.rs`. New fields deserialize with `#[serde(default)]` so an older `settings.json` still loads. A `schema_version` newer than this build still falls back to defaults. Tests cover a round-trip, a missing device id and a missing model id falling back to the default with a non-blocking notice, and a recording that keeps the endpoints captured in its `StartRequest` after a settings edit.
 
 ### M8.2 — OS commands and accessibility
@@ -368,7 +382,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M9.2 — Portable distribution
 
-- [ ] `build.rs` already embeds the icon and `VERSIONINFO` only, because gpui-pre links its own manifest (D-01). Ship the release executable, the runtime DLLs the loader actually needs, GPUI Kit assets the binary expects, license and notice files for the app and for whisper.cpp, `README`, and a privacy note that matches `.specs/skrivli-product.md`. Leave `resources/skrivli.manifest` in the repo as the DPI contract; it is not a second linked manifest.
+- [ ] `build.rs` already embeds the icon and `VERSIONINFO` only, because gpui-pre links its own manifest (D-01). Ship the release executable, the runtime DLLs the loader actually needs, GPUI Kit assets the binary expects, license and notice files for the app and for whisper.cpp, `licenses/sonora-BSD-3-Clause.txt`, `README`, and a privacy note that matches `.specs/skrivli-product.md`. Leave `resources/skrivli.manifest` in the repo as the DPI contract; it is not a second linked manifest.
 - [ ] On a clean Windows VM, inspect the release binary with a loader-dependency tool. Every native dependency is either in the ZIP or a Windows component the supported OS already has. A machine without a Visual Studio install still starts the app. Record the dependency list next to the ZIP.
 - [ ] Extract the ZIP to a path that contains a space and a non-ASCII character. Launch, confirm settings land in the roaming `AppPaths::settings_file()`, models under `AppPaths::models_dir()`, and logs under `AppPaths::logs_dir()`. Note SmartScreen and Defender behavior. Sign the binary when the distribution channel needs it, and record the choice in `.specs/decisions.md`.
 - [ ] The ZIP contains no `ggml-*.bin`. First launch does not download one. The model prompt states the file size and that the download needs a network. After that file is installed, transcription of an existing recording completes with the network disconnected.
@@ -454,7 +468,7 @@ Done when: observable milestone acceptance condition
 ## Scope discipline
 
 **Mandatory v1:** M0–M7 core goals, M8 essential settings/hotkey/accessibility, M9 distribution.  
-**Optional/defer if needed:** FLAC, separate recording stems, VAD, advanced AGC, expanded theming and installers.  
+**Optional/defer if needed:** FLAC, separate recording stems, VAD, expanded theming and installers.  
 **Outside v1:** live transcription, cloud sync, diarization, summaries, GPU transcription and cross-platform support.
 
 This plan is derived from the supplied Skrivli app design. It intentionally converts its decisions into implementation tasks and acceptance evidence without claiming untested Rust/GPUI Kit/Windows APIs already work.

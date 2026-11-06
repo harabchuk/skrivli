@@ -1,7 +1,7 @@
 //! In-process recording harness with fake capture ports.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -11,6 +11,7 @@ use crate::common::error::AppError;
 use crate::domain::audio::{AudioBlock, CivilTime, SessionOrigin};
 use crate::domain::recording::RecordPhase;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
+use crate::services::audio_pipeline::PassThroughPipelineFactory;
 use crate::services::lease::EndpointLease;
 use crate::services::ports::{
     CaptureError, CapturePort, CaptureStream, FreeSpace, PerformanceCounter, RecordingClock,
@@ -54,7 +55,6 @@ impl CapturePort for SharedCapture {
         &mut self,
         _endpoint_id: &str,
         _origin: SessionOrigin,
-        _drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         let mut state = lock_fake(&self.inner);
         if let Some(error) = state.error.take() {
@@ -259,7 +259,8 @@ impl RecordingHarness {
                 }),
                 performance: Box::new(FixedCounter),
                 levels: Arc::new(LevelSnapshot::new()),
-                gain: Arc::new(GainControl::new(1.0, false)),
+                gain: Arc::new(GainControl::new(1.0)),
+                pipeline: Box::new(PassThroughPipelineFactory),
                 lease: Arc::new(EndpointLease::new()),
                 rescue_dir: rescue_dir.clone(),
                 space_check_every: Duration::ZERO,

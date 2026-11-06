@@ -5,9 +5,12 @@
 //! the peak back to zero about 30 times a second. Gain uses the same bit
 //! pattern so the slider does not take a lock in the mix loop.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
-use crate::domain::gain::{clamp_slider_gain, MIC_GAIN_DEFAULT};
+use crate::domain::audio_frame::{AudioFrame, ChannelLayout};
+use crate::domain::gain::clamp_slider_gain;
+use crate::services::ports::AudioTap;
 
 fn publish_peak(slot: &AtomicU32, peak: f32) {
     if peak <= 0.0 || !peak.is_finite() {
@@ -67,17 +70,12 @@ impl LevelSnapshot {
 
 pub(crate) struct GainControl {
     slider: AtomicU32,
-    agc: AtomicBool,
-    effective: AtomicU32,
 }
 
 impl GainControl {
-    pub(crate) fn new(slider: f32, agc: bool) -> Self {
-        let bits = clamp_slider_gain(slider).to_bits();
+    pub(crate) fn new(slider: f32) -> Self {
         Self {
-            slider: AtomicU32::new(bits),
-            agc: AtomicBool::new(agc),
-            effective: AtomicU32::new(bits),
+            slider: AtomicU32::new(clamp_slider_gain(slider).to_bits()),
         }
     }
 
@@ -89,37 +87,62 @@ impl GainControl {
         self.slider
             .store(clamp_slider_gain(gain).to_bits(), Ordering::Release);
     }
+}
 
-    pub(crate) fn agc_enabled(&self) -> bool {
-        self.agc.load(Ordering::Acquire)
+/// Which recording meter a [`PeakTap`] publishes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MeterSlot {
+    Mic,
+    System,
+    Mixed,
+}
+
+/// Publishes the peak of the frame's valid samples. Padding past `valid_frames`
+/// is ignored, and samples are never logged.
+pub(crate) struct PeakTap {
+    levels: Arc<LevelSnapshot>,
+    slot: MeterSlot,
+}
+
+impl PeakTap {
+    pub(crate) fn new(levels: Arc<LevelSnapshot>, slot: MeterSlot) -> Self {
+        Self { levels, slot }
     }
+}
 
-    pub(crate) fn set_agc_enabled(&self, enabled: bool) {
-        self.agc.store(enabled, Ordering::Release);
-    }
-
-    pub(crate) fn set_effective(&self, gain: f32) {
-        let stored = if gain.is_finite() {
-            gain.clamp(0.0, 4.0)
-        } else {
-            MIC_GAIN_DEFAULT
-        };
-        self.effective.store(stored.to_bits(), Ordering::Release);
-    }
-
-    pub(crate) fn effective(&self) -> f32 {
-        let value = f32::from_bits(self.effective.load(Ordering::Acquire));
-        if value.is_finite() {
-            value.clamp(0.0, 4.0)
-        } else {
-            MIC_GAIN_DEFAULT
+impl AudioTap for PeakTap {
+    fn observe(&mut self, frame: &AudioFrame) {
+        let peak = peak_of_valid(frame);
+        match self.slot {
+            MeterSlot::Mic => self.levels.publish(peak, 0.0, 0.0),
+            MeterSlot::System => self.levels.publish(0.0, peak, 0.0),
+            MeterSlot::Mixed => self.levels.publish(0.0, 0.0, peak),
         }
     }
 }
 
+fn peak_of_valid(frame: &AudioFrame) -> f32 {
+    let count = match frame.layout() {
+        ChannelLayout::Mono => frame.valid_frames(),
+        ChannelLayout::Stereo => frame.valid_frames().saturating_mul(2),
+    };
+    let samples = frame.samples();
+    let end = count.min(samples.len());
+    let mut loudest = 0.0_f32;
+    for sample in &samples[..end] {
+        if sample.is_finite() {
+            loudest = loudest.max(sample.abs());
+        }
+    }
+    loudest
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GainControl, LevelSnapshot};
+    use super::{peak_of_valid, GainControl, LevelSnapshot, MeterSlot, PeakTap};
+    use crate::domain::audio_frame::{AudioFrame, ChannelLayout, FRAME_LEN};
+    use crate::services::ports::AudioTap;
+    use std::sync::Arc;
 
     #[test]
     fn peaks_keep_the_louder_sample_until_the_ui_takes_them() {
@@ -144,18 +167,36 @@ mod tests {
     #[test]
     fn slider_gain_is_visible_without_a_lock() {
         // Arrange
-        let gain = GainControl::new(1.0, false);
+        let gain = GainControl::new(1.0);
 
         // Act
         gain.set_slider(1.5);
-        gain.set_agc_enabled(true);
-        gain.set_effective(2.0);
 
         // Assert
         assert!((gain.slider() - 1.5).abs() < 0.0001);
-        assert!(gain.agc_enabled());
-        assert!((gain.effective() - 2.0).abs() < 0.0001);
         gain.set_slider(f32::NAN);
         assert!((gain.slider() - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn peak_tap_ignores_samples_past_the_valid_length() {
+        // Arrange
+        let levels = Arc::new(LevelSnapshot::new());
+        let mut tap = PeakTap::new(Arc::clone(&levels), MeterSlot::Mic);
+        let mut samples = vec![0.0; FRAME_LEN];
+        samples[0] = 0.25;
+        samples[1] = 0.9;
+        let frame = AudioFrame::new(ChannelLayout::Mono, samples, 1, 0).expect("frame");
+
+        // Act
+        let measured = peak_of_valid(&frame);
+        tap.observe(&frame);
+        let published = levels.take_mic();
+
+        // Assert
+        assert!((measured - 0.25).abs() < 0.0001);
+        assert!((published - 0.25).abs() < 0.0001);
+        assert_eq!(levels.take_system(), 0.0);
+        assert_eq!(levels.take_mixed(), 0.0);
     }
 }

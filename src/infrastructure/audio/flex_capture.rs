@@ -1,10 +1,10 @@
 //! flexaudio CapturePort adapters for microphone and system loopback.
 //!
 //! Each `open` starts a worker that owns one flexaudio [`Stream`]. Chunks are
-//! already 48 kHz stereo `f32`. This module maps them onto the session timeline,
-//! applies the shared drift resampler, and offers blocks on the bounded queue.
+//! already 48 kHz stereo `f32`. This module maps them onto the session timeline
+//! and offers blocks on the bounded queue. Drift resampling runs in the pipeline.
 
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -19,7 +19,6 @@ use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_CHANNELS, INTERNA
 use crate::services::ports::{CaptureError, CapturePort, CaptureStream, PerformanceCounter};
 
 use super::queue::CAPTURE_QUEUE_CAPACITY;
-use super::resampler::StereoResampler;
 
 /// Microphone capture through flexaudio (`SourceKind::Mic`).
 pub(crate) struct FlexMicCapture {
@@ -49,13 +48,11 @@ impl CapturePort for FlexMicCapture {
         &mut self,
         endpoint_id: &str,
         origin: SessionOrigin,
-        drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         open_flex_port(
             SourceKind::Mic,
             endpoint_id,
             origin,
-            drift_error,
             Arc::clone(&self.clock),
         )
     }
@@ -66,13 +63,11 @@ impl CapturePort for FlexSystemCapture {
         &mut self,
         endpoint_id: &str,
         origin: SessionOrigin,
-        drift_error: Arc<AtomicI64>,
     ) -> Result<Box<dyn CaptureStream>, CaptureError> {
         open_flex_port(
             SourceKind::SystemLoopback,
             endpoint_id,
             origin,
-            drift_error,
             Arc::clone(&self.clock),
         )
     }
@@ -82,7 +77,6 @@ fn open_flex_port(
     kind: SourceKind,
     endpoint_id: &str,
     origin: SessionOrigin,
-    drift_error: Arc<AtomicI64>,
     clock: Arc<dyn PerformanceCounter>,
 ) -> Result<Box<dyn CaptureStream>, CaptureError> {
     let device_id = if endpoint_id.is_empty() {
@@ -101,7 +95,6 @@ fn open_flex_port(
             kind,
             device_id,
             origin,
-            drift_error,
             packet_tx,
             thread_stop,
             thread_overruns,
@@ -133,7 +126,6 @@ fn run_flex_worker(
     kind: SourceKind,
     device_id: Option<String>,
     origin: SessionOrigin,
-    drift_error: Arc<AtomicI64>,
     tx: SyncSender<Result<AudioBlock, CaptureError>>,
     stop: Arc<AtomicBool>,
     overruns: Arc<AtomicU64>,
@@ -166,7 +158,7 @@ fn run_flex_worker(
         return;
     }
 
-    let mut forwarder = BlockForwarder::new(origin, drift_error, tx, overruns, clock);
+    let mut forwarder = BlockForwarder::new(origin, tx, overruns, clock);
     let mut fatal = None;
     while !stop.load(Ordering::Acquire) {
         if let Some(error) = drain_events(&mut stream) {
@@ -186,11 +178,9 @@ fn run_flex_worker(
 /// Turns flexaudio chunks into timeline blocks on the bounded queue.
 struct BlockForwarder {
     origin: SessionOrigin,
-    drift_error: Arc<AtomicI64>,
     tx: SyncSender<Result<AudioBlock, CaptureError>>,
     overruns: Arc<AtomicU64>,
     clock: Arc<dyn PerformanceCounter>,
-    resampler: StereoResampler,
     session_base: Option<u64>,
     pending_gap: bool,
 }
@@ -198,18 +188,15 @@ struct BlockForwarder {
 impl BlockForwarder {
     fn new(
         origin: SessionOrigin,
-        drift_error: Arc<AtomicI64>,
         tx: SyncSender<Result<AudioBlock, CaptureError>>,
         overruns: Arc<AtomicU64>,
         clock: Arc<dyn PerformanceCounter>,
     ) -> Self {
         Self {
             origin,
-            drift_error,
             tx,
             overruns,
             clock,
-            resampler: StereoResampler::new(INTERNAL_SAMPLE_RATE, INTERNAL_SAMPLE_RATE),
             session_base: None,
             pending_gap: false,
         }
@@ -228,14 +215,14 @@ impl BlockForwarder {
             chunk.frame_index,
         );
         let discontinuity = chunk_discontinuity(chunk) || self.pending_gap;
-        self.resampler
-            .set_drift_error(self.drift_error.load(Ordering::Relaxed));
-        let samples = self.resampler.process(&chunk.data);
-        if samples.is_empty() {
+        if chunk.data.is_empty() {
+            if discontinuity {
+                self.pending_gap = true;
+            }
             return;
         }
         let block = AudioBlock {
-            samples,
+            samples: chunk.data.clone(),
             timeline_frame: timeline,
             discontinuity,
         };
@@ -248,8 +235,10 @@ impl BlockForwarder {
         }
     }
 
-    /// Queues everything left after the device stopped. A fatal error goes
-    /// last because the session stops reading a stream once it sees one.
+    /// Queues chunks still buffered after the device stopped. The pipeline
+    /// flushes the resampler later, once the session has drained this queue.
+    /// A fatal error goes last because the session stops reading a stream
+    /// once it sees one.
     fn finish_after_stop(
         mut self,
         mut poll_buffered: impl FnMut() -> Option<AudioChunk>,
@@ -257,17 +246,6 @@ impl BlockForwarder {
     ) {
         while let Some(chunk) = poll_buffered() {
             self.forward(&chunk);
-        }
-        let flushed = self.resampler.flush();
-        if !flushed.is_empty() {
-            let _ = offer_result(
-                &self.tx,
-                Ok(AudioBlock {
-                    samples: flushed,
-                    timeline_frame: None,
-                    discontinuity: false,
-                }),
-            );
         }
         if let Some(error) = fatal {
             let _ = offer_result(&self.tx, Err(error));
@@ -379,30 +357,14 @@ impl Drop for FlexCaptureStream {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicI64, AtomicU64};
+    use std::sync::atomic::AtomicU64;
     use std::sync::mpsc::{sync_channel, Receiver};
     use std::sync::Arc;
 
     use super::{chunk_discontinuity, map_flex_error, map_timeline, BlockForwarder};
-    use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_SAMPLE_RATE};
-    use crate::infrastructure::audio::resampler::StereoResampler;
+    use crate::domain::audio::{AudioBlock, SessionOrigin};
     use crate::services::ports::{CaptureError, PerformanceCounter};
     use flexaudio::{AudioChunk, ChunkFlags, Error, ErrorKind, Permission};
-
-    fn block_from_chunk(
-        chunk: &AudioChunk,
-        timeline_frame: Option<u64>,
-        pending_gap: bool,
-        resampler: &mut StereoResampler,
-    ) -> AudioBlock {
-        let discontinuity = chunk_discontinuity(chunk) || pending_gap;
-        let samples = resampler.process(&chunk.data);
-        AudioBlock {
-            samples,
-            timeline_frame,
-            discontinuity,
-        }
-    }
 
     struct FixedClock {
         ticks: u64,
@@ -463,17 +425,23 @@ mod tests {
     }
 
     #[test]
-    fn block_from_chunk_marks_pending_gap() {
+    fn a_dropped_offer_marks_the_next_block_discontinuous() {
         // Arrange
-        let source = chunk(0, ChunkFlags::empty(), 0);
-        let mut resampler = StereoResampler::new(INTERNAL_SAMPLE_RATE, INTERNAL_SAMPLE_RATE);
+        let (mut forwarder, rx) = forwarder(1);
+        let first = audio_chunk(0, 2);
+        let dropped = audio_chunk(2, 2);
+        let next = audio_chunk(4, 2);
 
         // Act
-        let block = block_from_chunk(&source, Some(100), true, &mut resampler);
+        forwarder.forward(&first);
+        forwarder.forward(&dropped);
+        let _ = rx.try_recv().expect("queued");
+        forwarder.forward(&next);
+        let block = rx.try_recv().expect("next").expect("audio");
 
         // Assert
         assert!(block.discontinuity);
-        assert_eq!(block.timeline_frame, Some(100));
+        assert_eq!(block.timeline_frame, Some(4));
     }
 
     fn audio_chunk(frame_index: u64, frames: usize) -> AudioChunk {
@@ -494,7 +462,6 @@ mod tests {
         let (tx, rx) = sync_channel(capacity);
         let forwarder = BlockForwarder::new(
             SessionOrigin::new(0, 48_000, 48_000).expect("origin"),
-            Arc::new(AtomicI64::new(0)),
             tx,
             Arc::new(AtomicU64::new(0)),
             Arc::new(FixedClock {

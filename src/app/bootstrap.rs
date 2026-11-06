@@ -18,6 +18,7 @@ use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
 use crate::infrastructure::ai::whisper::WhisperInference;
 use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
+use crate::infrastructure::audio::sonora_steps::SonoraPipelineFactory;
 use crate::infrastructure::files::wav::recover_partials;
 use crate::infrastructure::platform::{self, PlatformHost};
 use crate::infrastructure::storage::settings::Settings;
@@ -105,10 +106,7 @@ pub(crate) fn run() -> i32 {
     let recording_flag = Arc::new(AtomicBool::new(false));
     let recovery_notice = recovery_notice(settings.recordings_directory());
     let levels = Arc::new(LevelSnapshot::new());
-    let gain = Arc::new(GainControl::new(
-        settings.mic_gain(),
-        settings.agc_enabled(),
-    ));
+    let gain = Arc::new(GainControl::new(settings.mic_gain()));
     let lease = Arc::new(EndpointLease::new());
     let targets = Arc::new(MonitorTargets::new());
     let workers = spawn_workers(
@@ -186,6 +184,7 @@ fn spawn_workers(
             performance: Box::new(CloneCounter(Arc::clone(&performance))),
             levels: Arc::clone(&levels),
             gain: Arc::clone(&gain),
+            pipeline: Box::new(SonoraPipelineFactory),
             lease: Arc::clone(&lease),
             rescue_dir,
             space_check_every: crate::services::recording::SPACE_CHECK_INTERVAL,

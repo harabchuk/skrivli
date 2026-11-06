@@ -1,6 +1,6 @@
 # Skrivli audio pipeline refactor plan
 
-Status: **proposed, not started**. Nothing in this document is implemented yet. When work starts, the phase checklists in [section 10](#10-migration-phases) track progress.
+Status: **Phases S (S1–S8) and 1–7 are done. Phase 8 updated the specs and added the sonora license notice. S9's 30-minute hardware drift measurement was not run, and the [section 11](#hardware-checks) hardware checks were not run.** Section 2 describes the pipeline this refactor replaced. `mixer.rs` is deleted. The phase checklists in [section 10](#10-migration-phases) track progress.
 
 **Goal in one sentence:** replace the all-in-one `Mixer` and the resampler hidden in the capture workers with one pipeline of swappable steps, use [sonora](https://github.com/dignifiedquire/sonora) for echo cancellation and microphone gain, and make audio readable at any processing point for meters and statistics.
 
@@ -392,13 +392,13 @@ The setter docs say it applies at the next call. Live slider changes during reco
 
 ### Not verified yet
 
-The docs do not settle these, and I did not read `audio_processing_impl.rs`. **Spike S-phase answers them before any production code depends on them.**
+Phase S measured these. The numbers are in [D-13](decisions.md). S9 (30 minutes of real clock drift) is not measured. Production code still must not assume anything beyond D-13.
 
-- Whether `set_capture_post_gain` works when `capture_level_adjustment` was configured at build, and whether it is a no-op otherwise.
-- Whether gain of `0.0` gives true silence, and whether gain above `1.0` hard-clips at full scale. WebRTC-style scaling clamps its output; today our soft limiter handles hot samples instead.
-- How a wrong frame length behaves. It is not an `Error` variant, so it may panic.
-- Default `Pipeline` values and stereo render with mono capture.
-- Delay added by each instance.
+- `set_capture_post_gain` applies on the next capture frame only when `capture_level_adjustment` was configured. Otherwise it is a no-op.
+- Gain `0.0` is silence after the one-frame ramp. Gain above full scale hard-clips at ±1. `soft_limit` does not.
+- A 479-frame buffer panics. It is not an `Error`. Padding to 480 is mandatory.
+- Default `Pipeline` is 32 kHz max, stereo render allowed, capture downmix averages. Stereo render with mono capture is accepted. The AEC instance therefore runs at 32 kHz.
+- Gain adds no delay. The AEC instance adds about 9 ms at the default 32 kHz cap.
 
 ---
 
@@ -514,7 +514,7 @@ At session end, `SonoraEchoCanceller` logs `echo_return_loss_enhancement` and `d
 | `src/services/audio_pipeline/steps.rs` | **New.** `SumMixer`, `FixedGain`, `SoftLimiter`, `StatsTap`, `ChannelTap` |
 | `src/infrastructure/audio/resampler.rs` | Implement `DriftResampler`; add `reset`. |
 | `src/infrastructure/audio/flex_capture.rs` | Remove Rubato, the drift atomic, and the flush from the worker. Keep polling flexaudio's remaining chunks at stop. |
-| `src/infrastructure/audio/sonora_steps.rs` | **New.** `SonoraEchoCanceller`, `SonoraMicGain`, `SonoraPipelineFactory`. **The only file importing `sonora`.** |
+| `src/infrastructure/audio/sonora_steps.rs` | **New.** `SonoraEchoCanceller`, `SonoraMicGain`, `SonoraPipelineFactory`. Production code imports `sonora` only in this file. `sonora_spike.rs` is `#[cfg(test)]` measurement code and also imports it. |
 | `src/infrastructure/audio/levels.rs` | Add `PeakTap`, `MeterSlot`. Reduce `GainControl` to the slider. |
 | `src/infrastructure/audio/mixer.rs` | **Deleted** once its tests have moved. |
 | `src/services/recording.rs` | `Mixer` becomes `Pipeline`; the factory joins `RecordingEngine`; drift atomics go away; reopen calls `source_reopened`. |
@@ -552,34 +552,35 @@ Answer unknowns before refactoring. Use a scratch example or ignored tests with 
 
 **If S9 shows real drift the loop can't see,** the two sources slowly separate during long recordings: at 100 ppm, that is 360 ms per hour. It would be an existing bug rather than something this refactor causes, but it matters more with AEC. Raise it for a decision, and fix it as its own change after Phase 4, when the resampler and the session clock sit together.
 
-- [ ] S1 to S9 run, with results in D-13
-- [ ] Decision gates reviewed
+- [x] S1–S8 ran, with results in D-13. S9 was not measured.
+- [ ] S9's 30-minute hardware drift measurement was not run. A 10-second probe during Phase S is not S9. The drift algorithm was not changed. If a later 30-minute run shows the loop cannot see real clock drift, that fix is a separate change. It is not part of this refactor.
+- [x] Decision gates reviewed. Gain passes. AEC passes. S9 is not measured, so any drift fix stays a separate change.
 
 ### Phase 1: frame, traits, chain
 
 No app behavior change.
 
-- [ ] Add `AudioFrame`, `AudioProcessor`, `AudioTap`, `Chain`
-- [ ] Add `AudioMixer`, `SumMixer`, `FixedGain`, `SoftLimiter`
-- [ ] Tests: step order, taps see audio at their position, `Err` leaves the frame unchanged and continues, a panicking step is disabled
+- [x] Add `AudioFrame`, `AudioProcessor`, `AudioTap`, `Chain`
+- [x] Add `AudioMixer`, `SumMixer`, `FixedGain`, `SoftLimiter`
+- [x] Tests: step order, taps see audio at their position, `Err` leaves the frame unchanged and continues, a panicking step is disabled
 
 ### Phase 2: extract `Aligner`
 
 A pure move with no behavior change. Keep `Mixer` as a thin wrapper for now.
 
-- [ ] Move `Track` and timing logic from `Mixer` to `Aligner`
-- [ ] Move timeline tests: start offset, 30 s of silent system audio, gaps and overlaps, late blocks, tail, overrun, 100 ppm drift
+- [x] Move `Track` and timing logic from `Mixer` to `Aligner`
+- [x] Move timeline tests: start offset, 30 s of silent system audio, gaps and overlaps, late blocks, tail, overrun, 100 ppm drift
 
 ### Phase 3: `Pipeline` replaces `Mixer`, and Auto is removed
 
 These go together because `Agc` lives in `Mixer::mix`. Use a simple test gain step for now, since sonora arrives in the next phases.
 
-- [ ] Add `Pipeline`, `PipelineFactory`, `PeakTap`, and a temporary `LinearGain`
-- [ ] Mono mic downmix and stereo output
-- [ ] Update `session_body` and the harness
-- [ ] Remove `Agc`, the setting, the checkbox, and `effective`
-- [ ] Delete `mixer.rs`, moving the limiter tests
-- [ ] Tests: tail is not lengthened by padding; old settings with `agc_enabled: true` still load
+- [x] Add `Pipeline`, `PipelineFactory`, `PeakTap`, and a temporary `LinearGain`
+- [x] Mono mic downmix and stereo output
+- [x] Update `session_body` and the harness
+- [x] Remove `Agc`, the setting, the checkbox, and `effective`
+- [x] Delete `mixer.rs`, moving the limiter tests
+- [x] Tests: tail is not lengthened by padding; old settings with `agc_enabled: true` still load
 
 The resampler stays in the workers during this phase. `Aligner` keeps publishing to the atomics until Phase 4.
 
@@ -587,36 +588,36 @@ The resampler stays in the workers during this phase. `Aligner` keeps publishing
 
 This is a behavior-preserving move, done before sonora so that hardware checks and CPU numbers reflect the final thread layout.
 
-- [ ] Add the `DriftResampler` trait, `reset`, and a test pass-through
-- [ ] Add the input stage to `Pipeline`, and the `source_reopened` call in `try_reopen_sources`
-- [ ] Remove Rubato and the flush from `BlockForwarder`; call `finish_input` after the session drains its queues
-- [ ] Keep `stop_writes_blocks_that_are_still_queued_when_the_stream_closes` passing, and add a test that the flush reaches the aligner
-- [ ] Remove `drift_error` from `CapturePort::open` and all its implementations, and delete the atomics
-- [ ] Tests: drift error reaches the resampler, reopening resets it, `discontinuity` survives empty output, and the 100 ppm test now asserts through the closed loop
+- [x] Add the `DriftResampler` trait, `reset`, and a test pass-through
+- [x] Add the input stage to `Pipeline`, and the `source_reopened` call in `try_reopen_sources`
+- [x] Remove Rubato and the flush from `BlockForwarder`; call `finish_input` after the session drains its queues
+- [x] Keep `stop_writes_blocks_that_are_still_queued_when_the_stream_closes` passing, and add a test that the flush reaches the aligner
+- [x] Remove `drift_error` from `CapturePort::open` and all its implementations, and delete the atomics
+- [x] Tests: drift error reaches the resampler, reopening resets it, `discontinuity` survives empty output, and the 100 ppm test now asserts through the closed loop
 
 ### Phase 5: `SonoraMicGain`
 
-- [ ] Add the dependency, `sonora_steps.rs`, and the real factory
-- [ ] Replace `LinearGain` in production; keep it `#[cfg(test)]` for the harness
-- [ ] Tests: level follows the slider, live change applies, `0.0` is silent
+- [x] Add `sonora_steps.rs` and the real factory (`sonora = "=0.2.0"` was already pinned)
+- [x] Replace `LinearGain` in production. The harness and exact-sample tests still use it. It stays in the library because `tests/` links `RecordingHarness` without `cfg(test)`.
+- [x] Tests: level follows the slider, live change applies, `0.0` is silent
 
 ### Phase 6: `SonoraEchoCanceller`
 
-- [ ] Add the step, render-then-capture order, and scratch buffers
-- [ ] Tests from [section 11](#11-testing)
-- [ ] Skip the step when `system_active` is false
+- [x] Add the step, render-then-capture order, and scratch buffers
+- [x] Tests from [section 11](#11-testing)
+- [x] Skip the step when `system_active` is false
 
 ### Phase 7: failure handling and statistics
 
-- [ ] Sidecar `audio_processing` code
-- [ ] Log AEC statistics at session end
-- [ ] Add `StatsTap` and `ChannelTap` with tests
+- [x] Sidecar `audio_processing` code
+- [x] Log AEC statistics at session end
+- [x] Add `StatsTap` and `ChannelTap` with tests
 
 ### Phase 8: hardware check and specs
 
-- [ ] Run the checks in [section 11](#hardware-checks) and record the numbers in D-13
-- [ ] Update specs per [section 13](#13-spec-updates)
-- [ ] Add sonora's BSD-3-Clause license to the shipped notices
+- [ ] Run the checks in [section 11](#hardware-checks) and record the numbers in D-13. Not run: speakers, headphones, Bluetooth, a wrong output device, unplug, and a one-hour session. No laptop ERLE and no ppm number.
+- [x] Update specs per [section 13](#13-spec-updates)
+- [x] Add sonora's BSD-3-Clause license at `licenses/sonora-BSD-3-Clause.txt` (copied from the crates.io `sonora-0.2.0` LICENSE). M9 still copies that file into the ZIP.
 
 ---
 
@@ -635,6 +636,9 @@ Default `cargo test` must not need hardware. Sonora is pure Rust and runs on syn
 | `tail_shorter_than_a_frame_keeps_its_length` | Padding never lengthens a recording |
 | `mono_mic_is_duplicated_to_both_channels` | Mono downmix and stereo output |
 | `slow_channel_tap_drops_without_blocking` | A consumer cannot stall audio |
+| `stats_tap_reports_rms_peak_and_clipped_samples` | RMS, peak, and full-scale clip count on one buffer |
+| `stats_and_channel_taps_observe_the_frame_at_their_position` | Both taps read the audio where they sit |
+| `resampler_panic_falls_back_to_pass_through_and_the_other_source_still_resamples` | One resampler panic does not stop the other source |
 | `drift_error_from_aligner_reaches_the_resampler` | The feedback loop works without an atomic |
 | `reopened_source_resets_its_resampler_only` | Reopening one source leaves the other alone |
 | `discontinuity_survives_a_resampler_call_with_no_output` | The flag is carried to the next output |
@@ -694,7 +698,7 @@ These are manual and belong in the M9-style evidence notes:
 | --- | --- | --- |
 | R1 | **The recording can't be undone.** We store only the processed mix, so a bad AEC result can't be recovered afterwards. | Spike S6 and hardware checks before shipping. Stems via `ChannelTap` are a natural later addition. |
 | R2 | **Always on with no off switch.** AEC can reduce our own voice while others talk (double talk). On a device where this is bad, users have no way out. | Test explicitly. If checks show real harm, revisit the "always on" decision before release. |
-| R3 | **Sonora is pre-1.0 and has limited field history.** | Exact pin. Only one file imports it. Failure rules protect the recording. |
+| R3 | **Sonora is pre-1.0 and has limited field history.** | Exact pin. Production code imports it only in `sonora_steps.rs`. Failure rules protect the recording. |
 | R4 | **Hot mic audio may hard-clip** in the gain step, where it is soft-limited today. | S4 measures it, then the decision gate applies. |
 | R5 | **Added CPU on the session loop**, which also writes the WAV. Falling behind fills the 64-block capture queue and creates gaps. | S8 and the one-hour check. The `overrun` code already reports this. |
 | R6 | **Reference and mic are misaligned**, for example after a late system block is replaced by silence. | Brief echo only; AEC3 re-estimates. Not a data-loss risk. |
@@ -722,17 +726,18 @@ Line numbers are from the current specs and may shift.
 
 ## 14. Done means
 
-- [ ] Recording on speakers has clearly less echo than the current build, confirmed by listening and by ERLE in the logs.
-- [ ] Headphone recordings have no audible degradation.
-- [ ] The gain slider works live during a recording. Auto is gone. Old settings load.
-- [ ] Meters behave as described in [section 6](#6-reading-audio-at-any-point).
-- [ ] A new tap or processor needs only one new line in the factory, plus the new type.
-- [ ] `sonora` is imported in exactly one file, and `mixer.rs` is gone.
-- [ ] Capture workers no longer contain Rubato, and `CapturePort::open` no longer takes a drift atomic.
-- [ ] S9 results are recorded, and any drift fix has an explicit decision.
-- [ ] Timeline, gap, drift, durability, and recovery behavior is unchanged, with moved tests still passing.
-- [ ] `cargo fmt`, clippy, and `cargo test` are clean without hardware.
-- [ ] All specs in [section 13](#13-spec-updates) are updated.
+- [ ] Recording on speakers has clearly less echo than the previous build, confirmed by listening and by ERLE in the logs. Not run.
+- [ ] Headphone recordings have no audible degradation. Not run.
+- [ ] A one-hour session: WAV duration against the session clock, no new overrun problems, and CPU use recorded. Not run.
+- [x] The gain slider works live during a recording (synthetic stream). Auto is gone. Old settings that still contain `agc_enabled` load, and `mic_gain` applies.
+- [x] Meters behave as described in [section 6](#6-reading-audio-at-any-point): microphone after echo cancellation and gain, system after the fixed gain, mixed snapshot after the limiter. Idle meters stay outside the pipeline. The Record tab draws the microphone and system meters.
+- [x] A new tap or processor needs one new line in the factory, plus the new type. `StatsTap` and `ChannelTap` exist and are not in the production factory.
+- [x] Production code imports `sonora` only in `sonora_steps.rs`. `sonora_spike.rs` is `#[cfg(test)]` and also imports it. `mixer.rs` is gone.
+- [x] Capture workers contain no Rubato, and `CapturePort::open` takes no drift atomic.
+- [x] S9 is recorded as not measured. The drift algorithm was not changed. If a later 30-minute run shows the loop cannot see real clock drift, that fix is a separate change. It is not part of this refactor.
+- [x] Timeline, gap, drift, durability, and recovery behavior is unchanged, with the moved tests still passing. Confirmed by `cargo test` in Phase 8; no Rust changed in that phase.
+- [x] `cargo test` is clean without hardware: 220 passed, 0 failed, 3 ignored (spike S6, S8, and the 10-second S9 probe). Phase 8 did not change Rust, so `cargo fmt` and clippy were not re-run.
+- [x] All specs in [section 13](#13-spec-updates) are updated.
 
 ---
 

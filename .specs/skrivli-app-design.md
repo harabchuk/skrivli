@@ -53,8 +53,8 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | UI | **GPUI Kit** (`gpui-kit`), pinned Windows-tested version | Primary framework; re-exports compatible GPUI, `gpui-base`, `gpui-component`, and assets; use its styled components and app setup |
 | Windows interfaces | `windows` crate plus flexaudio for capture | Shell, COM device notifications, dialogs, hotkeys; flexaudio owns WASAPI/cpal capture |
 | Audio capture | flexaudio 0.8 (`Mic` + `SystemLoopback`) behind `CapturePort` | Dedicated worker threads; classic loopback keepalive on |
-| Device format conversion | flexaudio normalizer to 48 kHz stereo `f32`, plus Rubato `Async` drift nudge | Internal 48 kHz stereo `f32`; device ids from `flexaudio::devices()` |
-| Audio mixing | Rust DSP module, bounded SPSC buffers | Timestamp alignment, drift handling, limiter, meters |
+| Device format conversion | flexaudio normalizer to 48 kHz stereo `f32`. The pipeline's Rubato nudge runs on the session thread | Internal 48 kHz stereo `f32`; device ids from `flexaudio::devices()` |
+| Audio pipeline | `Pipeline` on the session thread, bounded SPSC buffers | Align, mono microphone downmix, echo cancellation, sonora microphone gain, fixed system gain, sum, soft limit, peak taps |
 | Recording | PCM16 stereo 48 kHz WAV first | `.wav.partial` while writing; finalize and recover on startup |
 | Optional FLAC | `flac-codec` encode/decode | Post-processing worker; user opt-in |
 | Transcription | whisper.cpp via maintained Rust bindings or a pinned FFI adapter | Local CPU inference; explicitly controlled native build, optional acceleration later |
@@ -111,7 +111,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
             │                           │                   │
  ┌──────────▼───────────────────────────▼───────────────────▼──────────────┐
  │ infrastructure/                                                      │
- │  audio: flexaudio mic + loopback → SPSC → timed mixer → peak snapshots │
+ │  audio: flexaudio mic + loopback → SPSC → Pipeline → peak snapshots │
  │  files: WAV writer / reader / cpal output / writability probe / FLAC │
  │  ai: decode → 16 kHz mono → whisper.cpp → transcript                  │
  │  storage: settings / library / sidecars (no OS APIs)                 │
@@ -128,9 +128,9 @@ This is a firm framework decision, **not** an optional later UI improvement.
 | Execution context | Responsibilities | Constraints |
 | --- | --- | --- |
 | GPUI foreground | Windows, entities, views, focus, menu state, message presentation | No blocking audio/file/model operations |
-| Microphone capture thread | flexaudio stream worker, timeline mapping, drift resampler | Short bounded packet processing, no UI calls |
+| Microphone capture thread | flexaudio stream worker and timeline mapping | Short bounded packet processing, no UI calls. Drift resampling is on the session thread |
 | Loopback capture thread | Separate COM apartment + loopback event loop | Handle silence, discontinuity and device invalidation |
-| Mixer/writer thread | Merge 10 ms blocks, disk output, meter atomics | Bounded latency; protect recording on I/O error |
+| Pipeline/writer thread | Align 10 ms blocks, run the chains, write the file, publish meter snapshots | Bounded latency; protect recording on I/O error |
 | Idle level-monitor worker(s) | Meter selected sources without recording | Stop/hand over before recording starts |
 | Transcription worker | At most one queued job at a time, decode/model infer/save | Cancellation, progress, no GPUI access |
 | Optional storage watcher/encoder | Directory notifications and FLAC conversion | Debounce updates; no UI thread I/O |
@@ -186,7 +186,7 @@ Do not sprinkle `cfg` through views, services, domain, or storage. If a call nee
 - **Atomic replace.** `replace_file` must replace an existing destination and remove the temp name. Windows uses `ReplaceFileW` because `std::fs::rename` fails when the destination exists. Unix rename replaces; that body is written only with the Unix host.
 - **User directories.** Fill the three bases `AppPaths::from_bases` already takes. Windows: `%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`. A macOS host maps Application Support, Logs, and the home directory. A Linux host maps XDG config, state, and home. Default recordings stay under Documents via `AppPaths::recordings_dir`.
 - **Recording clock, performance counter, free space.** `RecordingClock::local` is civil local time. `PerformanceCounter::sample` returns `(ticks, ticks_per_second)` for the existing timeline in `domain/chunk_plan.rs` (Windows: QPC). `FreeSpace` reports bytes available for the recordings directory (Windows: `GetDiskFreeSpaceExW`).
-- **Capture.** Do not write a new `CapturePort` for Linux or macOS. flexaudio already selects the backend (cpal mic; PipeWire, WASAPI, or macOS system loopback) and normalizes to 48 kHz stereo `f32`. Keep `infrastructure/audio/flex_capture.rs`. Pass that OS’s `PerformanceCounter` into the existing adapters so the worker does not call QPC. Re-enumerate with `flexaudio::devices()` into the same `DeviceCatalog`. Implement `spawn_device_watch` for that OS: Windows needs `IMMNotificationClient` because flexaudio’s `DeviceWatcher` is a no-op except on Linux; an OS where `flexaudio::watch_devices` reports events should use that and still call `enumerate_catalog`. Do not change the mixer. A capture adapter under `platform/<os>/` is only for a target flexaudio does not support.
+- **Capture.** Do not write a new `CapturePort` for Linux or macOS. flexaudio already selects the backend (cpal mic; PipeWire, WASAPI, or macOS system loopback) and normalizes to 48 kHz stereo `f32`. Keep `infrastructure/audio/flex_capture.rs`. Pass that OS’s `PerformanceCounter` into the existing adapters so the worker does not call QPC. Re-enumerate with `flexaudio::devices()` into the same `DeviceCatalog`. Implement `spawn_device_watch` for that OS: Windows needs `IMMNotificationClient` because flexaudio’s `DeviceWatcher` is a no-op except on Linux; an OS where `flexaudio::watch_devices` reports events should use that and still call `enumerate_catalog`. Do not change the pipeline. A capture adapter under `platform/<os>/` is only for a target flexaudio does not support.
 - **Playback.** `services/playback.rs` owns the play/stop command loop (`PlayerHost`). `files/player.rs` opens the cpal output session. Keep cpal’s default host unless that host cannot play PCM16 WAV; a special output adapter then belongs in `platform/<os>/` behind a small port used by `files/player.rs`.
 - **Packaging.** Windows icon and manifest stay in `build.rs`. Add that OS’s bundle, `.desktop` file, or equivalent beside it. Do not compile `winresource` for the new target.
 - **Not built yet.** When autostart, global hotkey, or whisper.cpp land, their OS APIs and native build flags go under `platform/<os>/` (or that crate’s build script), behind a port in `services/ports.rs`. Services do not link shell or inference libraries themselves.
@@ -242,6 +242,7 @@ skrivli/
 │   ├── services/
 │   │   ├── mod.rs
 │   │   ├── recording.rs            # one recording lifecycle
+│   │   ├── audio_pipeline/         # Pipeline, aligner, chains
 │   │   ├── recording_harness.rs    # fake capture for tests
 │   │   ├── playback.rs             # PlayerHost command loop
 │   │   ├── level_monitor.rs
@@ -253,8 +254,8 @@ skrivli/
 │   │   │   ├── mod.rs
 │   │   │   ├── devices.rs          # flexaudio catalog (no Win32)
 │   │   │   ├── flex_capture.rs
-│   │   │   ├── mixer.rs
 │   │   │   ├── resampler.rs
+│   │   │   ├── sonora_steps.rs     # only production import of sonora
 │   │   │   └── format.rs
 │   │   ├── ai/
 │   │   │   ├── mod.rs
@@ -324,7 +325,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `app/` | Process composition root: GPUI Kit bootstrap, worker wiring, shutdown, settings writer |
 | `domain/` | Audio formats, `AudioBlock`, `RecordPhase`, `ThemePreference`, timeline, recording metadata |
 | `services/` | Recording sessions, playback host, idle level monitoring, transcription jobs |
-| `infrastructure/audio/` | flexaudio capture adapters, device catalog, mixing and resampling (no OS APIs) |
+| `infrastructure/audio/` | flexaudio capture adapters, device catalog, the 48 kHz drift resampler, and the sonora echo and gain steps (no OS APIs). Production code imports `sonora` only in `sonora_steps.rs` |
 | `infrastructure/ai/` | Whisper engine integration and local model management |
 | `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
 | `infrastructure/files/` | WAV writer/reader, cpal output session, writability probe, optional FLAC |
@@ -352,14 +353,14 @@ Prefer channels and typed events for worker-to-UI communication, with updates di
 - Two independent shared-mode streams, one capture endpoint and one render endpoint with `AUDCLNT_STREAMFLAGS_LOOPBACK`.
 - Prefer event-driven buffering and a roughly 200 ms engine buffer if supported; check the negotiated format/device period rather than assuming one setting fits every device.
 - Internal processing format: **48,000 Hz, stereo, interleaved `f32`**. Try suitable shared-mode format conversion only after probing support. On rejection, open the device mix format and perform explicit channel mapping, sample conversion and resampling.
-- A capture worker drains all available packets for each event, converting `AUDCLNT_BUFFERFLAGS_SILENT` to zero frames and retaining first-frame QPC/device timestamps. On `DATA_DISCONTINUITY`, record a gap marker and let the mixer repair the timeline.
+- A capture worker drains all available packets for each event, converting `AUDCLNT_BUFFERFLAGS_SILENT` to zero frames and retaining first-frame QPC/device timestamps. On `DATA_DISCONTINUITY`, record a gap marker and let the pipeline repair the timeline.
 - No synchronous filesystem I/O, GPUI entity operations, blocking locks, model calls or unbounded allocations in the hot capture loop.
-- Audio packets move via bounded SPSC buffers (or an equally suitable proven crate) to the mixer. Define overflow and backpressure handling: report overrun, drop according to a documented policy and preserve elapsed timeline with gaps rather than indefinitely blocking capture.
-- Optionally request Windows communications processing for microphone capture, but treat AEC/noise processing as device-dependent and separate from app-side gain control.
+- Audio packets move via bounded SPSC buffers (or an equally suitable proven crate) to the pipeline. Define overflow and backpressure handling: report overrun, drop according to a documented policy and preserve elapsed timeline with gaps rather than indefinitely blocking capture.
+- Echo cancellation is app-side, in the session pipeline, not in the capture worker. It runs whenever system audio is being captured. It is always on, and there is no setting to turn it off.
 
 ### 6.3 Silence and loopback keep-alive
 
-System loopback uses flexaudio’s classic silent-render keepalive so idle endpoints keep delivering silence on the device clock. The mixer must **never infer that the recording clock has stopped**. Use session-timeline alignment (`frame_index` anchored at open) and synthesize silence for remaining gaps. Timestamp-based gap filling remains required even with keepalive.
+System loopback uses flexaudio’s classic silent-render keepalive so idle endpoints keep delivering silence on the device clock. The pipeline must **never infer that the recording clock has stopped**. Use session-timeline alignment (`frame_index` anchored at open) and synthesize silence for remaining gaps. Timestamp-based gap filling remains required even with keepalive.
 
 ### 6.4 Timeline, mixing and clock drift
 
@@ -367,10 +368,9 @@ System loopback uses flexaudio’s classic silent-render keepalive so idle endpo
 - Convert packet timestamps into positions on the 48 kHz sample timeline, taking timestamp-unit conversions and device latency into account.
 - Operate in **10 ms / 480-frame** output blocks. A source gap of roughly 5 ms becomes silence; duplicated/overlapping late frames are discarded according to a deterministic rule.
 - Emit when sufficient data exists or when a block is more than about **150 ms** behind real time; a stalled input contributes silence. These thresholds are initial values and should be validated by tests on actual devices.
-- Two devices have independent hardware clocks. Each capture stream uses Rubato asynchronous resampling (device rate → 48 kHz) with a tiny adaptive ratio driven by mixer timeline error, so ppm-level clock drift is corrected without sparse drop/duplicate splices. Sudden holes still become silence; sudden overlaps are still discarded.
-- Mix `clamp(mic_gain * mic + system_gain * system)` with initial mic gain `1.0`, system gain `0.8`, and a tested soft limiter to avoid clipped speech. Downmix/duplicate mono microphone channels explicitly.
-- Optional **mic AGC**, off by default: approximately 0.75 s RMS analysis, −18 dBFS speech target, gain limits 0.5×–4×, noise gate below −45 dBFS, smooth gain transitions. This is application-side processing only.
-- Publish per-source and mixed peak snapshots plus effective microphone gain for meters, not per-sample UI events.
+- Two devices have independent hardware clocks. flexaudio converts each device's rate to 48 kHz stereo `f32`. Drift correction is a per-source Rubato resampler at 48 kHz to 48 kHz, owned by the pipeline and run on the session thread. It reads that source's timeline error from the aligner directly. There is no atomic shared with the capture worker. Sudden holes still become silence; sudden overlaps are still discarded.
+- Each output block is aligned, then the microphone is downmixed to mono (`(L + R) / 2`) before the microphone chain and copied onto both channels of the stored file. When system audio is captured, that chain is echo cancellation, then sonora microphone gain, then the microphone peak tap. When system audio is off, there is no canceller. The system chain is a fixed gain of `0.8`, then the system peak tap. The frames are summed, then a soft limiter, then the mixed peak tap. Echo cancellation is always on while system audio is captured, and there is no setting to turn it off. The file stores that processed mix. If the gain step cannot be created, that recording keeps the microphone at unity.
+- Publish microphone, system, and mixed peak snapshots for the meters, not per-sample UI events. During a recording the microphone meter reads after echo cancellation and gain, the system meter after the fixed gain, and the mixed snapshot after the limiter. The Record tab draws the microphone and system meters. Idle meters stay outside the pipeline and still use peak times the slider, so the microphone meter can change when a recording starts on speakers.
 - Optional (off by default): record separate `*.mic.wav` and `*.system.wav` stems for future troubleshooting/diarization.
 
 ### 6.5 Audio files, metadata and crash safety
@@ -482,7 +482,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 │               [ ● Start recording ]              │
 │                     00:12:34                     │
 │                      ● REC                       │
-│ Mic  ███████████░░░  −12 dB   Gain ──●── 1.0× [Auto] │
+│ Mic  ███████████░░░  −12 dB   Gain ──●── 1.0×       │
 │ System █████░░░░░░░░░░░░░       −24 dB           │
 │                                                  │
 │ [inline device/permission/disk warning]          │
@@ -491,9 +491,9 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 
 - Compose **GPUI Kit** select/combo, button, input, slider, checkbox, status, and dialog components for the recording form. Implement custom `level_meter` (and specialized recording indicator only if needed) using GPUI primitives and GPUI Kit theme tokens: band fills from `success` / `warning` / `danger`, track from the same color at low opacity (Kit Progress pattern), labels from `foreground` / `muted_foreground`. Do **not** create a parallel theme system; use GPUI Kit tokens and component styling.
 - Choose a folder with a Windows folder-picker adapter; show it in a read-only path field. Default `%USERPROFILE%\Documents\Skrivli\` where writable.
-- Disable source selection and destination changes while recording. Gain and Auto (AGC) remain live, with the slider disabled when Auto is active.
+- Disable source selection and destination changes while recording. The gain slider stays enabled during capture and is disabled only while saving.
 - A red recording state, elapsed timer and status text; ensure information is accessible without relying on red color or a blinking indicator alone.
-- Meter data: post-gain microphone and system peak on −60..0 dBFS, green→amber→red range and a ~1 s peak hold. Draw from throttled snapshots; maintain meter monitoring while idle using `LevelMonitor`, then hand ownership to the recording session.
+- Meter data: during a recording, microphone peak after echo removal and gain, and system peak after the fixed system gain, on −60..0 dBFS, with a green→amber→red range and a ~1 s peak hold. Draw from throttled snapshots. Idle monitoring stays outside the pipeline, uses peak times the slider, and hands the devices to the recording session when capture starts.
 - Missing devices/unwritable destination show inline GPUI Kit feedback; material failures use GPUI Kit dialogs or a Windows TaskDialog through a platform adapter when specifically required.
 - Global toggle shortcut default `Ctrl+Alt+R` using Windows `RegisterHotKey`; allow disable/rebinding and handle conflicts explicitly.
 
@@ -512,7 +512,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 
 **Model prompt:** available installed models, browse button, explicit download action, verification/progress/cancel feedback, errors and retry.
 
-**Settings:** recording directory, default endpoints, gain/AGC, optional stems, FLAC and WAV retention; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
+**Settings:** recording directory, default endpoints, microphone gain, optional stems, FLAC and WAV retention; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
 
 ### 8.5 System tray (native Windows integration)
 
@@ -578,8 +578,8 @@ cargo build --release
 Put small tests beside Rust implementations with `#[cfg(test)] mod tests`; extract large suites into an adjacent `tests/` submodule when necessary. Use injected clocks, temporary directories, synthetic audio and fake service ports.
 
 - Ring buffer: capacity, SPSC order, wrap-around, overflow policy and concurrent stress tests.
-- Mixer: QPC alignment, silent intervals, overlapping/late packets, bounded wait, 100-ppm simulated drift, gains and clipping/limiter.
-- Resampler: 48→16 kHz 1 kHz sine retains pitch/amplitude, >8 kHz aliases attenuated, stereo downmix checks.
+- Pipeline and aligner: QPC alignment, silent intervals, overlapping and late packets, bounded wait, 100 ppm simulated drift, microphone and system gain, the soft limiter, mono downmix, and echo-reference order.
+- Resampler: the capture nudge is 48 kHz to 48 kHz and reads the aligner error directly. Transcription uses a separate 48 kHz to 16 kHz path: a 1 kHz sine retains pitch and amplitude, content above 8 kHz is attenuated, and stereo downmix is checked.
 - WAV: correct RIFF sizes and PCM16 encoding, periodic repair, crash-interrupted recovery, large-file boundary handling.
 - Transcript: time formatting beyond one hour, paragraph grouping, repeated-line suppression, overlap chunk stitching.
 - Library: audio/text/JSON pairing, sorting, stable selection keys, malformed metadata, partial file recovery.
@@ -632,10 +632,10 @@ Each milestone ends with a runnable app or independently validated recording fun
 | GPUI Kit / GPUI foreground thread stalls from capture/inference | Dedicated workers, bounded channels, throttled state updates |
 | COM thread/apartment misuse | flexaudio owns capture COM; device-watch COM stays on its worker; no unchecked cross-thread interface movement |
 | Silent loopback produces no packets | QPC timeline and silence insertion; investigate silent render keep-alive |
-| Drift between independent devices | Unit-test 100 ppm deviations; Rubato adaptive resample ratio on each capture stream |
+| Drift between independent devices | Unit-test 100 ppm deviations; the pipeline reads aligner error and nudges each source's Rubato ratio |
 | Driver rejects requested format/conversion | Probe `IsFormatSupported`/mix format; test alternate converter path |
 | Long WAV exceeds RIFF 32-bit size | Monitor file length and stop/split or use compatible large-file format |
-| Speaker feedback/echo | Recommend headphones; AEC only when supported; optional source stems |
+| Speaker echo | Echo removal is always on while system audio is captured. There is no off switch. Double-talk can reduce the user's own voice while the far side is talking. The stored file is the processed mix, so a bad result cannot be recovered afterwards. |
 | Silence hallucination in Whisper | VAD when verified, conservative duplicate cleanup, progress/cancel |
 | whisper.cpp FFI/build mismatch | Pin tested native revision/binding; minimal isolated adapter; CI native-build test |
 | High CPU/memory on slow laptops | Quantized model choice, one inference job, bounded chunking, no blocking UI work |
@@ -660,9 +660,9 @@ Each milestone ends with a runnable app or independently validated recording fun
 These are deliberate implementation choices to settle during M0–M3, not implicit claims of already-working APIs:
 
 1. **GPUI Kit version and Windows backend:** confirm `Application`/window creation, focus, close interception, timers/tasks, text selection, and exact event subscription API with a pinned revision.
-2. **Capture stack:** flexaudio 0.8 behind `CapturePort` (D-03); keep Skrivli mixer for gains/meters/degrade.
+2. **Capture stack:** flexaudio 0.8 behind `CapturePort` (D-03). The session runs `Pipeline`: align, mono microphone downmix, echo cancellation when system audio is captured, sonora microphone gain, fixed system gain, sum, soft limit, and peak taps. Echo removal is always on in that case and has no setting. The stored file is the processed mix. `mixer.rs` is gone.
 3. **Audio buffer implementation:** use a proven SPSC implementation unless custom time-stamped packet semantics demand a bespoke ring; test contention and overrun behavior.
-4. **Format conversion:** verify negotiated shared-mode capture formats and preferred fallback resampler, rather than assuming auto-conversion is universal.
+4. **Format conversion:** flexaudio converts the device rate to 48 kHz stereo `f32`. The pipeline resampler is 48 kHz to 48 kHz and reads the aligner's error directly (D-06).
 5. **Tray event bridge:** determine safe native HWND/message registration and shutdown interaction with the chosen GPUI Kit / GPUI Windows backend.
 6. **Model manifest:** pin actual model URLs, license terms, hashes and formats before exposing downloads.
 7. **Recording file maximum:** decide between RIFF-safe duration cap/rotation and RF64 or equivalent for long sessions.
