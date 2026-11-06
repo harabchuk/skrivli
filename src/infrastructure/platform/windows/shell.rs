@@ -114,6 +114,7 @@ fn pick_recordings_folder() -> Result<Option<PathBuf>, AppError> {
     Ok(Some(path))
 }
 
+#[allow(dead_code)] // Called by `DesktopShell::pick_model_file`, which the prompt no longer uses.
 fn pick_model_file() -> Result<Option<PathBuf>, AppError> {
     let _apartment = sta_guard()?;
     let dialog: IFileOpenDialog =

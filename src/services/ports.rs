@@ -142,6 +142,9 @@ pub(crate) trait DesktopShell: Send + Sync {
     fn set_window_visible(&self, visible: bool) -> bool;
     fn window_is_minimized(&self) -> bool;
     fn pick_recordings_folder(&self) -> Result<Option<PathBuf>, AppError>;
+    /// Native file dialog for a local GGML model. The speech-model prompt lists
+    /// catalog variants instead; this stays for a later local-file picker.
+    #[allow(dead_code)]
     fn pick_model_file(&self) -> Result<Option<PathBuf>, AppError>;
     fn open_recordings_folder(&self, path: &Path) -> Result<(), AppError>;
 }

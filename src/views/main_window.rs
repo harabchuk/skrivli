@@ -11,7 +11,7 @@ use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::table::{TableEvent, TableSelection, TableState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, IconName};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, IconName, WindowExt as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     div, px, App, Context, Entity, FocusHandle, IntoElement, ParentElement, Render, SharedString,
@@ -46,7 +46,8 @@ use crate::views::hooks::ShellHooks;
 use crate::views::state::{AppTab, Presentation};
 
 use super::model_prompt::{
-    download_button_label, open_model_alert, open_model_prompt, ModelPromptView,
+    catalog_row_label, open_model_alert, open_model_prompt, prompt_can_dismiss,
+    selected_model_line, CatalogRow, ModelPromptView,
 };
 use super::recording::record_tab;
 use super::recordings::{
@@ -80,7 +81,8 @@ pub(crate) struct MainWindow {
     transcript_generation: u64,
     transcript_error: Option<&'static str>,
     transcript_load: Option<Task<()>>,
-    download_label: SharedString,
+    prompt_model_id: String,
+    model_prompt_open: bool,
     recordings_table: Entity<TableState<RecordingsDelegate>>,
     _table_sub: Subscription,
     levels: Arc<LevelSnapshot>,
@@ -231,6 +233,7 @@ impl MainWindow {
             session.update(cx, |view, cx| view.on_close_requested(window, cx))
         });
         let transcript_editor = cx.new(|cx| EditorState::new(window, cx).line_number(false));
+        let prompt_model_id = settings.selected_model().to_string();
         let appearance_entity = cx.weak_entity();
         let appearance = window.observe_window_appearance(move |window, cx| {
             let Some(entity) = appearance_entity.upgrade() else {
@@ -268,7 +271,8 @@ impl MainWindow {
             transcript_generation: 0,
             transcript_error: None,
             transcript_load: None,
-            download_label: SharedString::from(default_download_label()),
+            prompt_model_id,
+            model_prompt_open: false,
             recordings_table,
             _table_sub: table_sub,
             levels,
@@ -478,10 +482,9 @@ impl MainWindow {
                 });
             }
             Effect::Quit => self.quit_now(window),
-            Effect::DownloadModel => self.model_host.download_default(),
+            Effect::DownloadModel => self.model_host.download(self.prompt_model_id.clone()),
             Effect::CancelModelDownload => self.model_host.cancel(),
             Effect::RetryModelDownload => self.model_host.retry(),
-            Effect::BrowseModelFile => self.browse_model_file(window, cx),
         }
         cx.notify();
     }
@@ -657,6 +660,13 @@ impl MainWindow {
     ) {
         let previous = self.presentation.model_failure();
         self.presentation.apply_model(snapshot);
+        if self.model_prompt_open
+            && prompt_can_dismiss(self.presentation.model_phase())
+            && window.has_active_dialog(cx)
+        {
+            self.model_prompt_open = false;
+            window.close_dialog(cx);
+        }
         if let Some(message) = self.presentation.model_failure() {
             if previous != Some(message) && is_distinct_model_message(message) {
                 open_model_alert(window, cx, message);
@@ -789,8 +799,10 @@ impl MainWindow {
 
     fn open_model_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.model_host.refresh();
+        self.model_prompt_open = true;
+        self.ensure_prompt_selection();
         let read_entity = cx.entity();
-        let browse_entity = read_entity.clone();
+        let select_entity = read_entity.clone();
         let download_entity = read_entity.clone();
         let cancel_entity = read_entity.clone();
         let retry_entity = read_entity.clone();
@@ -798,9 +810,10 @@ impl MainWindow {
             window,
             cx,
             move |cx| read_entity.read(cx).model_prompt_view(),
-            move |_event, window, cx| {
-                browse_entity.update(cx, |view, cx| {
-                    view.handle(AppCommand::BrowseModelFile, window, cx);
+            move |id, _window, cx| {
+                select_entity.update(cx, |view, cx| {
+                    view.select_prompt_model(id);
+                    cx.notify();
                 });
             },
             move |_event, window, cx| {
@@ -821,37 +834,60 @@ impl MainWindow {
         );
     }
 
-    fn model_prompt_view(&self) -> ModelPromptView {
-        ModelPromptView {
-            files: self
-                .presentation
-                .model_files()
-                .iter()
-                .map(|file| match &file.variant_id {
-                    Some(id) => SharedString::from(format!("{} ({id})", file.filename)),
-                    None => SharedString::from(file.filename.clone()),
-                })
-                .collect(),
-            download_label: self.download_label.clone(),
-            progress: self.presentation.model_progress(),
-            failure: self.presentation.model_failure(),
-            phase: self.presentation.model_phase(),
+    fn ensure_prompt_selection(&mut self) {
+        let Ok(manifest) = ModelManifest::load_bundled() else {
+            return;
+        };
+        if manifest.by_id(&self.prompt_model_id).is_some() {
+            return;
+        }
+        if manifest.by_id(self.settings.selected_model()).is_some() {
+            self.prompt_model_id = self.settings.selected_model().to_string();
+            return;
+        }
+        if let Some(entry) = manifest.default_entry() {
+            self.prompt_model_id = entry.id().to_string();
         }
     }
 
-    fn browse_model_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.shell.pick_model_file() {
-            Ok(Some(path)) => self.model_host.accept_file(path),
-            Ok(None) => {}
-            Err(error) => {
-                tracing::error!(error = %error, "speech model file was not chosen");
-                let message = error.user_message();
-                if is_distinct_model_message(message) {
-                    open_model_alert(window, cx, message);
-                } else {
-                    self.presentation.set_notice(Some(message));
-                }
-            }
+    fn select_prompt_model(&mut self, id: &str) {
+        self.prompt_model_id = id.to_string();
+        self.settings.set_selected_model(id);
+        self.hooks.save_settings(self.settings.clone());
+    }
+
+    fn model_prompt_view(&self) -> ModelPromptView {
+        let progress = self.presentation.model_progress();
+        let failure = self.presentation.model_failure();
+        let phase = self.presentation.model_phase();
+        let Ok(manifest) = ModelManifest::load_bundled() else {
+            return ModelPromptView {
+                catalog: Vec::new(),
+                selected_id: None,
+                selected_line: SharedString::from(selected_model_line(None, None)),
+                progress,
+                failure,
+                phase,
+            };
+        };
+        let selected = manifest.by_id(&self.prompt_model_id);
+        ModelPromptView {
+            catalog: manifest
+                .entries()
+                .iter()
+                .map(|entry| CatalogRow {
+                    id: SharedString::from(entry.id()),
+                    label: SharedString::from(catalog_row_label(entry.id(), entry.bytes())),
+                })
+                .collect(),
+            selected_id: selected.map(|entry| SharedString::from(entry.id())),
+            selected_line: SharedString::from(selected_model_line(
+                selected.map(|entry| entry.id()),
+                selected.map(|entry| entry.bytes()),
+            )),
+            progress,
+            failure,
+            phase,
         }
     }
 
@@ -1134,16 +1170,6 @@ impl MainWindow {
 
 fn apply(state: &mut Presentation, command: AppCommand) -> Effect {
     crate::views::actions::apply_command(state, command)
-}
-
-fn default_download_label() -> String {
-    let Ok(manifest) = ModelManifest::load_bundled() else {
-        return download_button_label("base-q5_1", 0);
-    };
-    let Some(entry) = manifest.default_entry() else {
-        return download_button_label("base-q5_1", 0);
-    };
-    download_button_label(entry.id(), entry.bytes())
 }
 
 fn read_transcript_file(

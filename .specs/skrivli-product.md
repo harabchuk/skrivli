@@ -31,7 +31,7 @@ People who take meetings or calls on Windows and want a private, local recording
 ## 2. Core user journey (v1)
 
 1. Install by unzipping a portable package and launching Skrivli.
-2. On first useful transcription, choose or download a speech model (optional until you want text).
+2. On first useful transcription, choose a speech model from the list and download it. That dialog stays open until the chosen model is installed.
 3. On the **Record** tab, pick microphone and system audio source if needed.
 4. Start recording (window, tray, or keyboard shortcut). Speak and/or play audio as usual.
 5. Stop recording. A finished audio file appears in the chosen folder and in the **Recordings** tab.
@@ -150,7 +150,7 @@ Transcription runs **after** a recording is finished. It does not produce live c
 ### Models
 
 - Speech models are **not** bundled with the app.
-- On first transcription without a model, the user chooses: download a recommended model or browse to a local model file.
+- On first transcription without a model, the user picks a model from the always-visible list. The chosen model is shown apart from the list, with its size and a notice that the download needs a network. Download starts only from the Download button. The dialog cannot be closed until that model is installed. Cancel and Retry apply to the download itself.
 - Downloads happen only when the user starts them, with progress, cancel, and verification feedback. Corrupt or unsupported models are reported distinctly.
 - After installation, transcription works fully offline.
 - Users can choose among offered model sizes/variants and language settings when available.

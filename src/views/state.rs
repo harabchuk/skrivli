@@ -126,6 +126,7 @@ impl Presentation {
         self.model_phase
     }
 
+    #[allow(dead_code)] // The prompt lists the catalog; accepted files stay on the snapshot.
     pub(crate) fn model_files(&self) -> &[ModelFile] {
         &self.model_files
     }

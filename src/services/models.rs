@@ -39,9 +39,10 @@ pub(crate) struct ModelSnapshot {
 }
 
 enum ModelCommand {
-    Download,
+    Download(String),
     Cancel,
     Retry,
+    #[cfg_attr(not(test), allow(dead_code))] // `accept_file`; the prompt no longer picks a file.
     Accept(PathBuf),
     Refresh,
     Shutdown,
@@ -81,8 +82,13 @@ impl ModelHost {
         (Self { tx, cancel }, handle)
     }
 
+    pub(crate) fn download(&self, id: impl Into<String>) {
+        let _ = self.tx.send(ModelCommand::Download(id.into()));
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn download_default(&self) {
-        let _ = self.tx.send(ModelCommand::Download);
+        self.download(String::new());
     }
 
     pub(crate) fn cancel(&self) {
@@ -94,6 +100,7 @@ impl ModelHost {
         let _ = self.tx.send(ModelCommand::Retry);
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // Local-file install. The prompt downloads a catalog variant.
     pub(crate) fn accept_file(&self, path: PathBuf) {
         let _ = self.tx.send(ModelCommand::Accept(path));
     }
@@ -146,6 +153,7 @@ fn worker_loop(
     on_change: Box<dyn Fn(ModelSnapshot) + Send>,
 ) {
     let mut listed = Vec::new();
+    let mut requested = String::new();
     while let Ok(command) = rx.recv() {
         match command {
             ModelCommand::Shutdown => break,
@@ -178,10 +186,23 @@ fn worker_loop(
                     ));
                 }
             },
-            ModelCommand::Download | ModelCommand::Retry => {
+            ModelCommand::Download(id) => {
+                requested = id;
                 listed = run_download(
                     &models_dir,
                     &manifest,
+                    &requested,
+                    source.as_mut(),
+                    &cancel,
+                    &on_change,
+                    listed,
+                );
+            }
+            ModelCommand::Retry => {
+                listed = run_download(
+                    &models_dir,
+                    &manifest,
+                    &requested,
                     source.as_mut(),
                     &cancel,
                     &on_change,
@@ -195,13 +216,19 @@ fn worker_loop(
 fn run_download(
     models_dir: &Path,
     manifest: &ModelManifest,
+    variant_id: &str,
     source: &mut dyn ModelSource,
     cancel: &AtomicBool,
     on_change: &dyn Fn(ModelSnapshot),
     mut listed: Vec<ModelFile>,
 ) -> Vec<ModelFile> {
     cancel.store(false, Ordering::Release);
-    let Some(entry) = manifest.default_entry() else {
+    let entry = if variant_id.is_empty() {
+        manifest.default_entry()
+    } else {
+        manifest.by_id(variant_id)
+    };
+    let Some(entry) = entry else {
         on_change(snapshot(
             ModelPhase::Failed,
             0,
@@ -390,6 +417,33 @@ mod tests {
         }
     }
 
+    fn two_variant_manifest(bytes: u64, sha: &str) -> ModelManifest {
+        let json = format!(
+            r#"{{
+                "schema_version": 1,
+                "source_base": "https://example.invalid/models",
+                "license": "MIT",
+                "models": [
+                    {{
+                        "id": "base-q5_1",
+                        "filename": "ggml-base-q5_1.bin",
+                        "bytes": {bytes},
+                        "sha256": "{sha}",
+                        "default": true
+                    }},
+                    {{
+                        "id": "tiny-q5_1",
+                        "filename": "ggml-tiny-q5_1.bin",
+                        "bytes": {bytes},
+                        "sha256": "{sha}",
+                        "default": false
+                    }}
+                ]
+            }}"#
+        );
+        ModelManifest::parse(&json).expect("manifest")
+    }
+
     fn tiny_manifest(bytes: u64, sha: &str) -> ModelManifest {
         let json = format!(
             r#"{{
@@ -431,6 +485,43 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         panic!("timeout waiting for {phase:?}");
+    }
+
+    #[test]
+    fn download_installs_the_requested_variant_not_the_default() {
+        // Arrange
+        let dir =
+            std::env::temp_dir().join(format!("skrivli-model-pick-id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let body = b"ggml".repeat(40);
+        let sha = hex::encode(Sha256::digest(&body));
+        let manifest = two_variant_manifest(body.len() as u64, &sha);
+        let snaps = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&snaps);
+        let (host, handle) = ModelHost::spawn_with_manifest(
+            dir.clone(),
+            manifest,
+            Box::new(ScriptedSource {
+                bodies: vec![body],
+                reads: Arc::new(Mutex::new(0)),
+                next: 0,
+            }),
+            Box::new(move |snap| {
+                sink.lock().expect("snaps").push(snap);
+            }),
+        );
+
+        // Act
+        host.download("tiny-q5_1");
+        let _snap = wait_phase(&snaps, ModelPhase::Ready);
+        host.shutdown();
+        let _ = handle.join();
+
+        // Assert
+        assert!(dir.join("ggml-tiny-q5_1.bin").is_file());
+        assert!(!dir.join("ggml-base-q5_1.bin").exists());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -29,12 +29,10 @@ pub(crate) enum AppCommand {
         job_id: JobId,
     },
     RefreshLibrary,
-    /// Download the default manifest speech model. User-initiated only.
+    /// Download the speech model selected in the prompt. User-initiated only.
     DownloadModel,
     CancelModelDownload,
     RetryModelDownload,
-    /// File dialog for a local GGML model. The window runs it off `render`.
-    BrowseModelFile,
     Show,
     Hide,
     ToggleVisibility,
@@ -77,7 +75,6 @@ pub(crate) enum Effect {
     DownloadModel,
     CancelModelDownload,
     RetryModelDownload,
-    BrowseModelFile,
     /// Show the window. `recording_id` is set only when that row is still in the library.
     ShowSelect {
         recording_id: Option<RecordingId>,
@@ -126,7 +123,6 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
         AppCommand::DownloadModel => Effect::DownloadModel,
         AppCommand::CancelModelDownload => Effect::CancelModelDownload,
         AppCommand::RetryModelDownload => Effect::RetryModelDownload,
-        AppCommand::BrowseModelFile => Effect::BrowseModelFile,
         AppCommand::Show => {
             state.set_visible(true);
             state.set_pending_show(false);
@@ -420,13 +416,11 @@ mod tests {
         let download = apply_command(&mut state, AppCommand::DownloadModel);
         let cancel = apply_command(&mut state, AppCommand::CancelModelDownload);
         let retry = apply_command(&mut state, AppCommand::RetryModelDownload);
-        let browse = apply_command(&mut state, AppCommand::BrowseModelFile);
 
         // Assert
         assert_eq!(download, Effect::DownloadModel);
         assert_eq!(cancel, Effect::CancelModelDownload);
         assert_eq!(retry, Effect::RetryModelDownload);
-        assert_eq!(browse, Effect::BrowseModelFile);
     }
 
     #[test]

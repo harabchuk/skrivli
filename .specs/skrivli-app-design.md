@@ -423,10 +423,10 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 ### 7.3 Local model management
 
 - Discover `ggml-*.bin` in `%LOCALAPPDATA%\Skrivli\models\` plus explicitly chosen user paths.
-- On first use without a model, show a GPUI Kit dialog/model-choice prompt: download the default quantized multilingual base model or browse for a local model file.
+- On first use without a model, show a GPUI Kit dialog that lists every manifest variant. The chosen variant is shown outside that list. Download installs that variant. The dialog hides its close button and ignores backdrop and Escape until the download reaches Ready, then the window closes it.
 - `services/models.rs` `ModelHost` owns that download. `app/bootstrap.rs` spawns it and `app/shutdown.rs` joins it, same as `TranscriptionHost`. The view never hashes a file or opens a socket. Bytes come through `ModelSource` on `services/ports.rs`; `infrastructure/ai/fetch.rs` is the HTTP adapter and tests inject a reader. Progress is one coalesced `ModelSnapshot` on the bridge (latest wins), reduced into `Presentation`.
-- Browse calls `DesktopShell::pick_model_file` in `infrastructure/platform/windows/shell.rs`. The host then validates and copies off the GPUI thread. Missing, hash-mismatch (`verify model`), and unsupported files each surface `AppError::user_message()` in a Kit alert.
-- Downloads must be **user-initiated only**, with progress, resumability where supported, and **SHA-256 verification against a maintained trusted manifest** before a file is accepted. Download to a temporary file and rename after verification. M7.1 downloads the default manifest variant and states the file size and that a network is required. Choosing another variant in Settings is M8.
+- `DesktopShell::pick_model_file` in `infrastructure/platform/windows/shell.rs` remains for a later local-file picker. The prompt does not call it. `ModelHost::accept_file` still validates and copies a picked path off the GPUI thread. Missing, hash-mismatch (`verify model`), and unsupported files each surface `AppError::user_message()` in a Kit alert.
+- Downloads must be **user-initiated only**, with progress, resumability where supported, and **SHA-256 verification against a maintained trusted manifest** before a file is accepted. Download to a temporary file and rename after verification. The prompt downloads the variant the user selected, states each variant's size, and says that a network is required. Choosing another variant in Settings is M8.
 - Provide tiny/base/small and suitable English/multilingual options only when the pinned engine supports the selected model files. Do not hardcode unverified model sizes or hashes.
 - Language, model and CPU thread count are configurable. A local-model workflow is fully offline after installation.
 
@@ -514,7 +514,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 
 ### 8.4 Model prompt and settings
 
-**Model prompt:** `views/model_prompt.rs`, opened from the Recordings detail pane. Lists models `discover` has already accepted. Browse, Download (default manifest variant, with size and a network notice), Cancel, and Retry. Download, cancel, and retry are `AppCommand` effects the window hands to `ModelHost` off `render`. Browse is `DesktopShell::pick_model_file`. Verification errors use Kit alerts.
+**Model prompt:** `views/model_prompt.rs`, opened from the Recordings detail pane. The body is wide enough for the controls (560px). It always lists the manifest variants (`ListItem` rows with id and size). The selected variant is a separate line outside that list. Footer buttons are Download, Cancel, and Retry. Download, cancel, and retry are `AppCommand` effects the window hands to `ModelHost` off `render`; Download sends the selected variant id, and Retry repeats that id. Close, backdrop, and Escape do not dismiss the dialog. When the phase becomes Ready, the window closes it. Verification errors use Kit alerts.
 
 **Settings:** recording directory, default endpoints, microphone gain, optional stems, FLAC and WAV retention; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
 
