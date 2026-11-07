@@ -69,6 +69,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 
 - Major actions are usable with the keyboard.
 - A global shortcut can start or stop recording (default **Ctrl+Alt+R**, configurable or disableable).
+- On the Recordings tab, **Up** and **Down** move through the list, **Space** plays or pauses, **F2** renames and **Delete** asks to delete the selected recording. These keys do nothing while a dialog is open, and Space works only when the page itself has focus (not when a button or the seek bar does). **Escape** closes menus and dialogs.
 
 ---
 
@@ -122,13 +123,15 @@ Skrivli does not silently delete usable partial recordings.
 - Each row shows the recording name, a muted line with when, how long and how large it is (`14:32 · 12:41 · 38.0 MB` for today and yesterday, `Nov 3 · 31:04 · 93.0 MB` for earlier days), and a transcript badge on the right. The selected row has a tinted background and an accent bar on its left edge.
 - The list header shows the word "Recordings", the number of recordings, a Refresh icon button and an Open folder icon button. The list is not sortable and has no search.
 - The list updates when files change in the folder (including changes made outside the app).
-- Empty and error states are clear when there is nothing to show or the folder cannot be read.
+- With no recordings, the tab shows an empty state ("No recordings yet", with a **Start recording** button that switches to the Record tab; it does not start recording). When the folder cannot be read, the list says "Recordings unavailable" with the reason.
+- Opening the tab with nothing selected selects the newest recording. "Select a recording" shows only if there is nothing to select.
+- In a window narrower than 680 px the list sits above the detail instead of beside it.
 - In-progress captures are not treated as finished library entries until saved (except when presenting recovered files).
 
 ### Detail and playback
 
 - Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · WAV`), then a player card.
-- A pencil icon next to the name (shown when the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Transcribe again…** (enabled only when the recording has a transcript and no job is queued or running) and **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
+- A pencil icon next to the name (dimmed until the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Transcribe again…** (enabled only when the recording has a transcript and no job is queued or running) and **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
 - A warning note appears under the title when a recording was recovered after an interruption ("The end of this recording may be missing"), when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
 - The player card has a round Play/Pause button, the current time, a seek bar and the total time. Play starts from the seek bar position, Pause keeps the position, and Play again resumes. Dragging the seek bar moves nothing until it is released. When a recording ends the player returns to the start. Only WAV recordings can be played: for other formats the player is disabled with the tooltip "Only WAV playback is available".
 - While a recording plays or is paused, the transcript paragraph being spoken is highlighted and the list scrolls to it when it changes. If you scroll the transcript yourself, it is not scrolled again for 5 seconds.

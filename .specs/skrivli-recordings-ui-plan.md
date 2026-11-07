@@ -1,6 +1,6 @@
 # Skrivli Recordings page redesign plan
 
-**Status:** Phases 0 to 6 done (Phase 5 hardware checks and Phase 6 manual checks open). Phase 7 is not started. The code snippets have not been compiled.
+**Status:** Done in code (Phases 0 to 7). **Not signed off:** the app was never run during this work, so every "Not verified" note below and the final manual checks in Phase 7 are still open, as are the Phase 5 hardware checks. The code snippets in this plan were not compiled; the code itself builds and its tests pass.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
 
@@ -550,26 +550,27 @@ h_flex()
 **Goal:** finish the empty states, keyboard use and narrow windows, and confirm the whole page.
 
 **Add**
-- [ ] Add an empty library state: icon, "No recordings yet", and a primary **Start recording** button that switches to the Record tab.
-- [ ] Add auto-selection of the newest recording when the tab opens with nothing selected. Keep "Select a recording" as a fallback.
-- [ ] Add keyboard support:
+- [x] Add an empty library state: icon, "No recordings yet", and a primary **Start recording** button that switches to the Record tab.
+- [x] Add auto-selection of the newest recording when the tab opens with nothing selected. Keep "Select a recording" as a fallback.
+- [x] Add keyboard support (Escape is left to Kit, which closes its menus and dialogs; that was not checked in the running app):
   - Up and Down move through the list.
   - Space plays or pauses, unless a dialog is open.
   - F2 renames.
   - Delete opens the delete confirmation.
   - Escape closes menus and dialogs.
-- [ ] Add a narrow layout: under 680 px wide, stack the list above the detail.
+- [x] Add a narrow layout: under 680 px wide, stack the list above the detail.
 
 **Change**
-- [ ] Change the spacing to one scale: 4, 8, 12, 16 and 20 px, with 8 to 12 px corner radii.
-- [ ] Change all colors to theme tokens, and check light and dark themes.
+- [x] Change the spacing to one scale: 4, 8, 12, 16 and 20 px, with 8 to 12 px corner radii.
+- [x] Change all colors to theme tokens. A search of `src/views` and `src/ui` finds no literal colors; every color comes from `cx.theme()`.
+- [ ] Check light and dark themes by eye. **Not done** (app not run).
 
 **Spec**
-- [ ] Reread section 5 and section 6 of `skrivli-product.md` against the running app.
-- [ ] Update the M5.2 and M7 notes in `skrivli-implementation-plan.md`.
-- [ ] Set this plan's status to done, with evidence notes.
+- [x] Reread section 5 and section 6 of `skrivli-product.md` against the code (not the running app, which was not run). Section 5 gained the empty state, auto-select, narrow layout and the dimmed pencil; section 3 gained the shortcuts. Section 6 matched the code.
+- [x] Update the M5.2 and M7 notes in `skrivli-implementation-plan.md`.
+- [x] Set this plan's status to done, with evidence notes (below). "Done" means the code is finished, not that the manual checks passed.
 
-**Final manual checks**
+**Final manual checks** (all still open: **NOT performed**, because the app cannot be run in this environment. Do not tick these without running the app.)
 - [ ] First run: no recordings, then record one, and it appears selected under Today.
 - [ ] Record → transcribe → copy works with no network, using an installed model.
 - [ ] No model: Transcribe downloads a model and then starts.
@@ -579,6 +580,10 @@ h_flex()
 - [ ] Add, rename and delete a file in Explorer while the tab is open.
 - [ ] 200 or more recordings: scrolling stays smooth.
 - [ ] Screen reader: icon buttons announce their labels.
+
+---
+
+**Evidence (Phase 7):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (336 lib tests, no hardware) and `cargo build` pass. New pure functions with tests (written red first against `unimplemented!` stubs): `is_narrow` (680 px breakpoint), `show_empty_state`, `default_selection` (newest when nothing is selected), `step_selection` (clamped at the ends), `item_index_of` (headers counted), `shortcut_for` (dialog open, other tab, Space only when the page has focus) and `seek_hold_active`. **Design notes:** the empty state replaces the whole list and detail split when the folder is readable and empty, and its button sends `SelectTab(Record)`. Auto-select runs from `apply_library` and after a tab change, so deleting the selected recording also selects the newest one. Shortcuts are handled on the shell root with `on_key_down`; clicking a row moves focus to the shell so Space does not also press a button. Up and Down scroll the list to the new row with `ScrollStrategy::Nearest`. Spacing: the accent bar inset is 12, the pane padding 20, the transcript item radius 8; remaining values are 4, 8, 12 and 16. **Carry-overs:** the rename pencil is now dimmed (opacity 0.5) until hover instead of hidden, so it can be found with the keyboard, and F2 also renames; there is still no dedicated focus-visible style. A seek is now held on screen after release until the player position is within 750 ms of the target or one second passes, which should stop the bar jumping back. The non-WAV tooltip is also set on an enabled wrapper around the disabled Play button, in case Kit hides tooltips on disabled buttons. The Refresh icon button stays (D-20). **Not verified (app not run):** all items under Final manual checks; the look of the empty state, the narrow layout (list height is a fixed 220 px) and both themes; that Kit accepts Space and arrow keys the way the shell handler assumes (a focused button or slider may take them first); that Escape closes menus and dialogs; that the seek hold removes the flicker; that the wrapper shows the non-WAV tooltip.
 
 ---
 

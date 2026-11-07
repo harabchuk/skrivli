@@ -270,6 +270,8 @@ Landed after M3.3. `Pipeline` and `Aligner` replace the all-in-one mixer. The M3
 - [x] Wire Open Folder, Refresh, Rename and Delete. Ensure rename groups audio/sidecar/transcript coherently and handles partial failures; delete via Recycle Bin after confirmation, not unconditional permanent deletion.
 - [x] Keep app status and selection stable on external file events; do not block UI while scanning large directories.
 
+> **Update (Recordings UI plan, Phases 1 to 7):** the table, sorting and the Name/Date/Duration/Size columns above were replaced by a grouped list (Today, Yesterday, Earlier) with a detail pane. `reader.rs` was removed and playback moved to Rodio with Pause and Seek (Phase 5). Phase 7 added the empty state, auto-selecting the newest recording, list keyboard shortcuts, and the stacked layout under 680 px. The Recordings UI plan holds the evidence and the open manual checks.
+
 **Validate:** dozens/hundreds of files, malformed sidecar, external edits, playback interruption, successful and partially failing rename/delete actions.
 
 ### M5 acceptance
@@ -331,6 +333,8 @@ Landed after M3.3. `Pipeline` and `Aligner` replace the all-in-one mixer. The M3
 - [x] Present transcription completion through a Windows notification implemented in `infrastructure/platform/windows/` behind a new port on `services/ports.rs`. The tray worker already owns the message-only window; the notification uses that lifetime and does not subclass the GPUI HWND. The inference callback only records a structured event. The service emits it, and the platform adapter shows it when the user setting allows. Activating the notification posts `AppCommand::Show` and selects that `RecordingId` when `LibraryHost` still has the row.
 - [x] Bind each job to its `RecordingId` and to the audio and `.txt` paths captured when the job leaves `Queued`. `LibraryHost::rename` and `LibraryHost::delete` notify the transcription host before they change files. A rename or delete of that id while the job is queued or running cancels the job, or fails it, before any text replace. `replace_file` for the transcript runs only when those paths still belong to that id. A rename that commits before the write may retarget the same id; otherwise the job fails and writes nothing. Delete still goes through the `Trash` port and includes a `.txt` the job has already promoted, plus the sidecar.
 - [ ] Write the manual pass into `.specs/decisions.md`: record then transcribe from the detail pane; auto-transcribe left off, then turned on for one new recording; missing-model prompt satisfied by a verified local file; cancel; retry after `Failed`; restart with the `.txt` and sidecar `Ready` still shown; network disconnected after the model is installed. Each failure leaves the WAV playable in the Recordings tab.
+
+> **Update (Recordings UI plan):** the Transcribe, Cancel and Retry buttons on the selected row became one transcript area with a single state and action (Phase 3), plus Transcribe again in the `⋯` menu (Phase 4). The M7.1 Kit read-only editor item is replaced by a paragraph list with a Copy button (D-21). The manual pass listed under M7.2 and the M7 acceptance below have **not** been run on the new UI; they stay open.
 
 ### M7 acceptance
 

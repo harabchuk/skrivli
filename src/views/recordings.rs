@@ -10,6 +10,7 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::slider::{Slider, SliderState};
 use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
     h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
     StyledExt as _, WindowExt as _,
@@ -234,6 +235,8 @@ pub(crate) const HEADER_HEIGHT_PX: f32 = 32.0;
 pub(crate) const ROW_HEIGHT_PX: f32 = 56.0;
 /// Fixed width of the recordings list.
 const LIST_WIDTH_PX: f32 = 330.0;
+/// Height of the list when it is stacked above the detail in a narrow window.
+const NARROW_LIST_HEIGHT_PX: f32 = 220.0;
 
 /// One entry of the grouped list: a day header or a recording.
 #[derive(Clone, Debug)]
@@ -330,8 +333,8 @@ pub(crate) fn recording_list_row(
                 div()
                     .absolute()
                     .left_0()
-                    .top(px(10.))
-                    .bottom(px(10.))
+                    .top(px(12.))
+                    .bottom(px(12.))
                     .w(px(3.))
                     .rounded(px(2.))
                     .bg(bar),
@@ -382,6 +385,8 @@ pub(crate) type ClickAction = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 /// Everything the Recordings tab can ask the app to do.
 pub(crate) struct RecordingsActions {
+    /// Switches to the Record tab (the empty state button).
+    pub(crate) go_record: ClickAction,
     pub(crate) refresh: ClickAction,
     pub(crate) open_folder: ClickAction,
     pub(crate) play: ClickAction,
@@ -411,6 +416,8 @@ pub(crate) struct RecordingsView<'a> {
     pub(crate) can_transcribe_again: bool,
     /// The scrolling paragraph list. Used only by the Ready pane.
     pub(crate) transcript_list: Option<AnyElement>,
+    /// Window is under the narrow breakpoint: list above detail.
+    pub(crate) narrow: bool,
 }
 
 /// Data for the player card under the title row.
@@ -461,14 +468,23 @@ fn player_card(card: PlayerCard<'_>, play_pause: &ClickAction, cx: &App) -> Div 
         .border_color(cx.theme().border)
         .rounded(px(10.))
         .child(
-            Button::new("play-pause")
-                .primary()
-                .rounded(px(20.))
-                .icon(Icon::default().data(if playing { PAUSE_SVG } else { PLAY_SVG }))
-                .tooltip(tooltip)
-                .accessibility_label(label)
-                .disabled(!playable)
-                .on_click(click(play_pause)),
+            // Kit may not show a tooltip on a disabled button, so the reason also sits on
+            // a wrapper that stays enabled.
+            div()
+                .id("play-pause-wrap")
+                .when(!playable, |wrap| {
+                    wrap.tooltip(|window, cx| Tooltip::new(NOT_PLAYABLE_TOOLTIP).build(window, cx))
+                })
+                .child(
+                    Button::new("play-pause")
+                        .primary()
+                        .rounded(px(20.))
+                        .icon(Icon::default().data(if playing { PAUSE_SVG } else { PLAY_SVG }))
+                        .tooltip(tooltip)
+                        .accessibility_label(label)
+                        .disabled(!playable)
+                        .on_click(click(play_pause)),
+                ),
         )
         .child(time_label(format_duration_ms(position_ms), cx))
         .child(
@@ -522,7 +538,8 @@ fn title_row(
                 .child(
                     div()
                         .flex_none()
-                        .opacity(0.)
+                        // Dimmed, not hidden, so a keyboard user can find it. F2 also renames.
+                        .opacity(0.5)
                         .group_hover("recording-title", |style| style.opacity(1.))
                         .child(
                             Button::new("rename-recording")
@@ -598,7 +615,7 @@ fn cancel_button(actions: &RecordingsActions) -> Option<Button> {
 }
 
 fn pane_frame() -> Div {
-    v_flex().gap_3().py_6().items_start()
+    v_flex().gap_3().py_5().items_start()
 }
 
 fn no_transcript_pane(actions: &RecordingsActions, cx: &App) -> Div {
@@ -707,7 +724,7 @@ pub(crate) fn recordings_tab(
     view: RecordingsView<'_>,
     actions: RecordingsActions,
     cx: &App,
-) -> impl IntoElement {
+) -> AnyElement {
     let RecordingsView {
         list,
         count,
@@ -717,29 +734,22 @@ pub(crate) fn recordings_tab(
         pane,
         can_transcribe_again,
         transcript_list,
+        narrow,
     } = view;
-    let list =
-        if let Some(message) = error {
-            Empty::new()
-                .header(
-                    EmptyHeader::new()
-                        .title(EmptyTitle::new().child("Recordings unavailable"))
-                        .description(EmptyDescription::new().child(message)),
-                )
-                .into_any_element()
-        } else if let Some(list) = list {
-            list
-        } else {
-            Empty::new()
-                .header(
-                    EmptyHeader::new()
-                        .title(EmptyTitle::new().child("No recordings"))
-                        .description(EmptyDescription::new().child(
-                            "Saved recordings will appear here. Record from the Record tab.",
-                        )),
-                )
-                .into_any_element()
-        };
+    if show_empty_state(count, error.is_some()) {
+        return empty_library(&actions, cx).into_any_element();
+    }
+    let list = if let Some(message) = error {
+        Empty::new()
+            .header(
+                EmptyHeader::new()
+                    .title(EmptyTitle::new().child("Recordings unavailable"))
+                    .description(EmptyDescription::new().child(message)),
+            )
+            .into_any_element()
+    } else {
+        list.unwrap_or_else(|| div().into_any_element())
+    };
 
     let detail = match selected {
         Some(row) => v_flex()
@@ -761,66 +771,98 @@ pub(crate) fn recordings_tab(
             .into_any_element(),
     };
 
-    v_flex().size_full().min_h_0().child(
-        h_flex()
-            .flex_1()
-            .min_h_0()
-            .items_stretch()
-            .gap_3()
-            .overflow_hidden()
-            .child(
-                v_flex()
-                    .flex_none()
-                    .w(px(LIST_WIDTH_PX))
-                    .min_h_0()
-                    .h_full()
-                    .overflow_hidden()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .flex_shrink_0()
-                            .px_3()
-                            .py_1()
-                            .gap_2()
-                            .items_center()
-                            .child(div().font_semibold().child("Recordings"))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(count.to_string()),
-                            )
-                            .child(div().flex_1())
-                            .child(
-                                Button::new("refresh-library")
-                                    .ghost()
-                                    .icon(IconName::RefreshCw)
-                                    .tooltip("Refresh")
-                                    .accessibility_label("Refresh recordings")
-                                    .on_click(click(&actions.refresh)),
-                            )
-                            .child(
-                                Button::new("open-recordings-folder-tab")
-                                    .ghost()
-                                    .icon(IconName::FolderOpen)
-                                    .tooltip("Open recordings folder")
-                                    .accessibility_label("Open recordings folder")
-                                    .on_click(click(&actions.open_folder)),
-                            ),
-                    )
-                    .child(div().flex_1().min_h_0().child(list)),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w(px(200.))
-                    .min_h_0()
-                    .h_full()
-                    .overflow_hidden()
-                    .gap_2()
-                    .child(detail),
-            ),
-    )
+    let list_header = h_flex()
+        .flex_shrink_0()
+        .px_3()
+        .py_1()
+        .gap_2()
+        .items_center()
+        .child(div().font_semibold().child("Recordings"))
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(count.to_string()),
+        )
+        .child(div().flex_1())
+        .child(
+            Button::new("refresh-library")
+                .ghost()
+                .icon(IconName::RefreshCw)
+                .tooltip("Refresh")
+                .accessibility_label("Refresh recordings")
+                .on_click(click(&actions.refresh)),
+        )
+        .child(
+            Button::new("open-recordings-folder-tab")
+                .ghost()
+                .icon(IconName::FolderOpen)
+                .tooltip("Open recordings folder")
+                .accessibility_label("Open recordings folder")
+                .on_click(click(&actions.open_folder)),
+        );
+    let list_column = v_flex()
+        .flex_none()
+        .min_h_0()
+        .overflow_hidden()
+        .gap_1()
+        .when(narrow, |column| {
+            column.w_full().h(px(NARROW_LIST_HEIGHT_PX))
+        })
+        .when(!narrow, |column| column.w(px(LIST_WIDTH_PX)).h_full())
+        .child(list_header)
+        .child(div().flex_1().min_h_0().child(list));
+    let detail_column = v_flex()
+        .flex_1()
+        .min_h_0()
+        .overflow_hidden()
+        .gap_2()
+        .when(narrow, |column| column.w_full())
+        .when(!narrow, |column| column.min_w(px(200.)).h_full())
+        .child(detail);
+
+    let split = if narrow { v_flex() } else { h_flex() };
+    v_flex()
+        .size_full()
+        .min_h_0()
+        .child(
+            split
+                .flex_1()
+                .min_h_0()
+                .when(!narrow, |split| split.items_stretch())
+                .gap_3()
+                .overflow_hidden()
+                .child(list_column)
+                .child(detail_column),
+        )
+        .into_any_element()
+}
+
+/// Shown instead of the list and detail when the folder has no recordings.
+fn empty_library(actions: &RecordingsActions, cx: &App) -> Div {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap_3()
+        .child(
+            Icon::new(IconName::Inbox)
+                .size(px(40.))
+                .text_color(cx.theme().muted_foreground),
+        )
+        .child(div().text_lg().font_semibold().child("No recordings yet"))
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child("Recordings you make appear here, newest first."),
+        )
+        .child(
+            Button::new("start-recording-empty")
+                .primary()
+                .label("Start recording")
+                .on_click(click(&actions.go_record)),
+        )
 }
 
 pub(crate) fn open_rename_dialog(
@@ -1044,6 +1086,97 @@ pub(crate) fn seek_position_ms(value: f32, duration_ms: Option<u64>) -> u64 {
     };
     let fraction = f64::from(value.clamp(0., SEEK_STEPS)) / f64::from(SEEK_STEPS);
     ((fraction * length as f64) as u64).min(length)
+}
+
+/// Window width below which the list stacks above the detail pane.
+pub(crate) const NARROW_BREAKPOINT_PX: f32 = 680.0;
+
+/// Whether the window is narrow enough to stack the list above the detail.
+pub(crate) fn is_narrow(width_px: f32) -> bool {
+    width_px < NARROW_BREAKPOINT_PX
+}
+
+/// The full-tab empty state shows when the folder has no recordings and is readable.
+pub(crate) fn show_empty_state(count: usize, has_error: bool) -> bool {
+    count == 0 && !has_error
+}
+
+/// The newest recording when nothing is selected, otherwise the current selection.
+pub(crate) fn default_selection(
+    selected: Option<RecordingId>,
+    rows: &[RecordingRow],
+) -> Option<RecordingId> {
+    selected.or_else(|| rows.first().map(|row| row.id))
+}
+
+/// The recording `step` rows from `current` (negative is newer), clamped to the ends.
+/// With no current selection the first row is chosen.
+pub(crate) fn step_selection(
+    rows: &[RecordingRow],
+    current: Option<RecordingId>,
+    step: isize,
+) -> Option<RecordingId> {
+    let last = rows.len().checked_sub(1)?;
+    let Some(index) = current.and_then(|id| rows.iter().position(|row| row.id == id)) else {
+        return rows.first().map(|row| row.id);
+    };
+    let target = index.saturating_add_signed(step).min(last);
+    rows.get(target).map(|row| row.id)
+}
+
+/// Index of a recording in the grouped list, headers included.
+pub(crate) fn item_index_of(items: &[LibraryItem], id: RecordingId) -> Option<usize> {
+    items
+        .iter()
+        .position(|item| matches!(item, LibraryItem::Recording(row) if row.id == id))
+}
+
+/// A keyboard shortcut on the Recordings tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Shortcut {
+    Previous,
+    Next,
+    PlayPause,
+    Rename,
+    Delete,
+}
+
+/// Where a key press happened.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ShortcutContext {
+    pub(crate) on_recordings_tab: bool,
+    pub(crate) dialog_open: bool,
+    /// Space is taken by a focused button or slider, so it plays only from the page.
+    pub(crate) page_focused: bool,
+}
+
+/// Map a key name to a shortcut. Escape is not mapped: Kit closes menus and dialogs.
+pub(crate) fn shortcut_for(key: &str, context: ShortcutContext) -> Option<Shortcut> {
+    if !context.on_recordings_tab || context.dialog_open {
+        return None;
+    }
+    match key {
+        "up" => Some(Shortcut::Previous),
+        "down" => Some(Shortcut::Next),
+        "space" if context.page_focused => Some(Shortcut::PlayPause),
+        "f2" => Some(Shortcut::Rename),
+        "delete" => Some(Shortcut::Delete),
+        _ => None,
+    }
+}
+
+const SEEK_HOLD_MAX: std::time::Duration = std::time::Duration::from_secs(1);
+const SEEK_HOLD_TOLERANCE_MS: u64 = 750;
+
+/// Whether a just-released seek target should still be shown instead of the player
+/// position, which lags behind for a moment.
+pub(crate) fn seek_hold_active(
+    target_ms: u64,
+    snapshot_position_ms: u64,
+    since_release: std::time::Duration,
+) -> bool {
+    since_release < SEEK_HOLD_MAX
+        && snapshot_position_ms.abs_diff(target_ms) > SEEK_HOLD_TOLERANCE_MS
 }
 
 #[cfg(test)]
@@ -1623,5 +1756,208 @@ mod tests {
         assert_eq!(position, 0);
         assert_eq!(clamped, 10_000);
         assert_eq!(past_end, 100_000.);
+    }
+
+    fn row_with_id(raw: u64) -> RecordingRow {
+        let info = RecordingInfo::new(
+            RecordingId::from_raw(raw),
+            "clip",
+            RecordingContainer::Wav,
+            None,
+            Some(1_000),
+            1024,
+            None,
+            TranscriptStatus::None,
+            SidecarState::Present,
+            false,
+            Vec::new(),
+        );
+        RecordingRow::from_info_in(&info, &jiff::tz::TimeZone::UTC, today_utc())
+    }
+
+    #[test]
+    fn narrow_layout_starts_below_the_breakpoint() {
+        use super::is_narrow;
+
+        // Arrange / Act
+        let below = is_narrow(679.0);
+        let at = is_narrow(680.0);
+        let above = is_narrow(1200.0);
+
+        // Assert
+        assert!(below);
+        assert!(!at);
+        assert!(!above);
+    }
+
+    #[test]
+    fn empty_state_shows_only_for_a_readable_empty_folder() {
+        use super::show_empty_state;
+
+        // Arrange / Act
+        let empty = show_empty_state(0, false);
+        let unreadable = show_empty_state(0, true);
+        let filled = show_empty_state(3, false);
+
+        // Assert
+        assert!(empty);
+        assert!(!unreadable);
+        assert!(!filled);
+    }
+
+    #[test]
+    fn default_selection_picks_the_newest_only_when_nothing_is_selected() {
+        use super::default_selection;
+
+        // Arrange
+        let rows = [row_with_id(7), row_with_id(3)];
+
+        // Act
+        let none_selected = default_selection(None, &rows);
+        let kept = default_selection(Some(RecordingId::from_raw(3)), &rows);
+        let empty = default_selection(None, &[]);
+
+        // Assert
+        assert_eq!(none_selected, Some(RecordingId::from_raw(7)));
+        assert_eq!(kept, Some(RecordingId::from_raw(3)));
+        assert_eq!(empty, None);
+    }
+
+    #[test]
+    fn step_selection_moves_and_clamps_at_the_ends() {
+        use super::step_selection;
+
+        // Arrange
+        let rows = [row_with_id(7), row_with_id(3), row_with_id(1)];
+        let id = RecordingId::from_raw;
+
+        // Act
+        let down = step_selection(&rows, Some(id(7)), 1);
+        let up = step_selection(&rows, Some(id(1)), -1);
+        let past_end = step_selection(&rows, Some(id(1)), 1);
+        let past_start = step_selection(&rows, Some(id(7)), -1);
+        let from_nothing = step_selection(&rows, None, 1);
+        let no_rows = step_selection(&[], None, 1);
+
+        // Assert
+        assert_eq!(down, Some(id(3)));
+        assert_eq!(up, Some(id(3)));
+        assert_eq!(past_end, Some(id(1)));
+        assert_eq!(past_start, Some(id(7)));
+        assert_eq!(from_nothing, Some(id(7)));
+        assert_eq!(no_rows, None);
+    }
+
+    #[test]
+    fn item_index_counts_headers() {
+        use super::item_index_of;
+
+        // Arrange
+        let items = library_items(&[row_with_id(7), row_with_id(3)]);
+
+        // Act
+        let first = item_index_of(&items, RecordingId::from_raw(7));
+        let second = item_index_of(&items, RecordingId::from_raw(3));
+        let missing = item_index_of(&items, RecordingId::from_raw(99));
+
+        // Assert
+        assert_eq!(first, Some(1));
+        assert_eq!(second, Some(2));
+        assert_eq!(missing, None);
+    }
+
+    #[test]
+    fn shortcuts_map_keys_on_the_recordings_tab() {
+        use super::{shortcut_for, Shortcut, ShortcutContext};
+
+        // Arrange
+        let page = ShortcutContext {
+            on_recordings_tab: true,
+            dialog_open: false,
+            page_focused: true,
+        };
+
+        // Act
+        let mapped = ["up", "down", "space", "f2", "delete", "escape", "a"]
+            .map(|key| shortcut_for(key, page));
+
+        // Assert
+        assert_eq!(
+            mapped,
+            [
+                Some(Shortcut::Previous),
+                Some(Shortcut::Next),
+                Some(Shortcut::PlayPause),
+                Some(Shortcut::Rename),
+                Some(Shortcut::Delete),
+                None,
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn shortcuts_are_off_with_a_dialog_or_on_the_record_tab() {
+        use super::{shortcut_for, ShortcutContext};
+
+        // Arrange
+        let dialog = ShortcutContext {
+            on_recordings_tab: true,
+            dialog_open: true,
+            page_focused: true,
+        };
+        let record_tab = ShortcutContext {
+            on_recordings_tab: false,
+            dialog_open: false,
+            page_focused: true,
+        };
+
+        // Act
+        let in_dialog = shortcut_for("space", dialog);
+        let delete_in_dialog = shortcut_for("delete", dialog);
+        let on_record = shortcut_for("down", record_tab);
+
+        // Assert
+        assert_eq!(in_dialog, None);
+        assert_eq!(delete_in_dialog, None);
+        assert_eq!(on_record, None);
+    }
+
+    #[test]
+    fn space_needs_the_page_to_hold_focus() {
+        use super::{shortcut_for, Shortcut, ShortcutContext};
+
+        // Arrange
+        let on_button = ShortcutContext {
+            on_recordings_tab: true,
+            dialog_open: false,
+            page_focused: false,
+        };
+
+        // Act
+        let space = shortcut_for("space", on_button);
+        let arrow = shortcut_for("down", on_button);
+
+        // Assert
+        assert_eq!(space, None);
+        assert_eq!(arrow, Some(Shortcut::Next));
+    }
+
+    #[test]
+    fn seek_hold_lasts_until_the_player_catches_up_or_one_second_passes() {
+        use super::seek_hold_active;
+
+        // Arrange
+        let target = 60_000;
+
+        // Act
+        let lagging = seek_hold_active(target, 12_000, Duration::from_millis(200));
+        let caught_up = seek_hold_active(target, 60_300, Duration::from_millis(200));
+        let timed_out = seek_hold_active(target, 12_000, Duration::from_millis(1_200));
+
+        // Assert
+        assert!(lagging);
+        assert!(!caught_up);
+        assert!(!timed_out);
     }
 }

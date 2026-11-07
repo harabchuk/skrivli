@@ -59,11 +59,13 @@ use super::model_prompt::{
 };
 use super::recording::{record_tab, DeviceChoice, RecordView};
 use super::recordings::{
-    can_transcribe_again, failure_reason, library_header, library_items, may_auto_scroll,
-    open_delete_dialog, open_rename_dialog, open_transcribe_again_dialog, play_action,
-    recording_list_row, recordings_tab, rows_from_catalog, seek_position_ms, seek_value,
-    set_row_status, shown_position_ms, transcript_pane, ClickAction, LibraryItem, PlayAction,
-    PlayerCard, RecordingRow, RecordingsActions, RecordingsView, TranscriptPane, SEEK_STEPS,
+    can_transcribe_again, default_selection, failure_reason, is_narrow, item_index_of,
+    library_header, library_items, may_auto_scroll, open_delete_dialog, open_rename_dialog,
+    open_transcribe_again_dialog, play_action, recording_list_row, recordings_tab,
+    rows_from_catalog, seek_hold_active, seek_position_ms, seek_value, set_row_status,
+    shortcut_for, shown_position_ms, step_selection, transcript_pane, ClickAction, LibraryItem,
+    PlayAction, PlayerCard, RecordingRow, RecordingsActions, RecordingsView, Shortcut,
+    ShortcutContext, TranscriptPane, SEEK_STEPS,
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
@@ -121,6 +123,8 @@ pub(crate) struct MainWindow {
     _seek_sub: Subscription,
     /// Position under the thumb while the user drags it. Playback updates are ignored.
     seek_drag: Option<u64>,
+    /// The released seek target, shown until the player position catches up.
+    seek_hold: Option<(u64, Instant)>,
     /// Where Play starts when nothing is playing: the slider position, 0 by default.
     idle_position_ms: u64,
     /// The value last written to the seek slider.
@@ -197,6 +201,7 @@ impl MainWindow {
                     let position_ms = seek_position_ms(value.start(), this.selected_duration_ms());
                     this.seek_drag = None;
                     if this.snapshot_is_selected() {
+                        this.seek_hold = Some((position_ms, Instant::now()));
                         this.player.seek(position_ms);
                     } else {
                         this.idle_position_ms = position_ms;
@@ -304,6 +309,7 @@ impl MainWindow {
             seek_slider,
             _seek_sub: seek_sub,
             seek_drag: None,
+            seek_hold: None,
             idle_position_ms: 0,
             seek_slider_value: 0.,
             mic_meter: PeakHold::new(),
@@ -365,8 +371,60 @@ impl MainWindow {
             cx.notify();
             return;
         }
+        let opens_tab = matches!(command, AppCommand::SelectTab(_));
         let effect = apply(&mut self.presentation, command);
         self.perform(effect, window, cx);
+        if opens_tab {
+            self.ensure_selection(window, cx);
+        }
+    }
+
+    /// Select the newest recording when the Recordings tab is open with nothing selected.
+    fn ensure_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.presentation.tab() != AppTab::Recordings {
+            return;
+        }
+        let chosen = default_selection(self.library_selected, &self.library_rows);
+        if chosen != self.library_selected {
+            self.select_library_row(chosen, window, cx);
+        }
+    }
+
+    fn on_shortcut(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let page_focused =
+            self.focus.is_focused(window) || self.transcript_focus.is_focused(window);
+        let context = ShortcutContext {
+            on_recordings_tab: self.presentation.tab() == AppTab::Recordings,
+            dialog_open: window.has_active_dialog(cx),
+            page_focused,
+        };
+        let Some(shortcut) = shortcut_for(key, context) else {
+            return false;
+        };
+        match shortcut {
+            Shortcut::Previous => self.step_library(-1, window, cx),
+            Shortcut::Next => self.step_library(1, window, cx),
+            Shortcut::PlayPause => {
+                self.play_selected();
+                cx.notify();
+            }
+            Shortcut::Rename => self.rename_selected(window, cx),
+            Shortcut::Delete => self.delete_selected(window, cx),
+        }
+        true
+    }
+
+    fn step_library(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = step_selection(&self.library_rows, self.library_selected, step) else {
+            return;
+        };
+        if self.library_selected != Some(id) {
+            self.select_library_row(Some(id), window, cx);
+        }
+        if let Some(index) = item_index_of(&self.library_items, id) {
+            self.library_scroll
+                .scroll_to_item(index, gpui_kit::ScrollStrategy::Nearest);
+        }
     }
 
     fn on_close_requested(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -899,7 +957,7 @@ impl MainWindow {
                         .gap_3()
                         .px_2()
                         .py_1()
-                        .rounded(px(6.))
+                        .rounded(px(8.))
                         .when(current == Some(index), |row| row.bg(cx.theme().accent))
                         .child(
                             div()
@@ -1120,6 +1178,7 @@ impl MainWindow {
         if selection_changed {
             self.load_selected_transcript(window, cx);
         }
+        self.ensure_selection(window, cx);
     }
 
     fn apply_player(&mut self, snapshot: PlayerSnapshot) {
@@ -1136,6 +1195,7 @@ impl MainWindow {
     fn reset_player_position(&mut self) {
         self.idle_position_ms = 0;
         self.seek_drag = None;
+        self.seek_hold = None;
         self.current_paragraph = None;
     }
 
@@ -1198,11 +1258,15 @@ impl MainWindow {
     }
 
     fn shown_position_ms(&self) -> u64 {
+        let hold = self.seek_hold.and_then(|(target, at)| {
+            seek_hold_active(target, self.player_snapshot.position_ms, at.elapsed())
+                .then_some(target)
+        });
         shown_position_ms(
             self.snapshot_is_selected(),
             self.player_snapshot.position_ms,
             self.idle_position_ms,
-            self.seek_drag,
+            self.seek_drag.or(hold),
         )
     }
 
@@ -1500,6 +1564,7 @@ fn logical_bounds(window: &Window) -> Option<LogicalRect> {
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_seek_slider(window, cx);
+        let narrow = is_narrow(f32::from(window.viewport_size().width));
         let selected = match self.presentation.tab() {
             AppTab::Record => 0,
             AppTab::Recordings => 1,
@@ -1584,6 +1649,8 @@ impl Render for MainWindow {
                                             &row,
                                             selected,
                                             cx.listener(move |this, _event, window, cx| {
+                                                // Keys go to the page, not to a button.
+                                                window.focus(&this.focus, cx);
                                                 this.select_library_row(Some(id), window, cx);
                                             }),
                                             cx,
@@ -1638,7 +1705,13 @@ impl Render for MainWindow {
                 let again_entity = entity.clone();
                 let cancel_entity = entity.clone();
                 let retry_entity = entity.clone();
+                let record_entity = entity.clone();
                 let actions = RecordingsActions {
+                    go_record: Rc::new(move |_event, window, cx| {
+                        record_entity.update(cx, |view, cx| {
+                            view.handle(AppCommand::SelectTab(AppTab::Record), window, cx);
+                        });
+                    }),
                     refresh: Rc::new(move |_event, window, cx| {
                         refresh_entity.update(cx, |view, cx| {
                             view.handle(AppCommand::RefreshLibrary, window, cx);
@@ -1714,6 +1787,7 @@ impl Render for MainWindow {
                         pane,
                         can_transcribe_again: can_again,
                         transcript_list,
+                        narrow,
                     },
                     actions,
                     cx,
@@ -1742,6 +1816,14 @@ impl Render for MainWindow {
         v_flex()
             .id("skrivli-shell")
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.modifiers.modified() {
+                    return;
+                }
+                if this.on_shortcut(event.keystroke.key.as_str(), window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
