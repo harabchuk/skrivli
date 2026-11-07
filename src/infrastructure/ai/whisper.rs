@@ -36,7 +36,7 @@ impl InferencePort for WhisperInference {
             .ok_or_else(|| AppError::message("load model", "model path is not valid UTF-8"))?;
         // Engine chatter stays on its own streams; never forward into tracing.
         let context = WhisperContext::new_with_params(path, WhisperContextParameters::default())
-            .map_err(|error| AppError::message("model unsupported", error.to_string()))?;
+            .map_err(|error| AppError::message("load model", error.to_string()))?;
         self.context = Some(context);
         Ok(())
     }

@@ -494,7 +494,7 @@ mod tests {
             std::env::temp_dir().join(format!("skrivli-model-pick-id-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
-        let body = b"ggml".repeat(40);
+        let body = b"lmgg".repeat(40);
         let sha = hex::encode(Sha256::digest(&body));
         let manifest = two_variant_manifest(body.len() as u64, &sha);
         let snaps = Arc::new(Mutex::new(Vec::new()));
@@ -530,7 +530,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("skrivli-model-ok-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
-        let body = b"ggml".repeat(80);
+        let body = b"lmgg".repeat(80);
         let sha = hex::encode(Sha256::digest(&body));
         let manifest = tiny_manifest(body.len() as u64, &sha);
         let reads = Arc::new(Mutex::new(0_usize));
@@ -648,7 +648,7 @@ mod tests {
         let bad = dir.join("ggml-bad.bin");
         std::fs::write(&bad, b"nope").expect("bad");
         let good = dir.join("ggml-picked.bin");
-        std::fs::write(&good, b"ggml-ok").expect("good");
+        std::fs::write(&good, b"lmgg-ok").expect("good");
         let snaps = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&snaps);
         let (host, handle) = ModelHost::spawn(

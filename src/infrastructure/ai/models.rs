@@ -20,9 +20,8 @@ use crate::infrastructure::platform;
 pub(crate) const DEFAULT_VARIANT_ID: &str = "base-q5_1";
 
 const MANIFEST_JSON: &str = include_str!("../../../resources/models/manifest.json");
-const GGML_MAGIC: [u8; 4] = *b"ggml";
-const GGJT_MAGIC: [u8; 4] = *b"ggjt";
-const GGMF_MAGIC: [u8; 4] = *b"ggmf";
+/// whisper.cpp reads a little-endian `u32` 0x67676d6c, so the bytes on disk are `lmgg`.
+const GGML_MAGIC: [u8; 4] = 0x6767_6d6c_u32.to_le_bytes();
 const DOWNLOAD_CHUNK: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -366,7 +365,7 @@ fn is_ggml_filename(path: &Path) -> bool {
 }
 
 fn is_ggml_magic(magic: [u8; 4]) -> bool {
-    magic == GGML_MAGIC || magic == GGJT_MAGIC || magic == GGMF_MAGIC
+    magic == GGML_MAGIC
 }
 
 fn temp_sibling(path: &Path) -> PathBuf {
@@ -452,6 +451,39 @@ mod tests {
             .find(|item| item.filename == "ggml-custom.bin")
             .expect("custom");
         assert!(custom.variant_id.is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_accepts_real_whisper_header_bytes() {
+        // Arrange: first bytes of a real ggml-base-q5_1.bin (u32 0x67676d6c, little-endian).
+        let dir = temp_dir("validate-real");
+        let path = dir.join("ggml-real.bin");
+        std::fs::write(&path, [0x6c, 0x6d, 0x67, 0x67, 0x99, 0xca, 0x00, 0x00]).expect("write");
+
+        // Act
+        let result = validate_model_file(&path);
+
+        // Assert
+        assert!(result.is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_rejects_text_ggml_prefix() {
+        // Arrange
+        let dir = temp_dir("validate-text");
+        let path = dir.join("ggml-text.bin");
+        std::fs::write(&path, b"ggml-not-a-model").expect("write");
+
+        // Act
+        let error = validate_model_file(&path).expect_err("unsupported");
+
+        // Assert
+        assert_eq!(
+            error.user_message(),
+            "The speech model file is not supported."
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
