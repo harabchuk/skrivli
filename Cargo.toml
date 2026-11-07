@@ -24,6 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ureq = "2"
 whisper-rs = "0.16"
 windows-core = "0.58"
+jiff = "0.2.39"
 
 [build-dependencies]
 winresource = "0.1"

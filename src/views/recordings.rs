@@ -15,8 +15,15 @@ use gpui_kit::{
     ParentElement, SharedString, Styled, Window,
 };
 
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
+
+use crate::domain::audio::CivilTime;
 use crate::domain::ids::RecordingId;
-use crate::domain::recording::{format_duration_ms, format_size, RecordingInfo, SidecarState};
+use crate::domain::recording::{
+    format_duration_ms, format_size, recording_day, RecordingContainer, RecordingDay,
+    RecordingInfo, SidecarState, TranscriptStatus,
+};
 use crate::infrastructure::storage::library::LibraryCatalog;
 use crate::services::playback::PlayerPhase;
 
@@ -29,19 +36,45 @@ pub(crate) struct RecordingRow {
     pub(crate) size: SharedString,
     pub(crate) transcript: SharedString,
     pub(crate) detail: SharedString,
+    // The grouped list and detail header read these from phase 1 on.
+    #[allow(dead_code)]
+    pub(crate) day: RecordingDay,
+    #[allow(dead_code)]
+    pub(crate) meta: SharedString,
+    #[allow(dead_code)]
+    pub(crate) detail_line: SharedString,
+    #[allow(dead_code)]
+    pub(crate) badge: RowBadge,
 }
 
 impl RecordingRow {
+    /// Build a row using the system time zone and the current time.
+    #[cfg(test)]
     pub(crate) fn from_info(info: &RecordingInfo) -> Self {
-        let date = info
+        let (zone, today) = local_clock();
+        Self::from_info_in(info, &zone, today)
+    }
+
+    /// Build a row with an explicit time zone and "today", so tests are exact.
+    pub(crate) fn from_info_in(info: &RecordingInfo, zone: &TimeZone, today: CivilTime) -> Self {
+        let started = info
             .started_at_unix_ms()
-            .map(format_unix_ms)
+            .and_then(|ms| civil_from_unix_ms(ms, zone).ok());
+        let day = started.map_or(RecordingDay::Earlier, |time| recording_day(time, today));
+        let date = started
+            .map(|t| {
+                format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}",
+                    t.year, t.month, t.day, t.hour, t.minute
+                )
+            })
             .unwrap_or_else(|| "—".to_string());
         let duration = info
             .duration_ms()
             .map(format_duration_ms)
             .unwrap_or_else(|| "—".to_string());
-        let mut detail = format!("Size {}", format_size(info.size_bytes()));
+        let size = format_size(info.size_bytes());
+        let mut detail = format!("Size {size}");
         if info.recovered() {
             detail.push_str(" · Recovered");
         }
@@ -53,14 +86,129 @@ impl RecordingRow {
         if !info.problems().is_empty() {
             detail.push_str(" · Had recording issues");
         }
+        let meta = row_meta(day, started, &duration, &size);
+        let detail_line = detail_line(day, started, &duration, &size, info.container());
         Self {
             id: info.id(),
             name: SharedString::from(info.name().to_string()),
             date: SharedString::from(date),
             duration: SharedString::from(duration),
-            size: SharedString::from(format_size(info.size_bytes())),
+            size: SharedString::from(size),
             transcript: SharedString::from(info.transcript().display()),
             detail: SharedString::from(detail),
+            day,
+            meta: SharedString::from(meta),
+            detail_line: SharedString::from(detail_line),
+            badge: RowBadge::from_status(info.transcript(), info.recovered()),
+        }
+    }
+}
+
+/// The recorded time could not be converted to civil time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TimestampOutOfRange;
+
+/// Convert Unix milliseconds to civil time in `zone`.
+pub(crate) fn civil_from_unix_ms(
+    unix_ms: u64,
+    zone: &TimeZone,
+) -> Result<CivilTime, TimestampOutOfRange> {
+    let ms = i64::try_from(unix_ms).map_err(|_| TimestampOutOfRange)?;
+    let timestamp = Timestamp::from_millisecond(ms).map_err(|_| TimestampOutOfRange)?;
+    let dt = timestamp.to_zoned(zone.clone()).datetime();
+    let year = i32::from(dt.year());
+    let month = u8::try_from(dt.month()).map_err(|_| TimestampOutOfRange)?;
+    let day = u8::try_from(dt.day()).map_err(|_| TimestampOutOfRange)?;
+    let hour = u8::try_from(dt.hour()).map_err(|_| TimestampOutOfRange)?;
+    let minute = u8::try_from(dt.minute()).map_err(|_| TimestampOutOfRange)?;
+    let second = u8::try_from(dt.second()).map_err(|_| TimestampOutOfRange)?;
+    CivilTime::new(year, month, day, hour, minute, second).ok_or(TimestampOutOfRange)
+}
+
+/// The system time zone and the current local civil time.
+pub(crate) fn local_clock() -> (TimeZone, CivilTime) {
+    let zone = TimeZone::system();
+    let today = u64::try_from(Timestamp::now().as_millisecond())
+        .ok()
+        .and_then(|ms| civil_from_unix_ms(ms, &zone).ok())
+        .unwrap_or(CivilTime {
+            year: 1970,
+            month: 1,
+            day: 1,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        });
+    (zone, today)
+}
+
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+fn clock_text(time: CivilTime) -> String {
+    format!("{:02}:{:02}", time.hour, time.minute)
+}
+
+fn month_day_text(time: CivilTime) -> String {
+    let month = MONTHS
+        .get(usize::from(time.month).saturating_sub(1))
+        .copied()
+        .unwrap_or("—");
+    format!("{month} {}", time.day)
+}
+
+/// Second line of a list row: `14:32 · 12:41 · 38 MB` or `Nov 3 · 31:04 · 93 MB`.
+fn row_meta(day: RecordingDay, started: Option<CivilTime>, duration: &str, size: &str) -> String {
+    let when = match (day, started) {
+        (_, None) => "—".to_string(),
+        (RecordingDay::Today | RecordingDay::Yesterday, Some(time)) => clock_text(time),
+        (RecordingDay::Earlier, Some(time)) => month_day_text(time),
+    };
+    format!("{when} · {duration} · {size}")
+}
+
+/// Detail header line: `Today, 14:32 · 12:41 · 38 MB · WAV`.
+fn detail_line(
+    day: RecordingDay,
+    started: Option<CivilTime>,
+    duration: &str,
+    size: &str,
+    container: RecordingContainer,
+) -> String {
+    let when = match (day, started) {
+        (_, None) => "—".to_string(),
+        (RecordingDay::Today, Some(time)) => format!("Today, {}", clock_text(time)),
+        (RecordingDay::Yesterday, Some(time)) => format!("Yesterday, {}", clock_text(time)),
+        (RecordingDay::Earlier, Some(time)) => {
+            format!("{}, {}", month_day_text(time), clock_text(time))
+        }
+    };
+    let format = container.extension().to_uppercase();
+    format!("{when} · {duration} · {size} · {format}")
+}
+
+/// What the right edge of a list row shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RowBadge {
+    None,
+    Queued,
+    Progress(u8),
+    Ready,
+    Failed,
+    Recovered,
+}
+
+impl RowBadge {
+    /// An active or failed status wins over Recovered. Recovered wins over Ready or nothing.
+    pub(crate) fn from_status(status: TranscriptStatus, recovered: bool) -> Self {
+        match status {
+            TranscriptStatus::Queued => Self::Queued,
+            TranscriptStatus::Progress(percent) => Self::Progress(percent),
+            TranscriptStatus::Failed => Self::Failed,
+            _ if recovered => Self::Recovered,
+            TranscriptStatus::Ready => Self::Ready,
+            TranscriptStatus::None => Self::None,
         }
     }
 }
@@ -446,10 +594,11 @@ pub(crate) fn open_delete_dialog(
 }
 
 pub(crate) fn rows_from_catalog(catalog: &LibraryCatalog) -> Vec<RecordingRow> {
+    let (zone, today) = local_clock();
     catalog
         .entries
         .iter()
-        .map(|entry| RecordingRow::from_info(&entry.info))
+        .map(|entry| RecordingRow::from_info_in(&entry.info, &zone, today))
         .collect()
 }
 
@@ -486,37 +635,12 @@ pub(crate) fn play_button_label(phase: PlayerPhase) -> SharedString {
     }
 }
 
-fn format_unix_ms(ms: u64) -> String {
-    let secs = (ms / 1_000) as i64;
-    let days = secs.div_euclid(86_400);
-    let time = secs.rem_euclid(86_400) as u64;
-    let hour = time / 3600;
-    let minute = (time % 3600) / 60;
-    let (year, month, day) = civil_from_days(days);
-    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
-}
-
-/// Howard Hinnant civil-from-days (UTC).
-fn civil_from_days(days: i64) -> (i32, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = (yoe as i64) + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y as i32, m as u32, d as u32)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{format_unix_ms, RecordingRow};
+    use super::{RecordingRow, RowBadge};
     use crate::domain::ids::RecordingId;
     use crate::domain::recording::{
-        RecordingContainer, RecordingInfo, SidecarState, TranscriptStatus,
+        RecordingContainer, RecordingDay, RecordingInfo, SidecarState, TranscriptStatus,
     };
 
     #[test]
@@ -537,14 +661,202 @@ mod tests {
         );
 
         // Act
-        let row = RecordingRow::from_info(&info);
+        let row = RecordingRow::from_info_in(&info, &jiff::tz::TimeZone::UTC, today_utc());
 
         // Assert
         assert_eq!(row.name.as_ref(), "clip");
         assert_eq!(row.duration.as_ref(), "01:05");
         assert_eq!(row.transcript.as_ref(), "Ready");
         assert!(row.detail.as_ref().contains("Recovered"));
-        assert_eq!(format_unix_ms(0), "1970-01-01 00:00");
+        assert_eq!(row.date.as_ref(), "1970-01-01 00:00");
+    }
+
+    fn ms(utc: &str) -> u64 {
+        let ts: jiff::Timestamp = utc.parse().expect("timestamp");
+        u64::try_from(ts.as_millisecond()).expect("positive")
+    }
+
+    fn today_utc() -> crate::domain::audio::CivilTime {
+        crate::domain::audio::CivilTime::new(2026, 11, 7, 12, 0, 0).expect("civil")
+    }
+
+    fn info_at(
+        started: Option<u64>,
+        transcript: TranscriptStatus,
+        recovered: bool,
+    ) -> RecordingInfo {
+        RecordingInfo::new(
+            RecordingId::from_raw(1),
+            "clip",
+            RecordingContainer::Wav,
+            started,
+            Some(761_000),
+            38 * 1024 * 1024,
+            None,
+            transcript,
+            SidecarState::Present,
+            recovered,
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn civil_conversion_uses_the_given_zone() {
+        use super::civil_from_unix_ms;
+        use jiff::tz::{self, TimeZone};
+
+        // Arrange
+        let zone = TimeZone::fixed(tz::offset(2));
+
+        // Act
+        let civil = civil_from_unix_ms(0, &zone).expect("in range");
+
+        // Assert
+        assert_eq!(
+            (civil.year, civil.month, civil.day, civil.hour, civil.minute),
+            (1970, 1, 1, 2, 0)
+        );
+    }
+
+    #[test]
+    fn civil_conversion_follows_daylight_saving_changes() {
+        use super::civil_from_unix_ms;
+        use jiff::tz::TimeZone;
+
+        // Arrange
+        let zone = TimeZone::get("America/New_York").expect("tz database");
+        let before = ms("2026-03-08T06:59:00Z");
+        let after = ms("2026-03-08T07:01:00Z");
+
+        // Act
+        let before = civil_from_unix_ms(before, &zone).expect("in range");
+        let after = civil_from_unix_ms(after, &zone).expect("in range");
+
+        // Assert
+        assert_eq!((before.hour, before.minute), (1, 59));
+        assert_eq!((after.hour, after.minute), (3, 1));
+    }
+
+    #[test]
+    fn civil_conversion_rejects_out_of_range_timestamps() {
+        use super::{civil_from_unix_ms, TimestampOutOfRange};
+        use jiff::tz::TimeZone;
+
+        // Arrange
+        let zone = TimeZone::UTC;
+
+        // Act
+        let too_big = civil_from_unix_ms(u64::MAX, &zone);
+        let beyond_calendar = civil_from_unix_ms(i64::MAX as u64, &zone);
+
+        // Assert
+        assert_eq!(too_big, Err(TimestampOutOfRange));
+        assert_eq!(beyond_calendar, Err(TimestampOutOfRange));
+    }
+
+    #[test]
+    fn row_text_for_today_and_earlier_recordings() {
+        use jiff::tz::TimeZone;
+
+        // Arrange
+        let today_info = info_at(
+            Some(ms("2026-11-07T14:32:00Z")),
+            TranscriptStatus::None,
+            false,
+        );
+        let earlier_info = info_at(
+            Some(ms("2026-11-03T09:05:00Z")),
+            TranscriptStatus::None,
+            false,
+        );
+        let yesterday_info = info_at(
+            Some(ms("2026-11-06T23:59:00Z")),
+            TranscriptStatus::None,
+            false,
+        );
+
+        // Act
+        let today_row = RecordingRow::from_info_in(&today_info, &TimeZone::UTC, today_utc());
+        let earlier_row = RecordingRow::from_info_in(&earlier_info, &TimeZone::UTC, today_utc());
+        let yesterday_row =
+            RecordingRow::from_info_in(&yesterday_info, &TimeZone::UTC, today_utc());
+
+        // Assert
+        assert_eq!(today_row.day, RecordingDay::Today);
+        assert_eq!(today_row.meta.as_ref(), "14:32 · 12:41 · 38.0 MB");
+        assert_eq!(
+            today_row.detail_line.as_ref(),
+            "Today, 14:32 · 12:41 · 38.0 MB · WAV"
+        );
+        assert_eq!(yesterday_row.day, RecordingDay::Yesterday);
+        assert_eq!(
+            yesterday_row.detail_line.as_ref(),
+            "Yesterday, 23:59 · 12:41 · 38.0 MB · WAV"
+        );
+        assert_eq!(earlier_row.day, RecordingDay::Earlier);
+        assert_eq!(earlier_row.meta.as_ref(), "Nov 3 · 12:41 · 38.0 MB");
+        assert_eq!(
+            earlier_row.detail_line.as_ref(),
+            "Nov 3, 09:05 · 12:41 · 38.0 MB · WAV"
+        );
+    }
+
+    #[test]
+    fn row_groups_by_local_day_not_utc_day() {
+        use jiff::tz::{self, TimeZone};
+
+        // Arrange: 23:30 UTC on Nov 6 is 01:30 on Nov 7 at UTC+2.
+        let zone = TimeZone::fixed(tz::offset(2));
+        let info = info_at(
+            Some(ms("2026-11-06T23:30:00Z")),
+            TranscriptStatus::None,
+            false,
+        );
+
+        // Act
+        let row = RecordingRow::from_info_in(&info, &zone, today_utc());
+
+        // Assert
+        assert_eq!(row.day, RecordingDay::Today);
+        assert_eq!(row.meta.as_ref(), "01:30 · 12:41 · 38.0 MB");
+    }
+
+    #[test]
+    fn row_without_start_time_is_earlier_and_shows_dash() {
+        use jiff::tz::TimeZone;
+
+        // Arrange
+        let info = info_at(None, TranscriptStatus::None, false);
+
+        // Act
+        let row = RecordingRow::from_info_in(&info, &TimeZone::UTC, today_utc());
+
+        // Assert
+        assert_eq!(row.day, RecordingDay::Earlier);
+        assert_eq!(row.date.as_ref(), "—");
+        assert_eq!(row.meta.as_ref(), "— · 12:41 · 38.0 MB");
+        assert_eq!(row.detail_line.as_ref(), "— · 12:41 · 38.0 MB · WAV");
+    }
+
+    #[test]
+    fn badge_maps_status_and_recovered_flag() {
+        // Arrange
+        let cases = [
+            (TranscriptStatus::None, false, RowBadge::None),
+            (TranscriptStatus::None, true, RowBadge::Recovered),
+            (TranscriptStatus::Ready, false, RowBadge::Ready),
+            (TranscriptStatus::Ready, true, RowBadge::Recovered),
+            (TranscriptStatus::Queued, true, RowBadge::Queued),
+            (TranscriptStatus::Progress(42), true, RowBadge::Progress(42)),
+            (TranscriptStatus::Failed, true, RowBadge::Failed),
+            (TranscriptStatus::Failed, false, RowBadge::Failed),
+        ];
+
+        // Act
+        let actual = cases.map(|(status, recovered, _)| RowBadge::from_status(status, recovered));
+
+        // Assert
+        assert_eq!(actual, cases.map(|(_, _, badge)| badge));
     }
 
     #[test]

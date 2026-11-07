@@ -242,3 +242,9 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 **Outcome:** `WINDOW_DURATION` went from 30 to 10 minutes, with the overlap still 30 seconds, and the worker passes each window to the engine as a borrowed slice instead of copying it. By calculation, peak audio and spectrogram memory falls from about 290 MB to about 58 MB, excluding the model. About 5% of the audio is now decoded twice, up from about 2%.
 
 **Not verified:** transcript quality at the extra seams was not compared on a long real recording, and memory was not measured.
+
+## D-19 — Local time with `jiff` (Phase 0 of the Recordings UI plan)
+
+**Outcome:** `jiff = "0.2.39"` with default features is used to turn Unix milliseconds into local civil time. The default features include the Windows system zone lookup and a bundled time zone database, so no extra setup is needed. A test that read the system zone gave the expected local offset on the dev PC. A test also confirmed the New York spring-forward change (01:59 to 03:01). `jiff` appears only in `views/recordings.rs`. `domain/` keeps its own `CivilTime`, and `recording_day` compares plain dates. `TimeZone::system()` is called only in `local_clock`, where the views build row data.
+
+**Not verified:** behavior on a PC whose system zone cannot be detected. Jiff then falls back to UTC.

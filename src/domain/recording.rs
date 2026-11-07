@@ -3,6 +3,7 @@
 //! No paths, GPUI, Windows, or file I/O live here. Infrastructure attaches
 //! filesystem locations when it scans a folder.
 
+use crate::domain::audio::CivilTime;
 use crate::domain::ids::RecordingId;
 
 /// Lifecycle phase shared by the recording service and the shell snapshot.
@@ -247,6 +248,48 @@ pub(crate) fn format_duration_ms(duration_ms: u64) -> String {
     }
 }
 
+/// Which list group a recording belongs to, by local calendar day.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecordingDay {
+    Today,
+    Yesterday,
+    Earlier,
+}
+
+/// Group a recording by its local calendar day relative to `today`.
+///
+/// A recording dated after `today` (clock skew) counts as Today.
+pub(crate) fn recording_day(recorded: CivilTime, today: CivilTime) -> RecordingDay {
+    let recorded = (recorded.year, recorded.month, recorded.day);
+    let today = (today.year, today.month, today.day);
+    if recorded >= today {
+        RecordingDay::Today
+    } else if recorded == previous_day(today) {
+        RecordingDay::Yesterday
+    } else {
+        RecordingDay::Earlier
+    }
+}
+
+fn previous_day((year, month, day): (i32, u8, u8)) -> (i32, u8, u8) {
+    if day > 1 {
+        (year, month, day - 1)
+    } else if month > 1 {
+        (year, month - 1, days_in_month(year, month - 1))
+    } else {
+        (year - 1, 12, 31)
+    }
+}
+
+fn days_in_month(year: i32, month: u8) -> u8 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
 /// Stable synthetic id when a sidecar is missing or unreadable.
 ///
 /// Based on the display stem only so an in-app rename can recompute the same
@@ -280,9 +323,11 @@ pub(crate) fn preserve_selection(
 #[cfg(test)]
 mod tests {
     use super::{
-        format_duration_ms, format_size, preserve_selection, synthetic_recording_id,
-        RecordingContainer, RecordingFormat, RecordingInfo, SidecarState, TranscriptStatus,
+        format_duration_ms, format_size, preserve_selection, recording_day, synthetic_recording_id,
+        RecordingContainer, RecordingDay, RecordingFormat, RecordingInfo, SidecarState,
+        TranscriptStatus,
     };
+    use crate::domain::audio::CivilTime;
     use crate::domain::ids::RecordingId;
 
     fn row(id: u64, name: &str, started: Option<u64>) -> RecordingInfo {
@@ -360,6 +405,64 @@ mod tests {
         assert_eq!(format_duration_ms(3_661_000), "01:01:01");
         assert_eq!(format_size(500), "500 B");
         assert_eq!(format_size(2_048), "2.0 KB");
+    }
+
+    fn civil(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> CivilTime {
+        CivilTime::new(year, month, day, hour, minute, 0).expect("valid civil time")
+    }
+
+    #[test]
+    fn recording_day_splits_at_local_midnight() {
+        // Arrange
+        let today = civil(2026, 11, 7, 12, 0);
+        let late_yesterday = civil(2026, 11, 6, 23, 59);
+        let early_today = civil(2026, 11, 7, 0, 1);
+        let two_days_ago = civil(2026, 11, 5, 23, 59);
+
+        // Act
+        let groups = [late_yesterday, early_today, two_days_ago].map(|t| recording_day(t, today));
+
+        // Assert
+        assert_eq!(
+            groups,
+            [
+                RecordingDay::Yesterday,
+                RecordingDay::Today,
+                RecordingDay::Earlier
+            ]
+        );
+    }
+
+    #[test]
+    fn recording_day_handles_month_and_year_boundaries() {
+        // Arrange
+        let new_year = civil(2027, 1, 1, 9, 0);
+        let first_of_march_leap = civil(2028, 3, 1, 9, 0);
+        let first_of_march = civil(2027, 3, 1, 9, 0);
+
+        // Act
+        let dec_31 = recording_day(civil(2026, 12, 31, 20, 0), new_year);
+        let feb_29 = recording_day(civil(2028, 2, 29, 20, 0), first_of_march_leap);
+        let feb_28 = recording_day(civil(2027, 2, 28, 20, 0), first_of_march);
+        let feb_27_two_days_back = recording_day(civil(2027, 2, 27, 20, 0), first_of_march);
+
+        // Assert
+        assert_eq!(dec_31, RecordingDay::Yesterday);
+        assert_eq!(feb_29, RecordingDay::Yesterday);
+        assert_eq!(feb_28, RecordingDay::Yesterday);
+        assert_eq!(feb_27_two_days_back, RecordingDay::Earlier);
+    }
+
+    #[test]
+    fn recording_day_treats_future_dates_as_today() {
+        // Arrange
+        let today = civil(2026, 11, 7, 12, 0);
+
+        // Act
+        let day = recording_day(civil(2026, 11, 8, 1, 0), today);
+
+        // Assert
+        assert_eq!(day, RecordingDay::Today);
     }
 
     #[test]

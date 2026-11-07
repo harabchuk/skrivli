@@ -1,6 +1,6 @@
 # Skrivli Recordings page redesign plan
 
-**Status:** Not started. Nothing in this plan has been implemented. The code snippets have not been compiled.
+**Status:** Phase 0 done. Phases 1 to 7 are not started. The code snippets have not been compiled.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
 
@@ -106,26 +106,28 @@ Each phase should be one reviewable commit or PR, and should leave the app worki
 **Goal:** have correct, tested dates and row text before any layout changes.
 
 **Add**
-- [ ] Add the [`jiff`](https://docs.rs/jiff) crate to `Cargo.toml`, and commit `Cargo.lock`. Confirm that its default features resolve the Windows system time zone, including daylight saving changes, and record the version in `decisions.md`.
-- [ ] Add a function that converts Unix milliseconds to civil time with `jiff`, taking the `TimeZone` as a parameter so tests can pass a fixed zone. Use `jiff::Timestamp::from_millisecond`, then `to_zoned(zone).datetime()`, and convert the result to `CivilTime`. Keep `jiff` out of `domain/`, and call `TimeZone::system()` only where the views get their row data.
-- [ ] Add `RecordingDay { Today, Yesterday, Earlier }` and a pure `recording_day(recorded: CivilTime, today: CivilTime)` in `domain/recording.rs`. Handle month and year boundaries.
-- [ ] Add row text helpers in `views/recordings.rs`:
+- [x] Add the [`jiff`](https://docs.rs/jiff) crate to `Cargo.toml`, and commit `Cargo.lock`. Confirm that its default features resolve the Windows system time zone, including daylight saving changes, and record the version in `decisions.md`.
+- [x] Add a function that converts Unix milliseconds to civil time with `jiff`, taking the `TimeZone` as a parameter so tests can pass a fixed zone. Use `jiff::Timestamp::from_millisecond`, then `to_zoned(zone).datetime()`, and convert the result to `CivilTime`. Keep `jiff` out of `domain/`, and call `TimeZone::system()` only where the views get their row data.
+- [x] Add `RecordingDay { Today, Yesterday, Earlier }` and a pure `recording_day(recorded: CivilTime, today: CivilTime)` in `domain/recording.rs`. Handle month and year boundaries.
+- [x] Add row text helpers in `views/recordings.rs`:
   - Today and Yesterday rows: `14:32 · 12:41 · 38 MB`
   - Earlier rows: `Nov 3 · 31:04 · 93 MB`
   - Detail line: `Today, 14:32 · 12:41 · 38 MB · WAV`
-- [ ] Add `RowBadge { None, Queued, Progress(u8), Ready, Failed, Recovered }`, with a pure mapping from status and the recovered flag. An active or failed status wins over Recovered.
+- [x] Add `RowBadge { None, Queued, Progress(u8), Ready, Failed, Recovered }`, with a pure mapping from status and the recovered flag. An active or failed status wins over Recovered.
 
 **Remove**
-- [ ] Remove `format_unix_ms` and `civil_from_days` once nothing uses them.
+- [x] Remove `format_unix_ms` and `civil_from_days` once nothing uses them.
 
 **Tests to write first**
-- [ ] Conversion gives the right civil time in a fixed zone, on both sides of a daylight saving change, and for an out-of-range timestamp, which returns an error rather than panicking.
-- [ ] A recording from 23:59 yesterday and one from 00:01 today land in the right groups.
-- [ ] 1 January groups 31 December as Yesterday.
-- [ ] A recording with no start time goes to Earlier and shows `—`.
-- [ ] Each status maps to the right badge, including Recovered with Failed.
+- [x] Conversion gives the right civil time in a fixed zone, on both sides of a daylight saving change, and for an out-of-range timestamp, which returns an error rather than panicking.
+- [x] A recording from 23:59 yesterday and one from 00:01 today land in the right groups.
+- [x] 1 January groups 31 December as Yesterday.
+- [x] A recording with no start time goes to Earlier and shows `—`.
+- [x] Each status maps to the right badge, including Recovered with Failed.
 
 **Done when:** every row shows local time. A manual check near a time zone offset confirms it.
+
+**Evidence (Phase 0):** `jiff` 0.2.39 with default features, recorded as D-19 in `decisions.md`. Unit tests cover a fixed zone, both sides of the New York spring-forward change, out-of-range timestamps, local-versus-UTC day grouping, month, year and leap-day boundaries, a missing start time, and every badge mapping. `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass. A test that used the system zone returned UTC+1 on the dev PC, so the Windows zone resolves. **Not verified:** a visual check of the running app near a zone offset (the rows are not shown in the new format until Phase 1). Notes: `RecordingRow` gained `day`, `meta`, `detail_line` and `badge`, marked `allow(dead_code)` until Phase 1 and 2 read them. Sizes still use `format_size`, so the text reads `38.0 MB`, not `38 MB`. The existing Date column now shows local time.
 
 ---
 
