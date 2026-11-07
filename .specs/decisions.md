@@ -113,6 +113,8 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 
 **Native build requirements (x86_64-pc-windows-msvc):** CMake on `PATH` (VS Build Tools CMake and/or Scoop), a working MSVC toolset (`VsDevCmd -arch=amd64`), and **libclang** for bindgen (`LIBCLANG_PATH` → directory with `libclang.dll`). Machine note: winget `LLVM.LLVM` MSI needed elevation and was cancelled (exit 1602). Successful compile used portable `clang+llvm-18.1.8` under gitignored `.tools/llvm/` (and/or Scoop LLVM). With `LIBCLANG_PATH` set, `whisper-rs` **0.16.0** / `whisper-rs-sys` **0.15.0** built cleanly on this host.
 
+**Binding pitfalls (0.16.0):** Do not use `set_abort_callback_safe`: its trampoline casts the boxed closure to the wrong type, so it reads unrelated memory and usually aborts at the end of encoding (`whisper_full` error -6). The adapter installs its own `extern "C"` check over the cancel `AtomicBool`. Segment callback timestamps are in 10 ms units, not milliseconds; the adapter converts them. `real_model_decodes_a_chunk_without_aborting` (`#[ignore]`, set `SKRIVLI_TEST_MODEL`) covers the real engine.
+
 **Licenses / notices:** whisper.cpp and ggml are MIT. Ship whisper.cpp NOTICE/license text with the Windows distribution (M9). Model files are separate downloads (D-08), not bundled.
 
 **Runtime contract:** load one model on the inference worker thread; `FullParams` with `SamplingStrategy::Greedy { best_of: 1 }`; disable engine stdout (`set_print_*` false); progress and abort via safe callbacks; never log transcript text or audio samples. Default `cargo test` uses a fake `InferencePort` and does not download models or run real inference.
