@@ -44,11 +44,12 @@ use crate::services::transcription::{JobPhase, TranscriptionHost, TranscriptionS
 use crate::ui::theme::{apply_theme, theme_icon};
 use crate::views::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
 use crate::views::hooks::ShellHooks;
-use crate::views::state::{model_install_state, AppTab, ModelInstallState, Presentation};
+use crate::views::state::{model_install_state, AppTab, Presentation};
 
 use super::model_prompt::{
-    after_model_ready, catalog_row_label, open_model_alert, open_model_prompt, selected_model_line,
-    AfterModelReady, CatalogRow, ModelPromptHandlers, ModelPromptView,
+    after_model_ready, error_display, model_copy, model_footer, open_model_alert,
+    open_model_prompt, row_accessibility_label, row_meta, AfterModelReady, CatalogRow,
+    ErrorDisplay, ModelPromptHandlers, ModelPromptView,
 };
 use super::recording::record_tab;
 use super::recordings::{
@@ -688,7 +689,10 @@ impl MainWindow {
             self.finish_model_choice(window, cx);
         }
         if let Some(message) = self.presentation.model_failure() {
-            if previous != Some(message) && is_distinct_model_message(message) {
+            if previous != Some(message)
+                && is_distinct_model_message(message)
+                && error_display(self.model_prompt_open) == ErrorDisplay::Alert
+            {
                 open_model_alert(window, cx, message);
             }
         }
@@ -917,48 +921,59 @@ impl MainWindow {
     }
 
     fn model_prompt_view(&self) -> ModelPromptView {
-        let progress = self.presentation.model_progress();
-        let failure = self.presentation.model_failure();
         let phase = self.presentation.model_phase();
         let Ok(manifest) = ModelManifest::load_bundled() else {
             return ModelPromptView {
                 catalog: Vec::new(),
                 selected_id: None,
-                selected_line: SharedString::from(selected_model_line(None, None)),
-                progress,
-                failure,
-                phase,
-                can_use: false,
-                selected_is_target: false,
+                progress: self.presentation.model_progress(),
+                failure: self.presentation.model_failure(),
+                footer: model_footer(None, phase, None),
+                selected_bytes: None,
+                selected_name: SharedString::default(),
             };
+        };
+        let state_of = |id: &str| {
+            model_install_state(
+                id,
+                self.settings.selected_model(),
+                self.presentation.model_files(),
+            )
         };
         let selected = manifest.by_id(&self.prompt_model_id);
         ModelPromptView {
             catalog: manifest
                 .entries()
                 .iter()
-                .map(|entry| CatalogRow {
-                    id: SharedString::from(entry.id()),
-                    label: SharedString::from(catalog_row_label(entry.id(), entry.bytes())),
+                .map(|entry| {
+                    let state = state_of(entry.id());
+                    let copy = model_copy(entry.id());
+                    CatalogRow {
+                        id: SharedString::from(entry.id()),
+                        label: SharedString::from(format!(
+                            "{} ({})",
+                            entry.id(),
+                            row_meta(state, entry.bytes())
+                        )),
+                        accessibility_label: SharedString::from(row_accessibility_label(
+                            &copy, state,
+                        )),
+                        install_state: state,
+                    }
                 })
                 .collect(),
             selected_id: selected.map(|entry| SharedString::from(entry.id())),
-            selected_line: SharedString::from(selected_model_line(
-                selected.map(|entry| entry.id()),
-                selected.map(|entry| entry.bytes()),
-            )),
-            progress,
-            failure,
-            phase,
-            selected_is_target: selected
-                .is_some_and(|entry| self.presentation.download_target() == Some(entry.id())),
-            can_use: selected.is_some_and(|entry| {
-                model_install_state(
-                    entry.id(),
-                    self.settings.selected_model(),
-                    self.presentation.model_files(),
-                ) == ModelInstallState::Installed
-            }),
+            progress: self.presentation.model_progress(),
+            failure: self.presentation.model_failure(),
+            footer: model_footer(
+                selected.map(|entry| (entry.id(), state_of(entry.id()))),
+                phase,
+                self.presentation.download_target(),
+            ),
+            selected_bytes: selected.map(|entry| entry.bytes()),
+            selected_name: selected
+                .map(|entry| SharedString::from(model_copy(entry.id()).name.to_string()))
+                .unwrap_or_default(),
         }
     }
 

@@ -1,6 +1,6 @@
 # Skrivli model dialog, Settings and status bar plan
 
-Status: **Phase 1 done** (steps 1.1-1.6, automated tests only; manual tests not run). Decision 1 approved. Phases 2-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
+Status: **Phases 1-2 done** (steps 1.1-2.3, automated tests only; manual tests not run). Decision 1 approved. Phases 3-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
 
 **Goal in one sentence:** make it obvious which transcription models are installed and which one is in use, let the user change model at any time, and give the dialogs a consistent, modern look.
 
@@ -242,7 +242,7 @@ These are easy to change if you disagree.
 
 #### Step 2.1: Add tags to the rows
 
-- [ ] **What it does:** shows a green **✓ In use** tag or an **Installed** tag on each row, and shows "On this PC" in place of the size for installed models.
+- [x] **What it does:** shows a green **✓ In use** tag or an **Installed** tag on each row, and shows "On this PC" in place of the size for installed models.
 - **Why:** this is the direct answer to "not clear which models are already downloaded".
 - **Changes:** add `install_state` to `CatalogRow`, and fill it in `model_prompt_view` using step 1.2. Use Kit's `Tag::success()`. Include the state in each row's `accessibility_label`, for example "Base, in use".
 - **Tests:** `CatalogRow` gets the right state for each case. The accessibility label includes it.
@@ -250,7 +250,7 @@ These are easy to change if you disagree.
 
 #### Step 2.2: Show only the buttons that apply
 
-- [ ] **What it does:** replaces the three fixed buttons with the set in the [button table](#which-buttons-appear).
+- [x] **What it does:** replaces the three fixed buttons with the set in the [button table](#which-buttons-appear).
 - **Why:** greyed-out buttons make the user work out what is possible. One primary button tells them.
 - **Changes:** add a `ModelFooter` enum and `model_footer(selected_state, phase, selected_id, download_target)` in `views/model_prompt.rs`. The primary button uses Kit's `.primary()`. The Download label includes the size. **Use** dispatches `AppCommand::UseModel`.
 - **Tests:** cover every row of the table. Remove `download_button_is_the_word_download` and `download_button_label`.
@@ -258,7 +258,7 @@ These are easy to change if you disagree.
 
 #### Step 2.3: Show download errors inside the dialog
 
-- [ ] **What it does:** displays a failure next to the model that failed, using Kit's `Alert::error` or danger-coloured text.
+- [x] **What it does:** displays a failure next to the model that failed, using Kit's `Alert::error` or danger-coloured text.
 - **Why:** today some failures open a second popup over the dialog, and that popup can be the one `close_dialog` closes.
 - **Changes:** in `apply_model`, only open `open_model_alert` when the model dialog is not open. Keep the distinct messages for missing, unsupported and unverifiable files, which the product spec requires.
 - **Tests:** a pure function decides inline or alert, depending on whether the dialog is open.
