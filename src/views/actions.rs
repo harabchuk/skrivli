@@ -35,6 +35,8 @@ pub(crate) enum AppCommand {
     RetryModelDownload,
     /// Make the model highlighted in the dialog the one in use.
     UseModel,
+    /// Open the model dialog from the status bar or Settings.
+    OpenModelDialog,
     Show,
     Hide,
     ToggleVisibility,
@@ -78,6 +80,7 @@ pub(crate) enum Effect {
     CancelModelDownload,
     RetryModelDownload,
     UseModel,
+    OpenModelDialog,
     /// Show the window. `recording_id` is set only when that row is still in the library.
     ShowSelect {
         recording_id: Option<RecordingId>,
@@ -127,6 +130,7 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
         AppCommand::CancelModelDownload => Effect::CancelModelDownload,
         AppCommand::RetryModelDownload => Effect::RetryModelDownload,
         AppCommand::UseModel => Effect::UseModel,
+        AppCommand::OpenModelDialog => Effect::OpenModelDialog,
         AppCommand::Show => {
             state.set_visible(true);
             state.set_pending_show(false);
@@ -408,7 +412,7 @@ mod tests {
         assert!(effects.effects.is_empty());
         assert!(again.effects.is_empty());
         assert_eq!(state.shell_pulses(), 5);
-        assert_eq!(state.status_line(), "Shell ready (5)");
+        assert_eq!(state.status_line("00:00:05"), "Ready");
     }
 
     #[test]
@@ -437,6 +441,18 @@ mod tests {
 
         // Assert
         assert_eq!(effect, Effect::UseModel);
+    }
+
+    #[test]
+    fn open_model_dialog_command_returns_its_effect() {
+        // Arrange
+        let mut state = presentation();
+
+        // Act
+        let effect = apply_command(&mut state, AppCommand::OpenModelDialog);
+
+        // Assert
+        assert_eq!(effect, Effect::OpenModelDialog);
     }
 
     #[test]

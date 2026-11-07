@@ -135,7 +135,7 @@ impl Presentation {
     }
 
     /// False until the worker has reported the installed list once.
-    #[cfg_attr(not(test), allow(dead_code))] // Read by the status bar in a later phase.
+    #[cfg_attr(not(test), allow(dead_code))] // `model_status` reads the field directly.
     pub(crate) fn model_files_known(&self) -> bool {
         self.model_files_known
     }
@@ -247,6 +247,7 @@ impl Presentation {
         self.tray_explanation_seen = true;
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // No longer shown; the bridge test still counts it.
     pub(crate) fn shell_pulses(&self) -> u64 {
         self.shell_pulses
     }
@@ -286,29 +287,61 @@ impl Presentation {
         self.pending_show = pending;
     }
 
-    pub(crate) fn status_line(&self) -> String {
-        let shell = if self.shell_pulses() == 0 {
-            "Idle".to_string()
+    /// `elapsed` is passed in because the window owns the recording start time.
+    pub(crate) fn status_line(&self, elapsed: &str) -> String {
+        let activity = match self.record_phase {
+            RecordPhase::Starting => Some("Starting".to_string()),
+            RecordPhase::Recording => Some(format!("Recording {elapsed}")),
+            RecordPhase::Stopping => Some("Saving".to_string()),
+            RecordPhase::Idle | RecordPhase::Error => None,
+        };
+        let transcription = self
+            .transcript_status
+            .filter(|_| self.transcription_active())
+            .map(|status| match status {
+                TranscriptStatus::Progress(percent) => format!("Transcribing {percent}%"),
+                other => other.display().to_string(),
+            });
+        let parts: Vec<String> = activity
+            .into_iter()
+            .chain(self.notice.map(str::to_string))
+            .chain(transcription)
+            .collect();
+        if parts.is_empty() {
+            "Ready".to_string()
         } else {
-            format!("Shell ready ({})", self.shell_pulses)
-        };
-        let body = match self.notice {
-            Some(notice) => format!("{notice} {shell}"),
-            None => shell,
-        };
-        let base = match self.record_phase {
-            RecordPhase::Starting => format!("Starting {body}"),
-            RecordPhase::Recording => format!("Recording {body}"),
-            RecordPhase::Stopping => format!("Saving {body}"),
-            RecordPhase::Idle | RecordPhase::Error => body,
-        };
-        if self.transcription_active() {
-            if let Some(status) = self.transcript_status {
-                return format!("{base} · {}", status.display());
+            parts.join(" · ")
+        }
+    }
+
+    pub(crate) fn model_status(&self, selected_id: &str) -> ModelStatus {
+        if self.model_phase == ModelPhase::Downloading {
+            if let Some(id) = &self.download_target {
+                return ModelStatus::Downloading {
+                    id: id.clone(),
+                    percent: self.model_progress.unwrap_or(0),
+                };
             }
         }
-        base
+        if !self.model_files_known {
+            return ModelStatus::Checking;
+        }
+        match model_install_state(selected_id, selected_id, &self.model_files) {
+            ModelInstallState::InUse => ModelStatus::InUse {
+                id: selected_id.to_string(),
+            },
+            ModelInstallState::Installed | ModelInstallState::NotInstalled => ModelStatus::Missing,
+        }
     }
+}
+
+/// What the status bar and Settings report about the model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ModelStatus {
+    Checking,
+    InUse { id: String },
+    Missing,
+    Downloading { id: String, percent: u8 },
 }
 
 /// Whether one model is usable. Selected but not installed counts as `NotInstalled`.
@@ -336,7 +369,7 @@ pub(crate) fn model_install_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{model_install_state, ModelInstallState, Presentation};
+    use super::{model_install_state, ModelInstallState, ModelStatus, Presentation};
     use crate::domain::ids::{JobId, RecordingId};
     use crate::domain::recording::{RecordPhase, TranscriptStatus};
     use crate::services::models::{ModelFile, ModelPhase, ModelSnapshot};
@@ -384,8 +417,8 @@ mod tests {
             state.transcript_status(),
             Some(TranscriptStatus::Progress(42))
         );
-        assert!(state.status_line().starts_with("Recording "));
-        assert!(state.status_line().contains("42%"));
+        assert!(state.status_line("00:00:05").starts_with("Recording "));
+        assert!(state.status_line("00:00:05").contains("42%"));
     }
 
     #[test]
@@ -433,7 +466,7 @@ mod tests {
         assert_eq!(state.transcript_status(), Some(TranscriptStatus::Failed));
         assert_eq!(state.detail_text(), "Could not run speech recognition.");
         assert!(!state.detail_text().contains("engine"));
-        assert!(!state.status_line().starts_with("Recording "));
+        assert!(!state.status_line("00:00:05").starts_with("Recording "));
     }
 
     #[test]
@@ -462,7 +495,7 @@ mod tests {
 
         // Assert
         assert_eq!(state.model_progress(), Some(80));
-        assert!(state.status_line().starts_with("Recording "));
+        assert!(state.status_line("00:00:05").starts_with("Recording "));
     }
 
     fn model_snapshot(phase: ModelPhase, installed: &[&str]) -> ModelSnapshot {
@@ -574,5 +607,141 @@ mod tests {
 
         // Assert
         assert_eq!(state.download_target(), None);
+    }
+
+    #[test]
+    fn status_line_reads_naturally_for_every_phase() {
+        // Arrange
+        let mut state = presentation();
+        let idle = state.status_line("00:00:05");
+
+        // Act
+        state.set_record_phase(RecordPhase::Starting);
+        let starting = state.status_line("00:00:05");
+        state.set_record_phase(RecordPhase::Recording);
+        let recording = state.status_line("00:12:41");
+        state.set_record_phase(RecordPhase::Stopping);
+        let saving = state.status_line("00:12:41");
+        state.set_record_phase(RecordPhase::Error);
+        let errored = state.status_line("00:12:41");
+
+        // Assert
+        assert_eq!(idle, "Ready");
+        assert_eq!(starting, "Starting");
+        assert_eq!(recording, "Recording 00:12:41");
+        assert_eq!(saving, "Saving");
+        assert_eq!(errored, "Ready");
+    }
+
+    #[test]
+    fn status_line_shows_transcription_progress() {
+        // Arrange
+        let mut state = presentation();
+        state.apply_transcription(snapshot(JobPhase::Transcribing, 42, None));
+
+        // Act
+        let line = state.status_line("00:00:05");
+
+        // Assert
+        assert_eq!(line, "Transcribing 42%");
+    }
+
+    #[test]
+    fn status_line_puts_a_notice_with_the_activity() {
+        // Arrange
+        let mut state = presentation();
+        state.set_notice(Some("Saved."));
+        let alone = state.status_line("00:00:05");
+        state.set_record_phase(RecordPhase::Recording);
+
+        // Act
+        let with_activity = state.status_line("00:00:07");
+
+        // Assert
+        assert_eq!(alone, "Saved.");
+        assert_eq!(with_activity, "Recording 00:00:07 · Saved.");
+    }
+
+    #[test]
+    fn status_line_never_shows_internal_text() {
+        // Arrange
+        let mut state = presentation();
+        state.add_shell_pulses(5);
+
+        // Act
+        let line = state.status_line("00:00:05");
+
+        // Assert
+        assert!(!line.contains("Shell"));
+        assert!(!line.contains("Idle"));
+    }
+
+    #[test]
+    fn model_status_is_checking_until_the_list_is_known() {
+        // Arrange
+        let mut state = presentation();
+
+        // Act
+        let before = state.model_status("a");
+        state.apply_model(model_snapshot(ModelPhase::Idle, &[]));
+        let after = state.model_status("a");
+
+        // Assert
+        assert_eq!(before, ModelStatus::Checking);
+        assert_eq!(after, ModelStatus::Missing);
+    }
+
+    #[test]
+    fn model_status_is_in_use_when_the_selected_model_is_installed() {
+        // Arrange
+        let mut state = presentation();
+        state.apply_model(model_snapshot(ModelPhase::Idle, &["a", "b"]));
+
+        // Act
+        let status = state.model_status("a");
+
+        // Assert
+        assert_eq!(
+            status,
+            ModelStatus::InUse {
+                id: "a".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn model_status_is_missing_when_only_another_model_is_installed() {
+        // Arrange
+        let mut state = presentation();
+        state.apply_model(model_snapshot(ModelPhase::Idle, &["b"]));
+
+        // Act
+        let status = state.model_status("a");
+
+        // Assert
+        assert_eq!(status, ModelStatus::Missing);
+    }
+
+    #[test]
+    fn a_download_in_progress_wins_over_everything() {
+        // Arrange
+        let mut state = presentation();
+
+        // Act
+        state.begin_download("a");
+        let before_list = state.model_status("b");
+        state.apply_model(ModelSnapshot {
+            progress_percent: 40,
+            ..model_snapshot(ModelPhase::Downloading, &["b"])
+        });
+        let during = state.model_status("b");
+
+        // Assert
+        let expected = |percent| ModelStatus::Downloading {
+            id: "a".to_string(),
+            percent,
+        };
+        assert_eq!(before_list, expected(0));
+        assert_eq!(during, expected(40));
     }
 }

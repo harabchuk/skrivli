@@ -1,6 +1,6 @@
 # Skrivli model dialog, Settings and status bar plan
 
-Status: **Phases 1-3 done** (steps 1.1-3.4, automated tests only; manual tests not run, so card layout is unseen). Decision 1 approved. Phases 4-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
+Status: **Phases 1-4 done** (steps 1.1-4.3, automated tests only; manual tests not run, so card layout is unseen). Decision 1 approved. Phases 5-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
 
 **Goal in one sentence:** make it obvious which transcription models are installed and which one is in use, let the user change model at any time, and give the dialogs a consistent, modern look.
 
@@ -328,7 +328,7 @@ These are easy to change if you disagree.
 
 #### Step 4.1: Clean up the status text
 
-- [ ] **What it does:** shows `Ready`, `Starting`, `Recording 00:12:41`, `Saving` or `Transcribing 42%`, with any notice taking priority.
+- [x] **What it does:** shows `Ready`, `Starting`, `Recording 00:12:41`, `Saving` or `Transcribing 42%`, with any notice taking priority.
 - **Why:** users shouldn't see `Shell ready (5)` or `Recording Idle`.
 - **Changes:** rewrite `Presentation::status_line` to take the elapsed time as an argument, because `MainWindow::render` is what holds the start time. Stop showing `shell_pulses`. The bridge test still counts them, so the accessor stays with `#[cfg_attr(not(test), allow(dead_code))]`, as this codebase already does elsewhere.
 - **Tests:** update the `status_line` assertions in `views/state.rs` and `views/actions.rs`, including `"Shell ready (5)"`. Add one case per recording phase, one for transcription, and one for a notice.
@@ -336,7 +336,7 @@ These are easy to change if you disagree.
 
 #### Step 4.2: Work out what the model item should say
 
-- [ ] **What it does:** adds one function that decides the text and colour of the status bar's model item.
+- [x] **What it does:** adds one function that decides the text and colour of the status bar's model item.
 - **Why:** this keeps the logic testable and matches the rest of the app through step 1.2.
 - **Changes:** add `ModelStatus` with `Checking`, `InUse { id }`, `Missing` and `Downloading { id, percent }`, and `model_status(...)` in `views/state.rs`.
 - **Tests:** not-known gives `Checking`, so "No model installed" doesn't flash at launch. Selected but not installed gives `Missing`. A download in progress wins over everything else.
@@ -344,7 +344,7 @@ These are easy to change if you disagree.
 
 #### Step 4.3: Add the clickable item
 
-- [ ] **What it does:** adds the model item on the right of the status bar, with a coloured dot and hover highlight. Clicking it opens the model dialog.
+- [x] **What it does:** adds the model item on the right of the status bar, with a coloured dot and hover highlight. Clicking it opens the model dialog.
 - **Why:** this is the status bar improvement you asked for.
 - **Changes:**
   - Replace the hand-built strip in `MainWindow::render` with Kit's `StatusBar`, keeping the 28px height. Put the status text in `.child()` and the model item in `.right()`. With only a right region, Kit left-aligns the center and gives it the free space.

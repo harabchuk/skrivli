@@ -10,6 +10,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
+use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::table::{TableEvent, TableSelection, TableState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, IconName, WindowExt as _};
@@ -48,9 +49,9 @@ use crate::views::hooks::ShellHooks;
 use crate::views::state::{model_install_state, AppTab, Presentation};
 
 use super::model_prompt::{
-    after_model_ready, card_progress, error_display, model_copy, model_footer, open_model_alert,
-    open_model_prompt, row_accessibility_label, row_meta, row_tag, AfterModelReady, ErrorDisplay,
-    ModelPromptHandlers, ModelPromptView,
+    after_model_ready, card_progress, error_display, model_copy, model_footer, model_status_item,
+    open_model_alert, open_model_prompt, row_accessibility_label, row_meta, row_tag,
+    AfterModelReady, ErrorDisplay, ModelPromptHandlers, ModelPromptView,
 };
 use super::recording::record_tab;
 use super::recordings::{
@@ -469,6 +470,7 @@ impl MainWindow {
                 let checked = move |cx: &App| watched.read_with(cx, |view, _| view.close_to_tray());
                 open_settings(window, cx, checked, on_change);
             }
+            Effect::OpenModelDialog => self.open_model_prompt(window, cx),
             Effect::OpenAbout => open_about(window, cx),
             Effect::StartRecording => self.begin_recording(),
             Effect::StopRecording => self.recording.stop(),
@@ -1376,6 +1378,7 @@ impl Render for MainWindow {
                 .map(|started| started.elapsed())
                 .unwrap_or(Duration::ZERO),
         );
+        let status_elapsed = elapsed.clone();
         let phase_label = match phase {
             RecordPhase::Idle => "Ready",
             RecordPhase::Starting => "Starting",
@@ -1536,7 +1539,20 @@ impl Render for MainWindow {
                 .into_any_element()
             }
         };
-        let status = SharedString::from(self.presentation.status_line());
+        let status = SharedString::from(self.presentation.status_line(&status_elapsed));
+        let model_status = self
+            .presentation
+            .model_status(self.settings.selected_model());
+        let status_entity = entity.clone();
+        let model_item = model_status_item(
+            &model_status,
+            move |_event, window, cx| {
+                status_entity.update(cx, |view, cx| {
+                    view.handle(AppCommand::OpenModelDialog, window, cx);
+                });
+            },
+            cx,
+        );
         let settings_entity = entity.clone();
         let theme_entity = entity.clone();
         let theme = self.settings.theme();
@@ -1601,15 +1617,13 @@ impl Render for MainWindow {
                     .child(div().size_full().min_h_0().child(body)),
             )
             .child(
-                h_flex()
+                // With only a right region, the center is start-aligned and takes the free
+                // space, so long status text truncates before the model item moves.
+                StatusBar::new()
                     .h(px(28.))
                     .px_3()
-                    .items_center()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(status),
+                    .child(div().min_w_0().truncate().child(status))
+                    .when_some(model_item, |bar, item| bar.right(item)),
             )
     }
 }

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogClose;
-use gpui_kit::component::{v_flex, WindowExt as _};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _, WindowExt as _};
 use gpui_kit::{
     div, AnyElement, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window,
 };
@@ -19,7 +19,7 @@ use crate::ui::components::model_card::{
     model_card, ModelCardData, ModelCardProgress, ModelCardTag,
 };
 
-use super::state::ModelInstallState;
+use super::state::{ModelInstallState, ModelStatus};
 
 const SUBTITLE: &str = "Runs on this PC. Your audio never leaves it.";
 const NETWORK_NOTE: &str = "Download needs a network";
@@ -318,18 +318,92 @@ pub(crate) fn open_model_alert(window: &mut Window, cx: &mut App, message: &'sta
     });
 }
 
+/// Text for the status bar item. `None` while the installed list is still loading.
+pub(crate) fn model_status_text(status: &ModelStatus) -> Option<String> {
+    match status {
+        ModelStatus::Checking => None,
+        ModelStatus::InUse { id } => Some(format!("Model: {}", model_copy(id).name)),
+        ModelStatus::Missing => Some("No model installed · Choose…".to_string()),
+        ModelStatus::Downloading { id, percent } => {
+            Some(format!("Downloading {} {percent}%", model_copy(id).name))
+        }
+    }
+}
+
+/// Status bar item. A ghost Button gives focus, hover and an accessible name for free.
+pub(crate) fn model_status_item(
+    status: &ModelStatus,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Option<AnyElement> {
+    let text = model_status_text(status)?;
+    let dot = match status {
+        ModelStatus::InUse { .. } => cx.theme().success,
+        ModelStatus::Missing | ModelStatus::Downloading { .. } | ModelStatus::Checking => {
+            cx.theme().warning
+        }
+    };
+    let tooltip = match status {
+        ModelStatus::InUse { id } => format!(
+            "Transcription model: {}. Click to change.",
+            model_copy(id).name
+        ),
+        _ => "Choose a transcription model.".to_string(),
+    };
+    Some(
+        Button::new("model-status")
+            .ghost()
+            .xsmall()
+            .tooltip(tooltip.clone())
+            .accessibility_label(tooltip)
+            .on_click(on_click)
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .child(div().size_1p5().rounded_full().bg(dot))
+                    .child(SharedString::from(text)),
+            )
+            .into_any_element(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         after_model_ready, download_label, download_progress_text, error_display, model_copy,
-        model_footer, row_accessibility_label, row_meta, row_tag, use_label, AfterModelReady,
-        ErrorDisplay, ModelFooter,
+        model_footer, model_status_text, row_accessibility_label, row_meta, row_tag, use_label,
+        AfterModelReady, ErrorDisplay, ModelFooter,
     };
     use crate::domain::ids::RecordingId;
     use crate::infrastructure::ai::models::ModelManifest;
     use crate::services::models::ModelPhase;
     use crate::ui::components::model_card::ModelCardTag;
-    use crate::views::state::ModelInstallState;
+    use crate::views::state::{ModelInstallState, ModelStatus};
+
+    #[test]
+    fn status_text_covers_every_model_status() {
+        // Arrange
+        let in_use = ModelStatus::InUse {
+            id: "base-q5_1".to_string(),
+        };
+        let downloading = ModelStatus::Downloading {
+            id: "small-q5_1".to_string(),
+            percent: 42,
+        };
+
+        // Act
+        let in_use_text = model_status_text(&in_use);
+        let downloading_text = model_status_text(&downloading);
+        let checking = model_status_text(&ModelStatus::Checking);
+        let missing = model_status_text(&ModelStatus::Missing);
+
+        // Assert
+        assert_eq!(in_use_text.as_deref(), Some("Model: Base"));
+        assert_eq!(downloading_text.as_deref(), Some("Downloading Small 42%"));
+        assert_eq!(checking, None);
+        assert_eq!(missing.as_deref(), Some("No model installed · Choose…"));
+    }
 
     #[test]
     fn every_manifest_entry_has_a_friendly_name() {
