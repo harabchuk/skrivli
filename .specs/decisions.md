@@ -101,7 +101,7 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 - **Catalog:** `LibraryHost` scans on a worker; `*.wav.partial` skipped; `*.recovered.wav` listed; `.m4a` listed if present (playback deferred — WAV only). Colliding sidecar ids keep both rows.
 - **Watch:** `FindFirstChangeNotificationW` with ~350 ms debounce plus a 30 s poll fallback. Missing folders poll until they appear.
 - **Delete:** `SHFileOperationW` with `FOF_ALLOWUNDO` (Recycle Bin) for audio + `.json` + `.txt` after confirm.
-- **Playback:** streaming PCM16 WAV via `cpal` 0.16 on a dedicated player thread; selection change stops playback. Device sample-rate negotiation beyond canonical 48 kHz stereo is best-effort (request WAV rate/channels on the default output device).
+- **Playback:** superseded by D-22 (Rodio). Selection change, delete and rename stop playback.
 - **UI:** Grouped list (Kit `v_virtual_list` of day headers and rows, 330 px wide) + detail pane (the `DataTable` was replaced in Recordings UI plan phase 1); Rename uses Kit dialog + `Input`; Delete uses confirm alert. Narrow stacked fallback not implemented (fixed split).
 
 **Not exercised on hardware this session:** large-folder browse (hundreds of files), live Explorer edits while the app is open, and audible WASAPI playback of a real recording.
@@ -260,3 +260,11 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 **Why GPUI's `list`, not Kit's `List`:** Kit's `ListState` measures one item and gives every row that size (`gpui-component-0.9.0/src/list/list.rs`, `prepare_items_if_needed`), so paragraphs of different lengths would be cut off or overlap. GPUI's `list` (`gpui-pre-0.3.11/src/elements/list.rs`) measures each item and draws only those in view. It is re-exported by `gpui_kit` (`pub use ::gpui::*`), so no second GPUI version is pulled in. Import it as `ListState as ParagraphListState`.
 
 **Not verified:** the running app (scroll feel, wrapping on resize, Copy with Unicode, PageUp and PageDown focus handling, the Spinner and Progress look).
+
+## D-22 — Playback engine is Rodio 0.21.1 (Phase 5 of the Recordings UI plan)
+
+**Outcome:** playback uses `rodio = "=0.21.1"` with `default-features = false` and features `playback` and `hound`, behind the `PlaybackOutput` and `PlaybackSession` ports. Rodio 0.21.1 depends on cpal `^0.16`, so `Cargo.lock` still has one cpal (0.16.0) and one hound (3.5.1), and no symphonia. Rodio 0.22 needs cpal 0.17, so do not upgrade without moving the capture code too. The cpal dependency stays for device code.
+
+**Verified by reading the Rodio 0.21.1 source and by building:** the player type is `Sink` (`Sink::connect_new(stream.mixer())`, `append`, `pause`, `play`, `try_seek`, `get_pos`, `empty`). The stream comes from `OutputStreamBuilder::open_default_stream()` and holds a `cpal::Stream`, so it is kept with the sink inside one session object on the player worker (sink dropped before stream). `Decoder::new_wav` with the `hound` feature gives `total_duration` and frame-based seeking (`hound` `seek`, saturated at the end). `try_seek` blocks until the audio thread answers (a few ms, the sink polls every 5 ms), runs on the worker only, and silently does nothing if the sink is already empty. `get_pos` is refreshed every 5 ms by the sink. The mixer wraps every source in `UniformSourceIterator`, so a file rate or channel count different from the device is converted in Rodio. The hound seek converts the time to frames with `f32`, so on a 1 h 48 kHz file the target can be off by a few frames (under 1 ms); this is source reading, not a measurement. Unit tests use a fake `PlaybackOutput` and need no hardware.
+
+**NOT verified on hardware:** seek accuracy and latency on a WAV longer than one hour; playback when the device sample rate differs from the file (conversion quality, no click); creating the `OutputStream` on the worker thread on Windows; audible playback to the end and the return to `Idle`; pause and seek with no click or hang; behavior when the default output device is removed during playback. Run these before Phase 6 is called done.

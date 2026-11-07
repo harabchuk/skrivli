@@ -225,11 +225,7 @@ impl MainWindow {
             models_dir,
             library_catalog: LibraryCatalog::empty(),
             library_selected: None,
-            player_snapshot: PlayerSnapshot {
-                phase: PlayerPhase::Idle,
-                recording_id: None,
-                notice: None,
-            },
+            player_snapshot: PlayerSnapshot::idle(),
             transcription_snapshot: TranscriptionSnapshot::idle(),
             transcript_paragraphs: Rc::new(Vec::new()),
             transcript_list,
@@ -1100,7 +1096,7 @@ impl MainWindow {
                 .set_notice(Some("Only WAV playback is available."));
             return;
         }
-        self.player.play(id, entry.audio_path.clone());
+        self.player.play(id, entry.audio_path.clone(), 0);
     }
 
     fn rename_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1114,6 +1110,8 @@ impl MainWindow {
         let entity = cx.entity();
         open_rename_dialog(window, cx, current, move |name, _window, cx| {
             entity.update(cx, |view, _cx| {
+                // The open WAV would make the rename fail on Windows.
+                view.player.stop();
                 view.library.rename(id, name);
             });
         });

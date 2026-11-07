@@ -20,6 +20,7 @@ use crate::infrastructure::ai::whisper::WhisperInference;
 use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::audio::sonora_steps::SonoraPipelineFactory;
+use crate::infrastructure::files::player::RodioOutput;
 use crate::infrastructure::files::wav::recover_partials;
 use crate::infrastructure::platform::{self, PlatformHost};
 use crate::infrastructure::storage::settings::Settings;
@@ -280,9 +281,12 @@ fn spawn_workers(
     shutdown.track(library_thread);
 
     let player_tx = tx.clone();
-    let (player, player_thread) = PlayerHost::spawn(Box::new(move |snapshot| {
-        let _ = player_tx.send(BridgeMessage::Player(snapshot));
-    }));
+    let (player, player_thread) = PlayerHost::spawn(
+        Box::new(RodioOutput),
+        Box::new(move |snapshot| {
+            let _ = player_tx.send(BridgeMessage::Player(snapshot));
+        }),
+    );
     let stop_player = player.clone();
     shutdown.on_stop(move || stop_player.shutdown());
     shutdown.track(player_thread);

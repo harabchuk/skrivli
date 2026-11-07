@@ -112,7 +112,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
  ┌──────────▼───────────────────────────▼───────────────────▼──────────────┐
  │ infrastructure/                                                      │
  │  audio: flexaudio mic + loopback → SPSC → Pipeline → peak snapshots │
- │  files: WAV writer / reader / cpal output / writability probe / FLAC │
+ │  files: WAV writer / Rodio output / writability probe / FLAC │
  │  ai: decode → 16 kHz mono → whisper.cpp → transcript                  │
  │  storage: settings / library / sidecars (no OS APIs)                 │
  │  platform/: shell, tray, trash, watch, replace, clocks, disk, wake   │
@@ -187,7 +187,7 @@ Do not sprinkle `cfg` through views, services, domain, or storage. If a call nee
 - **User directories.** Fill the three bases `AppPaths::from_bases` already takes. Windows: `%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`. A macOS host maps Application Support, Logs, and the home directory. A Linux host maps XDG config, state, and home. Default recordings stay under Documents via `AppPaths::recordings_dir`.
 - **Recording clock, performance counter, free space.** `RecordingClock::local` is civil local time. `PerformanceCounter::sample` returns `(ticks, ticks_per_second)` for the existing timeline in `domain/chunk_plan.rs` (Windows: QPC). `FreeSpace` reports bytes available for the recordings directory (Windows: `GetDiskFreeSpaceExW`).
 - **Capture.** Do not write a new `CapturePort` for Linux or macOS. flexaudio already selects the backend (cpal mic; PipeWire, WASAPI, or macOS system loopback) and normalizes to 48 kHz stereo `f32`. Keep `infrastructure/audio/flex_capture.rs`. Pass that OS’s `PerformanceCounter` into the existing adapters so the worker does not call QPC. Re-enumerate with `flexaudio::devices()` into the same `DeviceCatalog`. Implement `spawn_device_watch` for that OS: Windows needs `IMMNotificationClient` because flexaudio’s `DeviceWatcher` is a no-op except on Linux; an OS where `flexaudio::watch_devices` reports events should use that and still call `enumerate_catalog`. Do not change the pipeline. A capture adapter under `platform/<os>/` is only for a target flexaudio does not support.
-- **Playback.** `services/playback.rs` owns the play/stop command loop (`PlayerHost`). `files/player.rs` opens the cpal output session. Keep cpal’s default host unless that host cannot play PCM16 WAV; a special output adapter then belongs in `platform/<os>/` behind a small port used by `files/player.rs`.
+- **Playback.** `services/playback.rs` owns the command loop (`PlayerHost`: play, pause, resume, seek, stop). It talks to a `PlaybackOutput` port (a `Send` factory) whose `PlaybackSession` is created and used only on the player worker, because OS output streams are not `Send`. `files/player.rs` is the only Rodio user: Rodio 0.21 (cpal 0.16, default features off, only `playback` and `hound`) on the default output device. The worker uses `recv_timeout(100 ms)` while a session is live, and each tick publishes the end of playback (`Idle`, position 0) or a changed position. `PlayerSnapshot` carries `phase` (`Idle`, `Playing`, `Paused`, `Error`), `recording_id`, `notice`, `position_ms` and `duration_ms`; the bridge keeps only the latest one, so state, not events, is published. Seeking while paused stays paused, and a seek past the end clamps to the duration. Rename, delete and selection change stop playback first. Another OS output adapter would sit behind the same port.
 - **Packaging.** Windows icon and manifest stay in `build.rs`. Add that OS’s bundle, `.desktop` file, or equivalent beside it. Do not compile `winresource` for the new target.
 - **Not built yet.** When autostart, global hotkey, or whisper.cpp land, their OS APIs and native build flags go under `platform/<os>/` (or that crate’s build script), behind a port in `services/ports.rs`. Services do not link shell or inference libraries themselves.
 
@@ -273,7 +273,7 @@ skrivli/
 │   │   │   ├── wav.rs
 │   │   │   ├── flac.rs
 │   │   │   ├── reader.rs
-│   │   │   ├── player.rs           # cpal output session
+│   │   │   ├── player.rs           # Rodio output (PlaybackOutput adapter)
 │   │   │   └── writable.rs         # recordings folder probe
 │   │   └── platform/
 │   │       ├── mod.rs              # cfg(windows) → windows; else compile_error
@@ -330,7 +330,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `infrastructure/audio/` | flexaudio capture adapters, device catalog, the 48 kHz drift resampler, and the sonora echo and gain steps (no OS APIs). Production code imports `sonora` only in `sonora_steps.rs` |
 | `infrastructure/ai/` | Whisper engine integration and local model management |
 | `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
-| `infrastructure/files/` | WAV writer/reader, cpal output session, writability probe, optional FLAC |
+| `infrastructure/files/` | WAV writer, Rodio output session, transcript reader, writability probe, optional FLAC |
 | `infrastructure/platform/` | Sole home for OS APIs: shell, tray, trash, watch, replace, clocks, disk, device wake |
 | `ui/` | Reusable GPUI Kit compositions and custom GPUI elements such as level meters |
 | `views/` | GPUI screens, shell reducer (`Presentation` / commands), window composition |
@@ -514,7 +514,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Actions: Play, Transcribe, Cancel, Retry, Model, Open folder, Rename, Delete, Refresh (header icon buttons for Open folder and Refresh). Transcribe is disabled while that recording is queued or running. Cancel is enabled only then. Retry is a `Transcribe` command for a row whose status is Failed. The list is a Kit `v_virtual_list` over `LibraryItem` values (day headers and rows) that `MainWindow` rebuilds from `RecordingRow`s; a progress tick changes one row's badge in place without reordering or resetting scroll, and the status strip updates alongside. Rows are always newest first; there is no sorting. Delete goes to the Windows Recycle Bin through a Windows Shell adapter and includes associated audio/`.txt`/`.json`; ask for confirmation and handle partial failures. Rename and delete notify the transcription host before files change. A queued or running job for that recording is cancelled, or a rename that lands before the transcript write retargets the same id.
 - Double-click/Enter can start playback; selection change stops playback by design.
 - Background directory watcher debounces changes; the library scans WAV/FLAC files and matches sidecars/transcripts. Preserve selected recording after refresh.
-- Playback audio runs through `services/playback` and the cpal session in `files/player`; never decode files or drive playback from GPUI rendering.
+- Playback audio runs through `services/playback` and the Rodio session in `files/player` (behind the `PlaybackOutput` and `PlaybackSession` ports in `services/ports.rs`); never decode files or drive playback from GPUI rendering.
 
 ### 8.4 Model prompt and settings
 

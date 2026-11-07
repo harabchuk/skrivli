@@ -261,6 +261,23 @@ pub(crate) trait ModelSource: Send {
     fn open(&mut self, url: &str) -> Result<Box<dyn Read + Send>, AppError>;
 }
 
+/// Opens playback sessions. The factory moves to the player worker; every
+/// session is created, used and dropped on that same thread, because OS output
+/// streams are not `Send`.
+pub(crate) trait PlaybackOutput: Send {
+    /// Open `path` and start playing at `start_ms`.
+    fn open(&self, path: &Path, start_ms: u64) -> Result<Box<dyn PlaybackSession>, AppError>;
+}
+
+/// One playing (or paused) recording. Dropping it stops the sound.
+pub(crate) trait PlaybackSession {
+    fn position_ms(&self) -> u64;
+    fn duration_ms(&self) -> Option<u64>;
+    fn finished(&self) -> bool;
+    fn set_paused(&self, paused: bool);
+    fn seek(&self, position_ms: u64) -> Result<(), AppError>;
+}
+
 #[cfg(test)]
 mod inference_port_tests {
     use super::{InferencePort, InferenceSegment};

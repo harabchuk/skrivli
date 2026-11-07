@@ -1,6 +1,6 @@
 # Skrivli Recordings page redesign plan
 
-**Status:** Phases 0 to 4 done. Phases 5 to 7 are not started. The code snippets have not been compiled.
+**Status:** Phases 0 to 5 done (Phase 5 hardware checks open). Phases 6 and 7 are not started. The code snippets have not been compiled.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
 
@@ -420,20 +420,20 @@ list(self.transcript_list.clone(), move |index, _window, cx| {
 **Spike first**
 
 Answer these on real hardware before the rest of the phase, and record the results and pinned version in `decisions.md`. If Rodio fails one that cannot be worked around, stop and revisit this phase.
-- [ ] Pick a Rodio release that uses cpal 0.16, so the build does not include two copies of cpal. `infrastructure/audio/devices.rs` and `domain/audio.rs` still use cpal directly.
-- [ ] Confirm the API names in that release. The player type may be `Sink` or `Player`, and this plan assumes `pause`, `play`, `try_seek`, `get_pos` and `empty`.
-- [ ] Turn off default features and enable only WAV.
-- [ ] Confirm the output stream can be created and kept on the worker thread.
+- [x] Pick a Rodio release that uses cpal 0.16, so the build does not include two copies of cpal. `infrastructure/audio/devices.rs` and `domain/audio.rs` still use cpal directly.
+- [x] Confirm the API names in that release. The player type may be `Sink` or `Player`, and this plan assumes `pause`, `play`, `try_seek`, `get_pos` and `empty`.
+- [x] Turn off default features and enable only WAV.
+- [ ] Confirm the output stream can be created and kept on the worker thread. (Design keeps it there; needs hardware.)
 - [ ] Confirm seeking is accurate and quick on a WAV longer than one hour.
 - [ ] Confirm a recording plays when the device's sample rate differs from the file's.
 
 **Add**
-- [ ] Add the `rodio` dependency, and commit `Cargo.lock`.
-- [ ] Add `PlayerPhase::Paused`.
-- [ ] Add `position_ms: u64` and `duration_ms: Option<u64>` to `PlayerSnapshot`.
-- [ ] Add `PlayerCommand::Pause`, `Resume` and `Seek { position_ms }`, and a `start_ms` field on `Play`.
-- [ ] Add `PlayerHost::pause`, `resume` and `seek`.
-- [ ] Add a port in `services/ports.rs` so tests need no audio device. The factory is `Send`, and the session stays on the worker thread:
+- [x] Add the `rodio` dependency, and commit `Cargo.lock`.
+- [x] Add `PlayerPhase::Paused`.
+- [x] Add `position_ms: u64` and `duration_ms: Option<u64>` to `PlayerSnapshot`.
+- [x] Add `PlayerCommand::Pause`, `Resume` and `Seek { position_ms }`, and a `start_ms` field on `Play`.
+- [x] Add `PlayerHost::pause`, `resume` and `seek`.
+- [x] Add a port in `services/ports.rs` so tests need no audio device. The factory is `Send`, and the session stays on the worker thread:
 
   ```rust
   pub(crate) trait PlaybackOutput: Send {
@@ -450,16 +450,16 @@ Answer these on real hardware before the rest of the phase, and record the resul
   ```
 
 **Change**
-- [ ] Change `infrastructure/files/player.rs` to a thin Rodio implementation of `PlaybackOutput`. `finished` wraps `empty()`, and `position_ms` wraps the position call.
-- [ ] Change `player_loop` from `rx.recv()` to `rx.recv_timeout(Duration::from_millis(100))`. On each timeout, check `finished` and publish a snapshot if the position changed (problem 1).
-- [ ] Change `PlayerHost::spawn` to take the output port. `app/bootstrap.rs` passes the Rodio output.
-- [ ] Change `rename_selected` to stop playback before renaming, as `delete_selected` already does (problem 7).
-- [ ] Change the doc comment at `transcript_reader.rs:3`, which mentions the playback `WavReader`.
+- [x] Change `infrastructure/files/player.rs` to a thin Rodio implementation of `PlaybackOutput`. `finished` wraps `empty()`, and `position_ms` wraps the position call.
+- [x] Change `player_loop` from `rx.recv()` to `rx.recv_timeout(Duration::from_millis(100))`. On each timeout, check `finished` and publish a snapshot if the position changed (problem 1).
+- [x] Change `PlayerHost::spawn` to take the output port. `app/bootstrap.rs` passes the Rodio output.
+- [x] Change `rename_selected` to stop playback before renaming, as `delete_selected` already does (problem 7).
+- [x] Change the doc comment at `transcript_reader.rs:3`, which mentions the playback `WavReader`.
 
 **Remove**
-- [ ] Remove `infrastructure/files/reader.rs` and its `mod` line. Only the player uses it.
-- [ ] Remove the cpal stream code, the audio callback and the `FromSample` trait from `player.rs`.
-- [ ] Do not remove the `cpal` dependency, because device code still uses it.
+- [x] Remove `infrastructure/files/reader.rs` and its `mod` line. Only the player uses it.
+- [x] Remove the cpal stream code, the audio callback and the `FromSample` trait from `player.rs`.
+- [x] Do not remove the `cpal` dependency, because device code still uses it.
 
 **Rules**
 - Reaching the end gives `Idle` with position 0.
@@ -468,16 +468,20 @@ Answer these on real hardware before the rest of the phase, and record the resul
 - The bridge already keeps only the latest player snapshot, so position updates cannot build up.
 
 **Tests to write first, with a fake output**
-- [ ] A finished session publishes `Idle` with no further commands. This is the regression test for problem 1.
-- [ ] Pause then Resume gives Paused then Playing.
-- [ ] Seek forwards the position and clamps beyond the end.
-- [ ] Position updates publish while playing, and not while paused.
-- [ ] An open failure publishes `Error` with a notice, and the next Play works.
-- [ ] Commands are still handled while a session is playing.
+- [x] A finished session publishes `Idle` with no further commands. This is the regression test for problem 1.
+- [x] Pause then Resume gives Paused then Playing.
+- [x] Seek forwards the position and clamps beyond the end.
+- [x] Position updates publish while playing, and not while paused.
+- [x] An open failure publishes `Error` with a notice, and the next Play works.
+- [x] Commands are still handled while a session is playing.
 
 **Spec:** update `skrivli-app-design.md` with Rodio, the new snapshot and the port, and replace the playback note at `decisions.md:104`. Keep the product spec change for phase 6, when the user can see it.
 
 **Done when:** tests pass, and on real hardware a recording plays to the end and returns to `Idle` with no click or hang on pause and seek.
+
+---
+
+**Evidence (Phase 5):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (314 pass, no hardware) and `cargo build` pass. Rodio 0.21.1, features `playback` and `hound` only, one cpal in `Cargo.lock` (D-22). Seven fake-output tests cover finish to `Idle` without commands (problem 1), Pause then Resume, Seek forward and clamp, seek while paused, start position, position publishing only while playing, open failure then a working Play, and Stop handled while playing. `rename_selected` now stops playback before renaming (problem 7). `reader.rs` and all cpal stream code are gone; the `cpal` dependency stays. **API for Phase 6:** `PlayerSnapshot { phase: PlayerPhase::{Idle, Playing, Paused, Error}, recording_id, notice, position_ms, duration_ms: Option<u64> }` with `PlayerSnapshot::idle()`; `PlayerHost::{play(id, path, start_ms), pause(), resume(), seek(position_ms), stop(), shutdown()}`; the worker publishes position about every 100 ms while playing. **Deviations:** `pause`, `resume`, `seek` and the matching commands carry `allow(dead_code)` until Phase 6 uses them. `RodioOutput` is a unit struct opened on the worker. A failed seek is logged and ignored, not published as `Error`. The Play button still restarts from 0 and shows "Play" while Paused (Phase 6 replaces it). Tests were written together with the code, not strictly red first. **Not verified on hardware:** the unchecked spike items and "Done when" (see D-22).
 
 ---
 

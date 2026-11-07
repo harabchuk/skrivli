@@ -5976,6 +5976,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rodio"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e40ecf59e742e03336be6a3d53755e789fd05a059fa22dfa0ed624722319e183"
+dependencies = [
+ "cpal",
+ "dasp_sample",
+ "hound",
+ "num-rational",
+]
+
+[[package]]
 name = "ropey"
 version = "2.0.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6655,6 +6667,7 @@ dependencies = [
  "hex",
  "hound",
  "jiff",
+ "rodio",
  "rubato 5.0.1",
  "serde",
  "serde_json",

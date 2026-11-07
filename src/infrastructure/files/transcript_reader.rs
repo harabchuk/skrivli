@@ -1,6 +1,6 @@
 //! Bounded PCM16 WAV reader for offline transcription.
 //!
-//! Separate from the playback [`super::reader::WavReader`]. Opens the finalized
+//! Separate from playback, which decodes through Rodio. Opens the finalized
 //! path only — never `.wav.partial`. MP3 stays out of v1. FLAC decode will arrive
 //! in M8 through `flac-codec`.
 
