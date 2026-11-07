@@ -955,7 +955,6 @@ impl MainWindow {
                 cards: Vec::new(),
                 footer: model_footer(None, phase, None),
                 selected_bytes: None,
-                selected_name: SharedString::default(),
             };
         };
         let state_of = |id: &str| {
@@ -983,7 +982,7 @@ impl MainWindow {
                         id: SharedString::from(id),
                         name: SharedString::from(copy.name.to_string()),
                         description: SharedString::from(copy.description.to_string()),
-                        meta: SharedString::from(row_meta(state, entry.bytes())),
+                        meta: SharedString::from(row_meta(entry.bytes())),
                         tag: row_tag(state),
                         ratings: copy.ratings,
                         selected: is_selected,
@@ -1010,9 +1009,6 @@ impl MainWindow {
                 target,
             ),
             selected_bytes: selected.map(|entry| entry.bytes()),
-            selected_name: selected
-                .map(|entry| SharedString::from(model_copy(entry.id()).name.to_string()))
-                .unwrap_or_default(),
         }
     }
 

@@ -12,9 +12,7 @@ use gpui_kit::{
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::format_size;
 use crate::services::models::ModelPhase;
-use crate::ui::components::dialog_style::{
-    dialog_footer, dialog_footer_note, dialog_subtitle, DIALOG_WIDTH,
-};
+use crate::ui::components::dialog_style::{dialog_footer, dialog_subtitle, DIALOG_WIDTH};
 use crate::ui::components::model_card::{
     model_card, ModelCardData, ModelCardProgress, ModelCardTag,
 };
@@ -22,7 +20,6 @@ use crate::ui::components::model_card::{
 use super::state::{ModelInstallState, ModelStatus};
 
 const SUBTITLE: &str = "Runs on this PC. Your audio never leaves it.";
-const NETWORK_NOTE: &str = "Download needs a network";
 
 /// Friendly text for one manifest entry. Kept here because the manifest is an integrity file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,9 +93,7 @@ pub(crate) fn download_label(bytes: u64) -> String {
     format!("Download {}", format_size(bytes))
 }
 
-pub(crate) fn use_label(name: &str) -> String {
-    format!("Use {name}")
-}
+pub(crate) const USE_LABEL: &str = "Use selected model";
 
 /// The total comes from the manifest and the percent is whole, so the amount is approximate.
 pub(crate) fn download_progress_text(percent: u8, total_bytes: u64) -> (String, String) {
@@ -123,11 +118,9 @@ pub(crate) fn card_progress(percent: u8, total_bytes: u64) -> ModelCardProgress 
     }
 }
 
-pub(crate) fn row_meta(state: ModelInstallState, bytes: u64) -> String {
-    match state {
-        ModelInstallState::NotInstalled => format_size(bytes),
-        ModelInstallState::Installed | ModelInstallState::InUse => "On this PC".to_string(),
-    }
+/// The size shows for every model, installed or not.
+pub(crate) fn row_meta(bytes: u64) -> String {
+    format_size(bytes)
 }
 
 pub(crate) fn row_tag(state: ModelInstallState) -> Option<ModelCardTag> {
@@ -174,8 +167,6 @@ pub(crate) struct ModelPromptView {
     pub(crate) footer: ModelFooter,
     /// Size of the selected model, for the Download label.
     pub(crate) selected_bytes: Option<u64>,
-    /// Display name of the selected model, for the Use label.
-    pub(crate) selected_name: SharedString,
 }
 
 /// What happens once a model is chosen and ready.
@@ -235,11 +226,6 @@ pub(crate) fn open_model_prompt(
                 cx,
             ));
         }
-        let note = if view.footer == ModelFooter::Download {
-            dialog_footer_note(NETWORK_NOTE, cx).into_any_element()
-        } else {
-            div().flex_1().into_any_element()
-        };
         dialog
             .title("Transcription model")
             .w(DIALOG_WIDTH)
@@ -250,19 +236,23 @@ pub(crate) fn open_model_prompt(
             .on_ok(|_, _, _| false)
             .on_close(move |event, window, cx| closed(event, window, cx))
             .child(body)
-            .footer(dialog_footer(cx).child(note).children(footer))
+            .footer(dialog_footer(cx).children(footer))
     });
 }
 
 fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec<AnyElement> {
-    let close = |label: &'static str, primary: bool| {
-        let button = Button::new("model-close").label(label);
+    let close = |primary: bool| {
+        let button = Button::new("model-close").label("Close");
         let button = if primary {
             button.primary()
         } else {
             button.outline()
         };
-        DialogClose::new().child(button).into_any_element()
+        // Kit's DialogClose is `size_full`, so unwrapped it fills the footer row.
+        div()
+            .flex_none()
+            .child(DialogClose::new().child(button))
+            .into_any_element()
     };
     match view.footer {
         ModelFooter::CancelDownload => {
@@ -276,7 +266,7 @@ fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec
         ModelFooter::Retry => {
             let on_retry = handlers.on_retry.clone();
             vec![
-                close("Close", false),
+                close(false),
                 Button::new("model-retry")
                     .primary()
                     .label("Retry download")
@@ -288,7 +278,7 @@ fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec
             let on_download = handlers.on_download.clone();
             let label = download_label(view.selected_bytes.unwrap_or(0));
             vec![
-                close("Close", false),
+                close(false),
                 Button::new("model-download")
                     .primary()
                     .label(label)
@@ -299,16 +289,16 @@ fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec
         ModelFooter::Use => {
             let on_use = handlers.on_use.clone();
             vec![
-                close("Close", false),
+                close(false),
                 Button::new("model-use")
                     .primary()
-                    .label(use_label(&view.selected_name))
+                    .label(USE_LABEL)
                     .on_click(move |event, window, cx| on_use(event, window, cx))
                     .into_any_element(),
             ]
         }
-        ModelFooter::Done => vec![close("Done", true)],
-        ModelFooter::CloseOnly => vec![close("Close", false)],
+        ModelFooter::Done => vec![close(true)],
+        ModelFooter::CloseOnly => vec![close(false)],
     }
 }
 
@@ -372,8 +362,8 @@ pub(crate) fn model_status_item(
 mod tests {
     use super::{
         after_model_ready, download_label, download_progress_text, error_display, model_copy,
-        model_footer, model_status_text, row_accessibility_label, row_meta, row_tag, use_label,
-        AfterModelReady, ErrorDisplay, ModelFooter,
+        model_footer, model_status_text, row_accessibility_label, row_meta, row_tag,
+        AfterModelReady, ErrorDisplay, ModelFooter, USE_LABEL,
     };
     use crate::domain::ids::RecordingId;
     use crate::infrastructure::ai::models::ModelManifest;
@@ -524,27 +514,22 @@ mod tests {
 
         // Act
         let download = download_label(bytes);
-        let use_model = use_label("Small");
 
         // Assert
         assert_eq!(download, "Download 181.3 MB");
-        assert_eq!(use_model, "Use Small");
+        assert_eq!(USE_LABEL, "Use selected model");
     }
 
     #[test]
-    fn installed_rows_replace_the_size() {
+    fn rows_always_show_the_size() {
         // Arrange
         let bytes = 32_152_673;
 
         // Act
-        let missing = row_meta(ModelInstallState::NotInstalled, bytes);
-        let installed = row_meta(ModelInstallState::Installed, bytes);
-        let in_use = row_meta(ModelInstallState::InUse, bytes);
+        let meta = row_meta(bytes);
 
         // Assert
-        assert_eq!(missing, "30.7 MB");
-        assert_eq!(installed, "On this PC");
-        assert_eq!(in_use, "On this PC");
+        assert_eq!(meta, "30.7 MB");
     }
 
     #[test]

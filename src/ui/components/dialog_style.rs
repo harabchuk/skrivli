@@ -23,13 +23,3 @@ pub(crate) fn dialog_footer(cx: &App) -> DialogFooter {
         .border_t_1()
         .border_color(cx.theme().border)
 }
-
-/// Muted footer text that takes the free space and pushes the buttons right.
-pub(crate) fn dialog_footer_note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
-    div()
-        .flex_1()
-        .min_w_0()
-        .text_xs()
-        .text_color(cx.theme().muted_foreground)
-        .child(text.into())
-}

@@ -1,14 +1,13 @@
 //! Settings: the transcription model and app behaviour. Rendering never touches a worker.
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::DialogClose;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{h_flex, v_flex, Sizable as _, WindowExt as _};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window};
+use gpui_kit::{div, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window};
 
 use crate::domain::recording::format_size;
-use crate::ui::components::dialog_style::{dialog_footer, dialog_footer_note, DIALOG_WIDTH};
+use crate::ui::components::dialog_style::DIALOG_WIDTH;
 use crate::ui::components::model_card::{model_tag, ModelCardTag};
 use crate::ui::components::settings_rows::{settings_row, settings_section};
 
@@ -84,46 +83,41 @@ pub(crate) fn open_settings(
             .when(model.in_use, |this| {
                 this.child(model_tag(ModelCardTag::InUse))
             });
-        dialog
-            .title("Settings")
-            .w(DIALOG_WIDTH)
-            .child(
-                v_flex()
-                    .w_full()
-                    .gap_4()
-                    .child(settings_section(
-                        "Transcription",
-                        [settings_row(
-                            model_title,
-                            model.description,
-                            Button::new("settings-change-model")
-                                .outline()
-                                .small()
-                                .label(model.button)
-                                .on_click(on_change_model.clone()),
-                            cx,
-                        )],
+        dialog.title("Settings").w(DIALOG_WIDTH).child(
+            v_flex()
+                .w_full()
+                .gap_4()
+                .child(settings_section(
+                    "Transcription",
+                    [settings_row(
+                        model_title,
+                        model.description,
+                        Button::new("settings-change-model")
+                            .outline()
+                            .small()
+                            .label(model.button)
+                            .on_click(on_change_model.clone()),
                         cx,
-                    ))
-                    .child(settings_section(
-                        "General",
-                        [settings_row(
-                            "Close to the notification area",
-                            "Skrivli keeps running when you close the window.",
-                            close_to_tray_switch(view.close_to_tray, on_close_to_tray.clone()),
-                            cx,
-                        )],
+                    )],
+                    cx,
+                ))
+                .child(settings_section(
+                    "General",
+                    [settings_row(
+                        "Close to the notification area",
+                        "Skrivli keeps running when you close the window.",
+                        close_to_tray_switch(view.close_to_tray, on_close_to_tray.clone()),
                         cx,
-                    )),
-            )
-            .footer(
-                dialog_footer(cx)
-                    .child(dialog_footer_note(version_text(), cx))
-                    .child(
-                        DialogClose::new()
-                            .child(Button::new("settings-done").label("Done").primary()),
-                    ),
-            )
+                    )],
+                    cx,
+                ))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(version_text()),
+                ),
+        )
     });
 }
 
