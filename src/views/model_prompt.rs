@@ -3,24 +3,32 @@
 use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogClose, DialogFooter};
-use gpui_kit::component::list::ListItem;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, WindowExt as _};
+use gpui_kit::component::dialog::DialogClose;
+use gpui_kit::component::{v_flex, WindowExt as _};
 use gpui_kit::{
-    div, px, AnyElement, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window,
+    div, AnyElement, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window,
 };
 
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::format_size;
 use crate::services::models::ModelPhase;
-use crate::ui::components::model_card::{model_tag, ModelCardTag};
+use crate::ui::components::dialog_style::{
+    dialog_footer, dialog_footer_note, dialog_subtitle, DIALOG_WIDTH,
+};
+use crate::ui::components::model_card::{
+    model_card, ModelCardData, ModelCardProgress, ModelCardTag,
+};
 
 use super::state::ModelInstallState;
+
+const SUBTITLE: &str = "Runs on this PC. Your audio never leaves it.";
+const NETWORK_NOTE: &str = "Download needs a network";
 
 /// Friendly text for one manifest entry. Kept here because the manifest is an integrity file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ModelCopy<'a> {
     pub(crate) name: &'a str,
+    pub(crate) description: &'a str,
     /// (speed, accuracy), each out of 3. General comparisons, not measured on this PC.
     pub(crate) ratings: Option<(u8, u8)>,
 }
@@ -29,18 +37,22 @@ pub(crate) fn model_copy(id: &str) -> ModelCopy<'_> {
     match id {
         "tiny-q5_1" => ModelCopy {
             name: "Tiny",
+            description: "Quick drafts and short notes",
             ratings: Some((3, 1)),
         },
         "base-q5_1" => ModelCopy {
             name: "Base",
+            description: "Good balance for most meetings",
             ratings: Some((2, 2)),
         },
         "small-q5_1" => ModelCopy {
             name: "Small",
+            description: "Best accuracy, takes longer to run",
             ratings: Some((1, 3)),
         },
         unknown => ModelCopy {
             name: unknown,
+            description: "",
             ratings: None,
         },
     }
@@ -86,6 +98,29 @@ pub(crate) fn download_label(bytes: u64) -> String {
 
 pub(crate) fn use_label(name: &str) -> String {
     format!("Use {name}")
+}
+
+/// The total comes from the manifest and the percent is whole, so the amount is approximate.
+pub(crate) fn download_progress_text(percent: u8, total_bytes: u64) -> (String, String) {
+    let done = total_bytes.saturating_mul(u64::from(percent.min(100))) / 100;
+    (
+        format!("Downloading {percent}%"),
+        format!(
+            "About {} of {}",
+            format_size(done),
+            format_size(total_bytes)
+        ),
+    )
+}
+
+/// Builds a card's progress block from the worker's percent and the manifest size.
+pub(crate) fn card_progress(percent: u8, total_bytes: u64) -> ModelCardProgress {
+    let (left, right) = download_progress_text(percent, total_bytes);
+    ModelCardProgress {
+        percent,
+        left: left.into(),
+        right: right.into(),
+    }
 }
 
 pub(crate) fn row_meta(state: ModelInstallState, bytes: u64) -> String {
@@ -134,19 +169,8 @@ pub(crate) fn error_display(dialog_open: bool) -> ErrorDisplay {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CatalogRow {
-    pub(crate) id: SharedString,
-    pub(crate) label: SharedString,
-    pub(crate) accessibility_label: SharedString,
-    pub(crate) install_state: ModelInstallState,
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct ModelPromptView {
-    pub(crate) catalog: Vec<CatalogRow>,
-    pub(crate) selected_id: Option<SharedString>,
-    pub(crate) progress: Option<u8>,
-    pub(crate) failure: Option<&'static str>,
+    pub(crate) cards: Vec<ModelCardData>,
     pub(crate) footer: ModelFooter,
     /// Size of the selected model, for the Download label.
     pub(crate) selected_bytes: Option<u64>,
@@ -201,40 +225,24 @@ pub(crate) fn open_model_prompt(
         let mut body = v_flex()
             .w_full()
             .gap_2()
-            .child("The download needs a network.");
-        for row in view.catalog.clone() {
+            .child(dialog_subtitle(SUBTITLE, cx));
+        for card in view.cards.clone() {
             let on_select = handlers.on_select.clone();
-            let id = row.id.clone();
-            let is_selected = view.selected_id.as_ref() == Some(&row.id);
-            let mut line = h_flex()
-                .w_full()
-                .gap_2()
-                .items_center()
-                .child(row.label.clone());
-            if let Some(tag) = row_tag(row.install_state) {
-                line = line.child(model_tag(tag));
-            }
-            body = body.child(
-                ListItem::new(SharedString::from(format!("model-row-{id}")))
-                    .w_full()
-                    .selected(is_selected)
-                    .disabled(busy)
-                    .accessibility_label(row.accessibility_label.clone())
-                    .on_click(move |_event, window, cx| on_select(id.as_ref(), window, cx))
-                    .child(line),
-            );
+            let id = card.id.clone();
+            body = body.child(model_card(
+                card,
+                move |window, cx| on_select(id.as_ref(), window, cx),
+                cx,
+            ));
         }
-        if busy {
-            if let Some(percent) = view.progress {
-                body = body.child(format!("Downloading {percent}%"));
-            }
-        }
-        if let Some(failure) = view.failure {
-            body = body.child(div().text_color(cx.theme().danger).child(failure));
-        }
+        let note = if view.footer == ModelFooter::Download {
+            dialog_footer_note(NETWORK_NOTE, cx).into_any_element()
+        } else {
+            div().flex_1().into_any_element()
+        };
         dialog
             .title("Transcription model")
-            .w(px(560.))
+            .w(DIALOG_WIDTH)
             .close_button(can_close)
             .overlay_closable(can_close)
             .keyboard(can_close)
@@ -242,7 +250,7 @@ pub(crate) fn open_model_prompt(
             .on_ok(|_, _, _| false)
             .on_close(move |event, window, cx| closed(event, window, cx))
             .child(body)
-            .footer(DialogFooter::new().gap_2().children(footer))
+            .footer(dialog_footer(cx).child(note).children(footer))
     });
 }
 
@@ -313,9 +321,9 @@ pub(crate) fn open_model_alert(window: &mut Window, cx: &mut App, message: &'sta
 #[cfg(test)]
 mod tests {
     use super::{
-        after_model_ready, download_label, error_display, model_copy, model_footer,
-        row_accessibility_label, row_meta, row_tag, use_label, AfterModelReady, ErrorDisplay,
-        ModelFooter,
+        after_model_ready, download_label, download_progress_text, error_display, model_copy,
+        model_footer, row_accessibility_label, row_meta, row_tag, use_label, AfterModelReady,
+        ErrorDisplay, ModelFooter,
     };
     use crate::domain::ids::RecordingId;
     use crate::infrastructure::ai::models::ModelManifest;
@@ -341,6 +349,40 @@ mod tests {
     }
 
     #[test]
+    fn every_manifest_entry_has_a_description() {
+        // Arrange
+        let manifest = ModelManifest::load_bundled().expect("manifest");
+
+        // Act
+        let missing: Vec<&str> = manifest
+            .entries()
+            .iter()
+            .map(|entry| entry.id())
+            .filter(|id| model_copy(id).description.is_empty())
+            .collect();
+
+        // Assert
+        assert!(missing.is_empty(), "no description for {missing:?}");
+    }
+
+    #[test]
+    fn progress_text_is_marked_approximate() {
+        // Arrange
+        let total = 190_085_487;
+
+        // Act
+        let (start, _) = download_progress_text(0, total);
+        let (left, right) = download_progress_text(42, total);
+        let (_, end) = download_progress_text(100, total);
+
+        // Assert
+        assert_eq!(start, "Downloading 0%");
+        assert_eq!(left, "Downloading 42%");
+        assert_eq!(right, "About 76.1 MB of 181.3 MB");
+        assert_eq!(end, "About 181.3 MB of 181.3 MB");
+    }
+
+    #[test]
     fn unknown_model_falls_back_to_its_id() {
         // Arrange
         let id = "large-v9";
@@ -351,6 +393,7 @@ mod tests {
         // Assert
         assert_eq!(copy.name, "large-v9");
         assert_eq!(copy.ratings, None);
+        assert_eq!(copy.description, "");
     }
 
     #[test]

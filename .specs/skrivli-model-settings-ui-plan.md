@@ -1,6 +1,6 @@
 # Skrivli model dialog, Settings and status bar plan
 
-Status: **Phases 1-2 done** (steps 1.1-2.3, automated tests only; manual tests not run). Decision 1 approved. Phases 3-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
+Status: **Phases 1-3 done** (steps 1.1-3.4, automated tests only; manual tests not run, so card layout is unseen). Decision 1 approved. Phases 4-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
 
 **Goal in one sentence:** make it obvious which transcription models are installed and which one is in use, let the user change model at any time, and give the dialogs a consistent, modern look.
 
@@ -276,7 +276,7 @@ These are easy to change if you disagree.
 
 #### Step 3.1: Add plain names and descriptions
 
-- [ ] **What it does:** adds the friendly text for each model.
+- [x] **What it does:** adds the friendly text for each model.
 - **Why:** technical IDs mean nothing to most users.
 - **Changes:** add `model_copy(id) -> ModelCopy` to `views/model_prompt.rs`, returning the name, description and ratings. An unknown ID falls back to showing the ID itself.
 
@@ -291,7 +291,7 @@ These are easy to change if you disagree.
 
 #### Step 3.2: Build the card
 
-- [ ] **What it does:** gives each row a border, radio dot, name, tags, description, size and rating dots. The selected card gets a stronger border and a tinted background.
+- [x] **What it does:** gives each row a border, radio dot, name, tags, description, size and rating dots. The selected card gets a stronger border and a tinted background.
 - **Why:** this makes the list clearly separated, which was the first thing you asked for.
 - **Changes:**
   - Add `ui/components/model_card.rs`, wrapping `ListItem` so clicks and disabled state still work. Use a Kit `Radio` for the dot, which also gives the card a keyboard stop.
@@ -303,7 +303,7 @@ These are easy to change if you disagree.
 
 #### Step 3.3: Move progress into the card
 
-- [ ] **What it does:** shows a Kit `Progress` bar, the percentage and "About 76.1 MB of 181.3 MB" inside the card being downloaded.
+- [x] **What it does:** shows a Kit `Progress` bar, the percentage and "About 76.1 MB of 181.3 MB" inside the card being downloaded.
 - **Why:** it is clear which model the progress belongs to, and the layout doesn't jump.
 - **Changes:** add `download_progress_text(percent, total_bytes)`, reusing `format_size`. The total comes from the manifest, so the worker needs no change. Show the card's failure message in the same spot.
 - **Tests:** text at 0%, 42% and 100%. The result is marked "About" because it is calculated from a whole-number percentage.
@@ -311,7 +311,7 @@ These are easy to change if you disagree.
 
 #### Step 3.4: Add the header and footer note
 
-- [ ] **What it does:** adds the subtitle "Runs on this PC. Your audio never leaves it." and moves the network notice to the footer, shown only when a download is on offer.
+- [x] **What it does:** adds the subtitle "Runs on this PC. Your audio never leaves it." and moves the network notice to the footer, shown only when a download is on offer.
 - **Why:** it answers the privacy question up front, and removes a network warning that doesn't apply to installed models.
 - **Changes:** use `.title()` for the heading and add a muted subtitle. Reuse the helper from step 6.1 if that has landed.
 - **Done when:** the network notice only appears when the selected model isn't installed.

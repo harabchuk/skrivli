@@ -33,7 +33,7 @@ use crate::infrastructure::storage::settings::{Settings, StoredEndpoint, StoredW
 use crate::infrastructure::storage::sidecar::transcript_path_for;
 use crate::services::level_monitor::MonitorTargets;
 use crate::services::library::{LibraryHost, LibrarySnapshot};
-use crate::services::models::{ModelHost, ModelSnapshot};
+use crate::services::models::{ModelHost, ModelPhase, ModelSnapshot};
 use crate::services::playback::{PlayerHost, PlayerPhase, PlayerSnapshot};
 use crate::services::ports::DesktopShell;
 use crate::services::recording::{
@@ -41,15 +41,16 @@ use crate::services::recording::{
     NOTICE_SYSTEM_FALLBACK,
 };
 use crate::services::transcription::{JobPhase, TranscriptionHost, TranscriptionSnapshot};
+use crate::ui::components::model_card::ModelCardData;
 use crate::ui::theme::{apply_theme, theme_icon};
 use crate::views::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
 use crate::views::hooks::ShellHooks;
 use crate::views::state::{model_install_state, AppTab, Presentation};
 
 use super::model_prompt::{
-    after_model_ready, error_display, model_copy, model_footer, open_model_alert,
-    open_model_prompt, row_accessibility_label, row_meta, AfterModelReady, CatalogRow,
-    ErrorDisplay, ModelPromptHandlers, ModelPromptView,
+    after_model_ready, card_progress, error_display, model_copy, model_footer, open_model_alert,
+    open_model_prompt, row_accessibility_label, row_meta, row_tag, AfterModelReady, ErrorDisplay,
+    ModelPromptHandlers, ModelPromptView,
 };
 use super::recording::record_tab;
 use super::recordings::{
@@ -922,12 +923,10 @@ impl MainWindow {
 
     fn model_prompt_view(&self) -> ModelPromptView {
         let phase = self.presentation.model_phase();
+        let busy = phase == ModelPhase::Downloading;
         let Ok(manifest) = ModelManifest::load_bundled() else {
             return ModelPromptView {
-                catalog: Vec::new(),
-                selected_id: None,
-                progress: self.presentation.model_progress(),
-                failure: self.presentation.model_failure(),
+                cards: Vec::new(),
                 footer: model_footer(None, phase, None),
                 selected_bytes: None,
                 selected_name: SharedString::default(),
@@ -941,34 +940,48 @@ impl MainWindow {
             )
         };
         let selected = manifest.by_id(&self.prompt_model_id);
+        let target = self.presentation.download_target();
+        // A failure belongs to the model that was being fetched, else the highlighted one.
+        let failure_id = target.or(selected.map(|entry| entry.id()));
         ModelPromptView {
-            catalog: manifest
+            cards: manifest
                 .entries()
                 .iter()
                 .map(|entry| {
-                    let state = state_of(entry.id());
-                    let copy = model_copy(entry.id());
-                    CatalogRow {
-                        id: SharedString::from(entry.id()),
-                        label: SharedString::from(format!(
-                            "{} ({})",
-                            entry.id(),
-                            row_meta(state, entry.bytes())
-                        )),
+                    let id = entry.id();
+                    let state = state_of(id);
+                    let copy = model_copy(id);
+                    let is_selected = selected.is_some_and(|chosen| chosen.id() == id);
+                    let downloading_this = busy && target == Some(id);
+                    ModelCardData {
+                        id: SharedString::from(id),
+                        name: SharedString::from(copy.name.to_string()),
+                        description: SharedString::from(copy.description.to_string()),
+                        meta: SharedString::from(row_meta(state, entry.bytes())),
+                        tag: row_tag(state),
+                        ratings: copy.ratings,
+                        selected: is_selected,
+                        disabled: busy,
+                        progress: self
+                            .presentation
+                            .model_progress()
+                            .filter(|_| downloading_this)
+                            .map(|percent| card_progress(percent, entry.bytes())),
+                        failure: self
+                            .presentation
+                            .model_failure()
+                            .filter(|_| !busy && failure_id == Some(id))
+                            .map(SharedString::from),
                         accessibility_label: SharedString::from(row_accessibility_label(
                             &copy, state,
                         )),
-                        install_state: state,
                     }
                 })
                 .collect(),
-            selected_id: selected.map(|entry| SharedString::from(entry.id())),
-            progress: self.presentation.model_progress(),
-            failure: self.presentation.model_failure(),
             footer: model_footer(
                 selected.map(|entry| (entry.id(), state_of(entry.id()))),
                 phase,
-                self.presentation.download_target(),
+                target,
             ),
             selected_bytes: selected.map(|entry| entry.bytes()),
             selected_name: selected
