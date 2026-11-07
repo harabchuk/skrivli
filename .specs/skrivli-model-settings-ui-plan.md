@@ -1,6 +1,6 @@
 # Skrivli model dialog, Settings and status bar plan
 
-Status: **Phases 1-4 done** (steps 1.1-4.3, automated tests only; manual tests not run, so card layout is unseen). Decision 1 approved. Phases 5-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
+Status: **Phases 1-5 done** (steps 1.1-5.3, automated tests only; manual tests not run, so card layout is unseen). Decision 1 approved. Phases 6-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
 
 **Goal in one sentence:** make it obvious which transcription models are installed and which one is in use, let the user change model at any time, and give the dialogs a consistent, modern look.
 
@@ -365,14 +365,14 @@ These are easy to change if you disagree.
 
 #### Step 5.1: Add reusable section and row helpers
 
-- [ ] **What it does:** adds the grouped section layout: an uppercase label, a bordered group, and rows with text on the left and a control on the right.
+- [x] **What it does:** adds the grouped section layout: an uppercase label, a bordered group, and rows with text on the left and a control on the right.
 - **Why:** every M8.1 setting will need this, so it should only be written once.
-- **Changes:** add `settings_section(title, rows, cx)` and `settings_row(title, description, control, cx)` in `ui/components/settings_rows.rs`. Don't use Kit's `setting` module for now: its `Settings` component is built around a sidebar with pages, which is too much for two settings. Revisit this during M8.1, when the list is longer, and record the outcome in `decisions.md`.
+- **Changes:** add `settings_section(title, rows, cx)` and `settings_row(title, description, control, cx)` in `ui/components/settings_rows.rs`. Don't use Kit's `setting` module for now: its `Settings` component is built around a sidebar with pages, which is too much for two settings. Revisit this during M8.1, when the list is longer. The outcome is recorded as D-17 in `decisions.md`.
 - **Done when:** the helpers render correctly in both themes.
 
 #### Step 5.2: Rebuild the Settings dialog
 
-- [ ] **What it does:** applies the new layout, replaces the checkbox with a Kit `Switch`, adds a line explaining it, and adds the footer.
+- [x] **What it does:** applies the new layout, replaces the checkbox with a Kit `Switch`, adds a line explaining it, and adds the footer.
 - **Why:** this is the first look most users get at Settings, and today it looks unfinished.
 - **Changes:**
   - Add a `SettingsView` struct, read through a closure the same way `ModelPromptView` is, replacing the single `checked` closure.
@@ -385,7 +385,7 @@ These are easy to change if you disagree.
 
 #### Step 5.3: Add the Transcription section
 
-- [ ] **What it does:** shows the model in use, with its tag, description and size, plus **Change model…**. If nothing is installed, it shows "No model installed" and **Choose model…**.
+- [x] **What it does:** shows the model in use, with its tag, description and size, plus **Change model…**. If nothing is installed, it shows "No model installed" and **Choose model…**.
 - **Why:** this is the Settings improvement you asked for.
 - **Changes:** add a row built from `model_status` and `model_copy`. The button dispatches `AppCommand::OpenModelDialog`, which opens the model dialog on top of Settings.
 - **Tests:** a pure function builds the row text for each model state.

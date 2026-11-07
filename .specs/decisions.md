@@ -215,3 +215,7 @@ Join steps at the change were 0.00348, 0.00012, 0.00488, and 0.00205. The larges
 No pass or fail result is recorded for those checks. The third M7.2 checkbox and the M7 acceptance checkbox stay open.
 
 **Notification mechanism:** a balloon (`NIF_INFO`) on the existing `Shell_NotifyIconW` icon owned by `Skrivli.TrayMessage`. The notifier port only queues a `RecordingId`. The tray thread shows the balloon. WinRT toasts were not added. `notify_on_transcript` defaults on via `serde(default)` and does not bump settings schema v4.
+
+## D-17 — Settings layout uses own row helpers, not Kit `setting` (Phase 5 of the model/settings UI plan)
+
+**Outcome:** Settings uses `settings_section` and `settings_row` in `ui/components/settings_rows.rs` (uppercase label, bordered group, text left and control right). Kit's `setting` module is not used: its `Settings` component is built around a sidebar with pages, which is too much for the current two rows. Revisit it during M8.1 once the list is longer; if it is adopted, record that here. Settings' **Change model…** dispatches `AppCommand::OpenModelDialog`. The manual checks in the plan (dialog stacking, light/dark rendering) have not been run.

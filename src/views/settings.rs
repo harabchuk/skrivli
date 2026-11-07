@@ -1,45 +1,143 @@
-//! Settings placeholder. Only close-to-tray is wired; the rest of the form is M8.
+//! Settings: the transcription model and app behaviour. Rendering never touches a worker.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::{v_flex, WindowExt as _};
-use gpui_kit::{App, IntoElement, ParentElement, SharedString, Styled, Window};
+use gpui_kit::component::dialog::DialogClose;
+use gpui_kit::component::switch::Switch;
+use gpui_kit::component::{h_flex, v_flex, Sizable as _, WindowExt as _};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window};
+
+use crate::domain::recording::format_size;
+use crate::ui::components::dialog_style::{dialog_footer, dialog_footer_note, DIALOG_WIDTH};
+use crate::ui::components::model_card::{model_tag, ModelCardTag};
+use crate::ui::components::settings_rows::{settings_row, settings_section};
+
+use super::model_prompt::model_copy;
+use super::state::ModelStatus;
+
+/// Text for the Transcription row. Pure, so each model state can be tested without GPUI.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SettingsModelRow {
+    pub(crate) title: String,
+    pub(crate) description: String,
+    pub(crate) button: &'static str,
+    pub(crate) in_use: bool,
+}
+
+pub(crate) fn settings_model_row(
+    status: &ModelStatus,
+    model_bytes: Option<u64>,
+) -> SettingsModelRow {
+    match status {
+        ModelStatus::InUse { id } => {
+            let copy = model_copy(id);
+            let description = match model_bytes {
+                Some(bytes) => format!("{} · {}", copy.description, format_size(bytes)),
+                None => copy.description.to_string(),
+            };
+            SettingsModelRow {
+                title: copy.name.to_string(),
+                description,
+                button: "Change model…",
+                in_use: true,
+            }
+        }
+        ModelStatus::Downloading { id, percent } => SettingsModelRow {
+            title: model_copy(id).name.to_string(),
+            description: format!("Downloading {percent}%"),
+            button: "Change model…",
+            in_use: false,
+        },
+        ModelStatus::Missing | ModelStatus::Checking => SettingsModelRow {
+            title: "No model installed".to_string(),
+            description: "Choose a model to create transcripts.".to_string(),
+            button: "Choose model…",
+            in_use: false,
+        },
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SettingsView {
+    pub(crate) close_to_tray: bool,
+    pub(crate) model: SettingsModelRow,
+}
+
+pub(crate) fn version_text() -> String {
+    format!("Skrivli {}", env!("CARGO_PKG_VERSION"))
+}
 
 pub(crate) fn open_settings(
     window: &mut Window,
     cx: &mut App,
-    checked: impl Fn(&App) -> bool + 'static,
-    on_change: impl Fn(&bool, &mut Window, &mut App) + Clone + 'static,
+    read: impl Fn(&App) -> SettingsView + 'static,
+    on_close_to_tray: impl Fn(&bool, &mut Window, &mut App) + Clone + 'static,
+    on_change_model: impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
 ) {
     window.open_dialog(cx, move |dialog, _, cx| {
-        let value = checked(cx);
-        let on_change = on_change.clone();
-        dialog.title("Settings").child(
-            v_flex()
-                .gap_3()
-                .child(close_to_tray_checkbox(value, on_change))
-                .child(
-                    Button::new("settings-about")
-                        .ghost()
-                        .label("About")
-                        .on_click(|_, window, cx| {
-                            open_about(window, cx);
-                        }),
-                ),
-        )
+        let view = read(cx);
+        let model = view.model;
+        let model_title = h_flex()
+            .gap_2()
+            .items_center()
+            .child(SharedString::from(model.title))
+            .when(model.in_use, |this| {
+                this.child(model_tag(ModelCardTag::InUse))
+            });
+        dialog
+            .title("Settings")
+            .w(DIALOG_WIDTH)
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap_4()
+                    .child(settings_section(
+                        "Transcription",
+                        [settings_row(
+                            model_title,
+                            model.description,
+                            Button::new("settings-change-model")
+                                .outline()
+                                .small()
+                                .label(model.button)
+                                .on_click(on_change_model.clone()),
+                            cx,
+                        )],
+                        cx,
+                    ))
+                    .child(settings_section(
+                        "General",
+                        [settings_row(
+                            "Close to the notification area",
+                            "Skrivli keeps running when you close the window.",
+                            close_to_tray_switch(view.close_to_tray, on_close_to_tray.clone()),
+                            cx,
+                        )],
+                        cx,
+                    )),
+            )
+            .footer(
+                dialog_footer(cx)
+                    .child(dialog_footer_note(version_text(), cx))
+                    .child(
+                        DialogClose::new()
+                            .child(Button::new("settings-done").label("Done").primary()),
+                    ),
+            )
     });
 }
 
-pub(crate) fn close_to_tray_checkbox(
+fn close_to_tray_switch(
     checked: bool,
     on_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    Checkbox::new("close-to-tray")
-        .label("Close to the notification area")
+    Switch::new("close-to-tray")
         .checked(checked)
+        .accessibility_label("Close to the notification area")
         .on_change(on_change)
 }
 
+/// Reached only through the reserved `ShowAbout` action. Settings shows the version itself.
 pub(crate) fn open_about(window: &mut Window, cx: &mut App) {
     let version = SharedString::from(format!("Version {}", env!("CARGO_PKG_VERSION")));
     window.open_alert_dialog(cx, move |alert, _, _| {
@@ -72,4 +170,57 @@ pub(crate) fn open_exit_while_recording(
                 true
             })
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{settings_model_row, version_text, SettingsModelRow};
+    use crate::views::state::ModelStatus;
+
+    #[test]
+    fn row_shows_the_model_in_use_with_its_size() {
+        // Arrange
+        let status = ModelStatus::InUse {
+            id: "base-q5_1".to_string(),
+        };
+
+        // Act
+        let row = settings_model_row(&status, Some(59_707_625));
+
+        // Assert
+        assert_eq!(
+            row,
+            SettingsModelRow {
+                title: "Base".to_string(),
+                description: "Good balance for most meetings · 56.9 MB".to_string(),
+                button: "Change model…",
+                in_use: true,
+            }
+        );
+    }
+
+    #[test]
+    fn row_offers_a_choice_when_nothing_is_installed() {
+        // Arrange
+        let status = ModelStatus::Missing;
+
+        // Act
+        let row = settings_model_row(&status, None);
+
+        // Assert
+        assert_eq!(row.title, "No model installed");
+        assert_eq!(row.button, "Choose model…");
+        assert!(!row.in_use);
+    }
+
+    #[test]
+    fn version_text_names_the_app() {
+        // Arrange
+
+        // Act
+        let text = version_text();
+
+        // Assert
+        assert!(text.starts_with("Skrivli "));
+    }
 }

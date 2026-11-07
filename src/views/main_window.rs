@@ -16,8 +16,8 @@ use gpui_kit::component::table::{TableEvent, TableSelection, TableState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, IconName, WindowExt as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    div, px, App, Context, Entity, FocusHandle, IntoElement, ParentElement, Render, SharedString,
-    Styled, Subscription, Task, Window,
+    div, px, App, ClickEvent, Context, Entity, FocusHandle, IntoElement, ParentElement, Render,
+    SharedString, Styled, Subscription, Task, Window,
 };
 
 use crate::domain::audio::format_elapsed;
@@ -46,7 +46,7 @@ use crate::ui::components::model_card::ModelCardData;
 use crate::ui::theme::{apply_theme, theme_icon};
 use crate::views::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
 use crate::views::hooks::ShellHooks;
-use crate::views::state::{model_install_state, AppTab, Presentation};
+use crate::views::state::{model_install_state, AppTab, ModelStatus, Presentation};
 
 use super::model_prompt::{
     after_model_ready, card_progress, error_display, model_copy, model_footer, model_status_item,
@@ -60,6 +60,7 @@ use super::recordings::{
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
+    settings_model_row, SettingsView,
 };
 
 const BOUNDS_DEBOUNCE: Duration = Duration::from_millis(400);
@@ -464,11 +465,17 @@ impl MainWindow {
             Effect::OpenSettings => {
                 let session = cx.entity();
                 let watched = session.clone();
+                let model_entity = session.clone();
                 let on_change = move |checked: &bool, _: &mut Window, cx: &mut App| {
                     session.update(cx, |view, cx| view.set_close_to_tray(*checked, cx));
                 };
-                let checked = move |cx: &App| watched.read_with(cx, |view, _| view.close_to_tray());
-                open_settings(window, cx, checked, on_change);
+                let on_change_model = move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    model_entity.update(cx, |view, cx| {
+                        view.handle(AppCommand::OpenModelDialog, window, cx);
+                    });
+                };
+                let read = move |cx: &App| watched.read_with(cx, |view, _| view.settings_view());
+                open_settings(window, cx, read, on_change, on_change_model);
             }
             Effect::OpenModelDialog => self.open_model_prompt(window, cx),
             Effect::OpenAbout => open_about(window, cx),
@@ -921,6 +928,23 @@ impl MainWindow {
     /// Highlights only. The saved model changes on Use or after a finished download.
     fn select_prompt_model(&mut self, id: &str) {
         self.prompt_model_id = id.to_string();
+    }
+
+    fn settings_view(&self) -> SettingsView {
+        let status = self
+            .presentation
+            .model_status(self.settings.selected_model());
+        let bytes = ModelManifest::load_bundled().ok().and_then(|manifest| {
+            let id = match &status {
+                ModelStatus::InUse { id } => id,
+                _ => return None,
+            };
+            manifest.by_id(id).map(|entry| entry.bytes())
+        });
+        SettingsView {
+            close_to_tray: self.close_to_tray(),
+            model: settings_model_row(&status, bytes),
+        }
     }
 
     fn model_prompt_view(&self) -> ModelPromptView {
