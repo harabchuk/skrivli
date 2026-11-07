@@ -141,7 +141,10 @@ fn close_to_tray_switch(
 pub(crate) fn open_about(window: &mut Window, cx: &mut App) {
     let version = SharedString::from(format!("Version {}", env!("CARGO_PKG_VERSION")));
     window.open_alert_dialog(cx, move |alert, _, _| {
-        alert.title("Skrivli").description(version.clone())
+        alert
+            .title("Skrivli")
+            .w(DIALOG_WIDTH)
+            .description(version.clone())
     });
 }
 
@@ -149,6 +152,7 @@ pub(crate) fn open_tray_explanation(window: &mut Window, cx: &mut App) {
     window.open_alert_dialog(cx, |alert, _, _| {
         alert
             .title("Skrivli is still running")
+            .w(DIALOG_WIDTH)
             .description("Skrivli stays in the notification area. Use Exit to quit.")
     });
 }
@@ -162,6 +166,7 @@ pub(crate) fn open_exit_while_recording(
         let on_confirm = on_confirm.clone();
         alert
             .title("Stop and save?")
+            .w(DIALOG_WIDTH)
             .description("A recording is in progress. Exit will stop and save it first.")
             .confirm()
             .ok_text("Stop and exit")

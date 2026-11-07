@@ -47,6 +47,11 @@ Keyboard focus is wired (`focus_handle().tab_stop(true)`, `track_focus`, `window
 
 **Not verified on this machine:** Explorer restart (`TaskbarCreated` is implemented and was not exercised; Explorer was not restarted). A live second process started during window creation. 100% / 150% DPI and a second monitor. Close, minimize, show, and hide were not clicked through a full manual pass. `cargo run` was used only to see whether the process stayed up, then `skrivli.exe` was stopped.
 
+**Pending manual verification (model and settings UI, Phase 6):** not run, because no GUI was available. These are not verified.
+- Step 6.2: at 560x420 with scaling at 100% and 150%, the model dialog and Settings footer buttons stay visible and reachable (Kit scrolls the body).
+- Step 6.3: a side-by-side look at rename, delete, tray explanation and exit-while-recording in both themes. Alert dialogs now use `DIALOG_WIDTH` (520px) but keep Kit's built-in buttons, so they have no footer divider.
+- Step 6.4: keyboard-only pass over the model dialog, Settings and the status bar item. Tab reaches every radio and button in order, Space selects a radio, Escape closes unless busy, focus rings stay visible.
+
 ## COM, foreground ownership, commands, shutdown, errors
 
 **COM:** flexaudio owns capture COM apartments on its worker threads. The device-watch thread still calls `CoInitializeEx` / `CoUninitialize` for `IMMNotificationClient` only. COM pointers stay in that apartment. Do not mark those wrappers `Send` or `Sync`. The GPUI foreground thread does not initialize a capture apartment and does not join workers inline.

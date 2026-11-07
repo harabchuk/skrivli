@@ -1,6 +1,6 @@
 # Skrivli model dialog, Settings and status bar plan
 
-Status: **Phases 1-5 done** (steps 1.1-5.3, automated tests only; manual tests not run, so card layout is unseen). Decision 1 approved. Phases 6-7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
+Status: **Phases 1-5 done** (steps 1.1-5.3, automated tests only; manual tests not run, so card layout is unseen). Phase 6: steps 6.1 and 6.3 done in code; 6.2 and 6.4 are manual checks, pending (see `decisions.md`). Decision 1 approved. Phase 7 not started. The [GPUI code](#9-gpui-code) is written and compiles, but it has not been applied to `src/` or seen running.
 
 **Goal in one sentence:** make it obvious which transcription models are installed and which one is in use, let the user change model at any time, and give the dialogs a consistent, modern look.
 
@@ -403,7 +403,7 @@ These are easy to change if you disagree.
 
 #### Step 6.1: Define the shared style
 
-- [ ] **What it does:** puts width, padding and subtitle styling in one place.
+- [x] **What it does:** puts width, padding and subtitle styling in one place.
 - **Why:** consistency is easier to keep when there is one place to change it.
 - **Changes:** add `ui/components/dialog_style.rs` with `DIALOG_WIDTH` at 520px, plus `dialog_subtitle`, `dialog_footer` and `dialog_footer_note`. Change the model dialog from 560px to this width.
 - **Rules for all dialogs:**
@@ -423,7 +423,7 @@ These are easy to change if you disagree.
 
 #### Step 6.3: Bring the remaining dialogs into line
 
-- [ ] **What it does:** applies the shared style to the rename, delete, tray explanation and exit-while-recording dialogs.
+- [x] **What it does:** applies the shared style to the rename, delete, tray explanation and exit-while-recording dialogs. (Code done: shared width on all, rename uses `dialog_footer`. The side-by-side theme check is pending manual verification.)
 - **Why:** these are short and mostly fine, so this is a light pass and not a redesign.
 - **Changes:** use the shared width and check button order. Rename already uses a primary button and delete already uses the danger style, so expect small changes. Keep their current wording unless it breaks the rules above.
 - **Done when:** a side-by-side check of each dialog in both themes shows no inconsistencies.

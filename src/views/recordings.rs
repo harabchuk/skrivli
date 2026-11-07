@@ -2,8 +2,9 @@
 
 use std::ops::Range;
 
+use crate::ui::components::dialog_style::{dialog_footer, DIALOG_WIDTH};
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
+use gpui_kit::component::dialog::{DialogAction, DialogClose};
 use gpui_kit::component::empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitle};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::table::{Column, ColumnSort, DataTable, TableDelegate, TableState};
@@ -391,11 +392,12 @@ pub(crate) fn open_rename_dialog(
             .placeholder("Recording name")
             .default_value(current.to_string())
     });
-    window.open_dialog(cx, move |dialog, _, _| {
+    window.open_dialog(cx, move |dialog, _, cx| {
         let input = input.clone();
         let on_confirm = on_confirm.clone();
         dialog
             .title("Rename recording")
+            .w(DIALOG_WIDTH)
             .child(Input::new(&input))
             .on_ok({
                 let input = input.clone();
@@ -407,8 +409,7 @@ pub(crate) fn open_rename_dialog(
                 }
             })
             .footer(
-                DialogFooter::new()
-                    .gap_2()
+                dialog_footer(cx)
                     .child(
                         DialogClose::new()
                             .child(Button::new("rename-cancel").label("Cancel").outline()),
@@ -432,6 +433,7 @@ pub(crate) fn open_delete_dialog(
         let description = format!("Send “{name}” and its related files to the Recycle Bin?");
         alert
             .title("Delete recording?")
+            .w(DIALOG_WIDTH)
             .description(description)
             .confirm()
             .ok_text("Delete")
