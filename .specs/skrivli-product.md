@@ -20,7 +20,7 @@ There is no account, no cloud sync, and no automatic upload of audio or transcri
 - Capture both sides of a conversation (your voice and system playback) in one file.
 - Keep recording reliable when one side is quiet, a device drops, or the app is interrupted.
 - Browse, play, rename, and delete recordings from the app.
-- Create a selectable, copyable transcript without sending audio anywhere.
+- Create a transcript, read it in the app, and copy it, without sending audio anywhere.
 
 ### Who it is for
 
@@ -36,7 +36,7 @@ People who take meetings or calls on Windows and want a private, local recording
 4. Start recording (window, tray, or keyboard shortcut). Speak and/or play audio as usual.
 5. Stop recording. A finished audio file appears in the chosen folder and in the **Recordings** tab.
 6. Open a recording, play it back, and optionally create a transcript.
-7. Select and copy transcript text for notes, email, or another tool.
+7. Copy the transcript for notes, email, or another tool.
 
 After a model is installed, the record → save → transcribe → copy path works without a network connection.
 
@@ -163,16 +163,31 @@ Transcription runs **after** a recording is finished. It does not produce live c
 
 ### Creating a transcript
 
-- From a selected recording: create transcript, cancel, or retry after failure.
+- From a selected recording: create transcript, cancel, or retry after failure. A recording that already has a transcript has no Transcribe button for now, so it cannot be overwritten by accident. Transcribing again is planned.
 - Jobs run one at a time in a queue; progress is visible in the UI and status strip.
 - Auto-transcribe after each new recording is available but **off by default**.
 - Completion can show a Windows/tray notification (when allowed); opening it focuses the matching recording when possible.
 - Failed transcription never damages the original audio.
 
+### What the transcript area shows
+
+Under the player the Recordings detail pane shows exactly one of these states:
+
+| State | What the user sees |
+| --- | --- |
+| No transcript | "No transcript yet", "Runs on this PC. Your audio never leaves it.", and a **Transcribe** button |
+| Queued | "Queued", "Starts when the current transcription finishes.", and **Cancel** |
+| Running | "Transcribing", the percentage, a progress bar, and **Cancel** |
+| Failed | "Transcription failed", the reason, "The recording itself is intact.", and a **Retry** button |
+| Ready | A "Transcript" heading with a Copy button, and a scrolling list with one item per paragraph |
+| Unreadable | "Could not open the transcript" and the reason |
+
+**Cancel** is shown only while the selected recording has a queued or running job.
+
 ### Transcript content
 
 - Plain text with timestamps like `[HH:MM:SS]`, including sessions longer than one hour.
-- Shown in a read-only view that supports selection, select-all, copy, scrolling, and keyboard use.
+- Shown as a scrolling list with one item per paragraph, with the timestamp in a column to the left of the text. Page Up, Page Down, Home and End scroll the list while it has focus. The **Copy** button copies the whole transcript, including timestamps. Selecting part of the text is not supported; open the `.txt` file for anything finer.
 - Associated with the recording as a sibling text file the user owns and can open outside the app.
 
 ### Identity safety

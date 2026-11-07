@@ -252,3 +252,11 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 ## D-20 — Recordings list is a virtual list; Refresh kept (Phase 1 of the Recordings UI plan)
 
 **Outcome:** the Recordings table (`DataTable`) was replaced by Kit's `v_virtual_list` with fixed heights (32 px headers, 56 px rows), built from `LibraryItem` values in catalog order. A Windows directory watcher is wired in production (`FindFirstChangeNotificationW` on file and directory name changes, size and write time, plus a 30 s full rescan, feeding `LibraryHost`), and a test covers create. Add, rename and delete in Explorer were **not** checked in the running app, so the Refresh icon button stays beside Open folder. Remove it, and `AppCommand::RefreshLibrary`, after that manual check.
+
+## D-21 — Transcript is a paragraph list; text selection dropped (Phase 3 of the Recordings UI plan)
+
+**Outcome:** the read-only Kit `Editor` is gone. The finished transcript is a GPUI `list` element with one multiline item per paragraph (`domain::transcript::parse_transcript`), and a Kit `Clipboard` button copies the whole file text. Selecting part of the transcript is **no longer supported**; the `.txt` file stays available for anything finer. This supersedes D-14 (the editor widget and its `set_value` scroll reset). The scroll rule from D-14 still holds: the list resets only when the loaded text changes.
+
+**Why GPUI's `list`, not Kit's `List`:** Kit's `ListState` measures one item and gives every row that size (`gpui-component-0.9.0/src/list/list.rs`, `prepare_items_if_needed`), so paragraphs of different lengths would be cut off or overlap. GPUI's `list` (`gpui-pre-0.3.11/src/elements/list.rs`) measures each item and draws only those in view. It is re-exported by `gpui_kit` (`pub use ::gpui::*`), so no second GPUI version is pulled in. Import it as `ListState as ParagraphListState`.
+
+**Not verified:** the running app (scroll feel, wrapping on resize, Copy with Unicode, PageUp and PageDown focus handling, the Spinner and Progress look).

@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::base::{v_virtual_list, VirtualListScrollHandle};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -16,15 +15,17 @@ use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, IconName, WindowExt 
 use gpui_kit::prelude::*;
 use gpui_kit::Pixels;
 use gpui_kit::{
-    div, px, size, App, ClickEvent, Context, Entity, FocusHandle, IntoElement, ParentElement,
-    Render, SharedString, Size, Styled, Subscription, Task, Window,
+    div, list, px, size, App, ClickEvent, Context, Entity, FocusHandle, IntoElement, KeyDownEvent,
+    ListAlignment, ListOffset, ListState as ParagraphListState, ParentElement, Render,
+    SharedString, Size, Styled, Subscription, Task, Window,
 };
 
 use crate::domain::audio::format_elapsed;
 use crate::domain::gain::{db_fs, format_gain};
-use crate::domain::ids::{JobId, RecordingId};
+use crate::domain::ids::RecordingId;
 use crate::domain::recording::{RecordPhase, TranscriptStatus};
 use crate::domain::theme::ThemePreference;
+use crate::domain::transcript::{parse_transcript, TranscriptParagraph};
 use crate::domain::window_frame::LogicalRect;
 use crate::infrastructure::ai::models::{path_for_variant, validate_model_file, ModelManifest};
 use crate::infrastructure::audio::devices::DeviceCatalog;
@@ -55,9 +56,10 @@ use super::model_prompt::{
 };
 use super::recording::{record_tab, DeviceChoice, RecordView};
 use super::recordings::{
-    library_header, library_items, open_delete_dialog, open_rename_dialog, play_button_label,
-    recording_list_row, recordings_tab, rows_from_catalog, set_row_status, transcript_controls,
-    LibraryItem, RecordingRow, RecordingsActions, RecordingsView,
+    failure_reason, library_header, library_items, open_delete_dialog, open_rename_dialog,
+    play_button_label, recording_list_row, recordings_tab, rows_from_catalog, set_row_status,
+    transcript_pane, ClickAction, LibraryItem, RecordingRow, RecordingsActions, RecordingsView,
+    TranscriptPane,
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
@@ -83,7 +85,9 @@ pub(crate) struct MainWindow {
     library_selected: Option<RecordingId>,
     player_snapshot: PlayerSnapshot,
     transcription_snapshot: TranscriptionSnapshot,
-    transcript_editor: Entity<EditorState>,
+    transcript_paragraphs: Rc<Vec<TranscriptParagraph>>,
+    transcript_list: ParagraphListState,
+    transcript_focus: FocusHandle,
     transcript_generation: u64,
     transcript_error: Option<&'static str>,
     transcript_load: Option<Task<()>>,
@@ -189,7 +193,8 @@ impl MainWindow {
         window.on_window_should_close(cx, move |window, cx| {
             session.update(cx, |view, cx| view.on_close_requested(window, cx))
         });
-        let transcript_editor = cx.new(|cx| EditorState::new(window, cx).line_number(false));
+        let transcript_list = ParagraphListState::new(0, ListAlignment::Top, px(400.));
+        let transcript_focus = cx.focus_handle().tab_stop(true);
         let prompt_model_id = settings.selected_model().to_string();
         // Status surfaces need the installed list before the dialog ever opens.
         model_host.refresh();
@@ -226,7 +231,9 @@ impl MainWindow {
                 notice: None,
             },
             transcription_snapshot: TranscriptionSnapshot::idle(),
-            transcript_editor,
+            transcript_paragraphs: Rc::new(Vec::new()),
+            transcript_list,
+            transcript_focus,
             transcript_generation: 0,
             transcript_error: None,
             transcript_load: None,
@@ -733,16 +740,15 @@ impl MainWindow {
 
     fn load_selected_transcript(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.library_selected else {
-            self.clear_transcript_editor(window, cx);
+            self.clear_transcript();
             return;
         };
         if self.row_transcript_status(id) != TranscriptStatus::Ready {
-            self.transcript_error = None;
-            self.clear_transcript_editor(window, cx);
+            self.clear_transcript();
             return;
         }
         let Some(entry) = self.library_catalog.find(id) else {
-            self.clear_transcript_editor(window, cx);
+            self.clear_transcript();
             return;
         };
         let path = transcript_path_for(&entry.audio_path);
@@ -750,26 +756,25 @@ impl MainWindow {
         let generation = self.transcript_generation;
         self.transcript_load = Some(cx.spawn_in(window, async move |this, async_cx| {
             let loaded = async_cx
-                .background_spawn(async move { read_transcript_file(path) })
+                .background_spawn(async move {
+                    read_transcript_file(path).map(|text| {
+                        let paragraphs = parse_transcript(&text);
+                        (text, paragraphs)
+                    })
+                })
                 .await;
-            let _ = this.update_in(async_cx, |view, window, cx| {
+            let _ = this.update_in(async_cx, |view, _window, cx| {
                 if view.transcript_generation != generation || view.library_selected != Some(id) {
                     return;
                 }
                 match loaded {
-                    Ok(text) => {
+                    Ok((text, paragraphs)) => {
                         view.transcript_error = None;
-                        view.presentation.set_loaded_transcript(text.clone());
-                        view.transcript_editor.update(cx, |editor, cx| {
-                            editor.set_value(text, window, cx);
-                        });
+                        view.set_transcript(text, paragraphs);
                     }
                     Err(message) => {
                         view.transcript_error = Some(message);
-                        view.presentation.set_loaded_transcript(String::new());
-                        view.transcript_editor.update(cx, |editor, cx| {
-                            editor.set_value(String::new(), window, cx);
-                        });
+                        view.set_transcript(String::new(), Vec::new());
                     }
                 }
                 cx.notify();
@@ -777,12 +782,78 @@ impl MainWindow {
         }));
     }
 
-    fn clear_transcript_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Store loaded text. The list resets only when the text changed, so a reload after
+    /// a progress update keeps the scroll position.
+    fn set_transcript(&mut self, text: String, paragraphs: Vec<TranscriptParagraph>) {
+        if self.presentation.loaded_transcript() == text {
+            return;
+        }
+        self.presentation.set_loaded_transcript(text);
+        self.transcript_list.reset(paragraphs.len());
+        self.transcript_paragraphs = Rc::new(paragraphs);
+    }
+
+    /// The scrolling paragraph list. GPUI's `list` measures every item, so paragraphs of
+    /// different lengths wrap without overlapping.
+    fn transcript_list_element(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let paragraphs = self.transcript_paragraphs.clone();
+        let state = self.transcript_list.clone();
+        let key_state = state.clone();
+        let focus = self.transcript_focus.clone();
+        div()
+            .id("transcript-list")
+            .track_focus(&self.transcript_focus)
+            .size_full()
+            .min_h_0()
+            .on_mouse_down(
+                gpui_kit::MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    window.focus(&this.transcript_focus, cx);
+                }),
+            )
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                if !focus.is_focused(window) {
+                    return;
+                }
+                if scroll_transcript(&key_state, event.keystroke.key.as_str()) {
+                    window.refresh();
+                    cx.stop_propagation();
+                }
+            })
+            .child(
+                list(state, move |index, _window, cx| {
+                    let Some(paragraph) = paragraphs.get(index) else {
+                        return div().into_any_element();
+                    };
+                    h_flex()
+                        .items_start()
+                        .gap_3()
+                        .py_1()
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(64.))
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .children(paragraph.timestamp_label()),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(SharedString::from(paragraph.text().to_string())),
+                        )
+                        .into_any_element()
+                })
+                .size_full(),
+            )
+            .into_any_element()
+    }
+
+    fn clear_transcript(&mut self) {
         self.transcript_generation = self.transcript_generation.saturating_add(1);
-        self.presentation.set_loaded_transcript(String::new());
-        self.transcript_editor.update(cx, |editor, cx| {
-            editor.set_value(String::new(), window, cx);
-        });
+        self.transcript_error = None;
+        self.set_transcript(String::new(), Vec::new());
     }
 
     fn open_model_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -993,6 +1064,7 @@ impl MainWindow {
     ) {
         if self.library_selected != id {
             self.player.stop();
+            self.clear_transcript();
         }
         self.library_selected = id;
         self.presentation.set_selected_recording(id);
@@ -1142,6 +1214,21 @@ impl MainWindow {
 
 fn apply(state: &mut Presentation, command: AppCommand) -> Effect {
     crate::views::actions::apply_command(state, command)
+}
+
+/// PageUp, PageDown, Home and End for the transcript list. Returns true when handled.
+fn scroll_transcript(state: &ParagraphListState, key: &str) -> bool {
+    match key {
+        "pageup" => state.scroll_by(-state.viewport_bounds().size.height),
+        "pagedown" => state.scroll_by(state.viewport_bounds().size.height),
+        "home" => state.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: px(0.),
+        }),
+        "end" => state.scroll_to_end(),
+        _ => return false,
+    }
+    true
 }
 
 fn read_transcript_file(
@@ -1337,34 +1424,26 @@ impl Render for MainWindow {
                 let status = selected_id
                     .map(|id| self.row_transcript_status(id))
                     .unwrap_or(TranscriptStatus::None);
-                let controls = transcript_controls(status, self.job_active_for(selected_id));
-                let failure = if status == TranscriptStatus::Failed {
-                    let detail = self.presentation.detail_text();
-                    if detail.is_empty() {
-                        None
-                    } else if self.presentation.transcript_recording() == selected_id {
-                        Some(SharedString::from(detail.to_string()))
-                    } else {
-                        None
-                    }
-                } else {
-                    self.transcript_error.map(SharedString::from)
-                };
-                let transcript_view =
-                    if status == TranscriptStatus::Ready && self.transcript_error.is_none() {
-                        Editor::new(&self.transcript_editor)
-                            .readonly(true)
-                            .h(px(220.))
-                            .into_any_element()
-                    } else {
-                        div().into_any_element()
-                    };
+                let job_active = self.job_active_for(selected_id);
+                let failure = failure_reason(
+                    self.presentation.detail_text(),
+                    self.presentation.transcript_recording(),
+                    selected_id,
+                );
+                let pane = transcript_pane(
+                    status,
+                    job_active,
+                    failure,
+                    self.transcript_error.map(SharedString::from),
+                );
+                let transcript_list =
+                    (pane == TranscriptPane::Ready).then(|| self.transcript_list_element(cx));
                 let job_id = self
                     .presentation
                     .active_job()
                     .filter(|(recording, _)| Some(*recording) == selected_id)
-                    .map(|(_, job)| job)
-                    .unwrap_or_else(|| JobId::from_raw(0));
+                    .map(|(_, job)| job);
+                let copy_entity = entity.clone();
                 let refresh_entity = entity.clone();
                 let folder_entity = entity.clone();
                 let play_entity = entity.clone();
@@ -1411,10 +1490,12 @@ impl Render for MainWindow {
                             view.handle(AppCommand::Transcribe { recording_id: id }, window, cx);
                         });
                     }),
-                    cancel_job: Rc::new(move |_event, window, cx| {
-                        cancel_entity.update(cx, |view, cx| {
-                            view.handle(AppCommand::CancelTranscription { job_id }, window, cx);
-                        });
+                    cancel_job: job_id.map(|job_id| -> ClickAction {
+                        Rc::new(move |_event, window, cx| {
+                            cancel_entity.update(cx, |view, cx| {
+                                view.handle(AppCommand::CancelTranscription { job_id }, window, cx);
+                            });
+                        })
                     }),
                     retry: Rc::new(move |_event, window, cx| {
                         let Some(id) = selected_id else {
@@ -1423,6 +1504,15 @@ impl Render for MainWindow {
                         retry_entity.update(cx, |view, cx| {
                             view.handle(AppCommand::Transcribe { recording_id: id }, window, cx);
                         });
+                    }),
+                    copy_transcript: Rc::new(move |_window, cx| {
+                        SharedString::from(
+                            copy_entity
+                                .read(cx)
+                                .presentation
+                                .loaded_transcript()
+                                .to_string(),
+                        )
                     }),
                 };
                 recordings_tab(
@@ -1433,9 +1523,8 @@ impl Render for MainWindow {
                         playing,
                         play_label: play_button_label(self.player_snapshot.phase),
                         error,
-                        transcript_view,
-                        controls,
-                        failure,
+                        pane,
+                        transcript_list,
                     },
                     actions,
                     cx,

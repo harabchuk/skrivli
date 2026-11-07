@@ -264,11 +264,112 @@ fn normalize_line(text: &str) -> String {
         .to_lowercase()
 }
 
+/// One paragraph of a transcript file, as shown in the transcript list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TranscriptParagraph {
+    start_ms: Option<u64>,
+    text: String,
+}
+
+impl TranscriptParagraph {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn start_ms(&self) -> Option<u64> {
+        self.start_ms
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// `HH:MM:SS` without brackets, or `None` when the paragraph has no timestamp.
+    pub(crate) fn timestamp_label(&self) -> Option<String> {
+        let total = self.start_ms? / 1_000;
+        Some(format!(
+            "{:02}:{:02}:{:02}",
+            total / 3_600,
+            (total % 3_600) / 60,
+            total % 60
+        ))
+    }
+}
+
+/// Split transcript file text into paragraphs. Never drops text.
+///
+/// A paragraph starts at a blank line or at a line beginning with `[HH:MM:SS]`,
+/// which is what `format_transcript` writes. Other lines join the paragraph above.
+pub(crate) fn parse_transcript(text: &str) -> Vec<TranscriptParagraph> {
+    let mut paragraphs = Vec::new();
+    let mut current: Option<TranscriptParagraph> = None;
+    let flush = |current: &mut Option<TranscriptParagraph>, out: &mut Vec<TranscriptParagraph>| {
+        if let Some(paragraph) = current.take() {
+            if !paragraph.text.is_empty() {
+                out.push(paragraph);
+            }
+        }
+    };
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            flush(&mut current, &mut paragraphs);
+            continue;
+        }
+        if let Some((start_ms, rest)) = split_timestamp(line) {
+            flush(&mut current, &mut paragraphs);
+            current = Some(TranscriptParagraph {
+                start_ms: Some(start_ms),
+                text: rest.to_string(),
+            });
+            continue;
+        }
+        match current.as_mut() {
+            Some(paragraph) if paragraph.text.is_empty() => paragraph.text.push_str(line),
+            Some(paragraph) => {
+                paragraph.text.push('\n');
+                paragraph.text.push_str(line);
+            }
+            None => {
+                current = Some(TranscriptParagraph {
+                    start_ms: None,
+                    text: line.to_string(),
+                });
+            }
+        }
+    }
+    flush(&mut current, &mut paragraphs);
+    paragraphs
+}
+
+/// Split a leading `[HH:MM:SS]` off a line. Returns the start in ms and the rest.
+fn split_timestamp(line: &str) -> Option<(u64, &str)> {
+    let inner = line.strip_prefix('[')?;
+    let (stamp, rest) = inner.split_once(']')?;
+    let mut parts = stamp.split(':');
+    let hours = parse_digits(parts.next()?)?;
+    let minutes = parse_digits(parts.next()?)?;
+    let seconds = parse_digits(parts.next()?)?;
+    if parts.next().is_some() || minutes > 59 || seconds > 59 {
+        return None;
+    }
+    let total = hours
+        .checked_mul(3_600)?
+        .checked_add(minutes * 60 + seconds)?
+        .checked_mul(1_000)?;
+    Some((total, rest.trim()))
+}
+
+fn parse_digits(part: &str) -> Option<u64> {
+    if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    part.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        cleanup_repeated_lines, format_timestamp, format_transcript, plan_windows, stitch_segments,
-        TranscriptSegment, PARAGRAPH_MAX_SPAN, PARAGRAPH_PAUSE, WINDOW_DURATION, WINDOW_OVERLAP,
+        cleanup_repeated_lines, format_timestamp, format_transcript, parse_transcript,
+        plan_windows, stitch_segments, TranscriptSegment, PARAGRAPH_MAX_SPAN, PARAGRAPH_PAUSE,
+        WINDOW_DURATION, WINDOW_OVERLAP,
     };
     use std::time::Duration;
 
@@ -426,5 +527,155 @@ mod tests {
         assert!(span_text.contains("\n\n["));
         assert!(pause_text.contains("[00:00:00] one"));
         assert!(span_text.contains("alpha"));
+    }
+
+    fn para(start_ms: Option<u64>, text: &str) -> super::TranscriptParagraph {
+        super::TranscriptParagraph {
+            start_ms,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn parses_two_paragraphs_from_formatted_output() {
+        // Arrange
+        let segments = vec![
+            TranscriptSegment::new(0, 1_000, "Hello there."),
+            TranscriptSegment::new(10_000, 11_000, "Second paragraph."),
+        ];
+        let text = format_transcript(&segments);
+
+        // Act
+        let paragraphs = parse_transcript(&text);
+
+        // Assert
+        assert_eq!(
+            paragraphs,
+            vec![
+                para(Some(0), "Hello there."),
+                para(Some(10_000), "Second paragraph.")
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_timestamp_past_one_hour_and_labels_it() {
+        // Arrange
+        let text = "[01:01:01] Late remark.
+";
+
+        // Act
+        let paragraphs = parse_transcript(text);
+
+        // Assert
+        assert_eq!(paragraphs, vec![para(Some(3_661_000), "Late remark.")]);
+        assert_eq!(paragraphs[0].timestamp_label().as_deref(), Some("01:01:01"));
+        assert_eq!(paragraphs[0].start_ms(), Some(3_661_000));
+        assert_eq!(para(None, "x").timestamp_label(), None);
+    }
+
+    #[test]
+    fn keeps_unicode_text() {
+        // Arrange
+        let text = "[00:00:05] Grüße, 世界 👋 — ok
+";
+
+        // Act
+        let paragraphs = parse_transcript(text);
+
+        // Assert
+        assert_eq!(paragraphs, vec![para(Some(5_000), "Grüße, 世界 👋 — ok")]);
+    }
+
+    #[test]
+    fn empty_or_blank_text_gives_no_paragraphs() {
+        // Arrange
+        let inputs = [
+            "", "
+
+  
+",
+        ];
+
+        // Act
+        let results = inputs.map(parse_transcript);
+
+        // Assert
+        assert!(results.iter().all(Vec::is_empty));
+    }
+
+    #[test]
+    fn text_without_timestamp_is_kept_with_no_start() {
+        // Arrange
+        let text = "Typed by hand.
+
+[00:00:09] Back to normal.
+";
+
+        // Act
+        let paragraphs = parse_transcript(text);
+
+        // Assert
+        assert_eq!(
+            paragraphs,
+            vec![
+                para(None, "Typed by hand."),
+                para(Some(9_000), "Back to normal.")
+            ]
+        );
+    }
+
+    #[test]
+    fn several_lines_under_one_timestamp_stay_in_one_paragraph() {
+        // Arrange
+        let text = "[00:00:01] First line.
+Second line.
+[00:00:02] Next.
+";
+
+        // Act
+        let paragraphs = parse_transcript(text);
+
+        // Assert
+        assert_eq!(
+            paragraphs,
+            vec![
+                para(
+                    Some(1_000),
+                    "First line.
+Second line."
+                ),
+                para(Some(2_000), "Next.")
+            ]
+        );
+    }
+
+    #[test]
+    fn round_trip_keeps_every_word() {
+        // Arrange
+        let segments = vec![
+            TranscriptSegment::new(0, 1_000, "alpha beta"),
+            TranscriptSegment::new(1_200, 2_000, "gamma"),
+            TranscriptSegment::new(9_000, 10_000, "delta épsilon"),
+            TranscriptSegment::new(70_000, 71_000, "zeta"),
+        ];
+        let text = format_transcript(&segments);
+
+        // Act
+        let parsed: Vec<String> = parse_transcript(&text)
+            .iter()
+            .flat_map(|p| {
+                p.text()
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        // Assert
+        assert_eq!(
+            parsed,
+            ["alpha", "beta", "gamma", "delta", "épsilon", "zeta"]
+        );
     }
 }

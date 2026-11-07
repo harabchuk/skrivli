@@ -2,10 +2,13 @@
 
 use crate::ui::components::dialog_style::{dialog_footer, DIALOG_WIDTH};
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::dialog::{DialogAction, DialogClose};
 use gpui_kit::component::empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitle};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::progress::Progress;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
     StyledExt as _, WindowExt as _,
@@ -358,7 +361,17 @@ fn row_badge(badge: RowBadge, cx: &App) -> Div {
         RowBadge::Failed => (SharedString::from("Failed"), theme.danger),
         RowBadge::Recovered => (SharedString::from("Recovered"), theme.warning),
     };
-    div().flex_none().text_xs().text_color(color).child(text)
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap_1()
+        .text_xs()
+        .text_color(color)
+        .when(matches!(badge, RowBadge::Progress(_)), |el| {
+            el.child(Spinner::new().xsmall().color(color))
+        })
+        .child(text)
 }
 
 /// A click handler shared between buttons and menu items.
@@ -373,9 +386,14 @@ pub(crate) struct RecordingsActions {
     pub(crate) rename: ClickAction,
     pub(crate) delete: ClickAction,
     pub(crate) transcribe: ClickAction,
-    pub(crate) cancel_job: ClickAction,
+    /// Present only when the selected recording has a job to cancel.
+    pub(crate) cancel_job: Option<ClickAction>,
     pub(crate) retry: ClickAction,
+    pub(crate) copy_transcript: CopyAction,
 }
+
+/// Supplies the text the Copy button puts on the clipboard.
+pub(crate) type CopyAction = Rc<dyn Fn(&mut Window, &mut App) -> SharedString>;
 
 /// What the Recordings tab shows.
 pub(crate) struct RecordingsView<'a> {
@@ -385,9 +403,9 @@ pub(crate) struct RecordingsView<'a> {
     pub(crate) playing: bool,
     pub(crate) play_label: SharedString,
     pub(crate) error: Option<SharedString>,
-    pub(crate) transcript_view: AnyElement,
-    pub(crate) controls: TranscriptControls,
-    pub(crate) failure: Option<SharedString>,
+    pub(crate) pane: TranscriptPane,
+    /// The scrolling paragraph list. Used only by the Ready pane.
+    pub(crate) transcript_list: Option<AnyElement>,
 }
 
 fn click(action: &ClickAction) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
@@ -472,6 +490,134 @@ fn title_row(row: &RecordingRow, actions: &RecordingsActions, cx: &App) -> Div {
         .children(row.notes.iter().map(|note| note_line(note.clone(), cx)))
 }
 
+fn pane_text(title: &'static str, description: Option<SharedString>, cx: &App) -> Div {
+    v_flex()
+        .gap_1()
+        .child(div().font_semibold().child(title))
+        .when_some(description, |el, text| {
+            el.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text),
+            )
+        })
+}
+
+fn cancel_button(actions: &RecordingsActions) -> Option<Button> {
+    actions.cancel_job.as_ref().map(|cancel| {
+        Button::new("cancel-transcription")
+            .label("Cancel")
+            .on_click(click(cancel))
+    })
+}
+
+fn pane_frame() -> Div {
+    v_flex().gap_3().py_6().items_start()
+}
+
+fn no_transcript_pane(actions: &RecordingsActions, cx: &App) -> Div {
+    pane_frame()
+        .child(pane_text(
+            "No transcript yet",
+            Some("Runs on this PC. Your audio never leaves it.".into()),
+            cx,
+        ))
+        .child(
+            Button::new("transcribe-recording")
+                .primary()
+                .label("Transcribe")
+                .on_click(click(&actions.transcribe)),
+        )
+}
+
+fn queued_pane(actions: &RecordingsActions, cx: &App) -> Div {
+    pane_frame()
+        .child(pane_text(
+            "Queued",
+            Some("Starts when the current transcription finishes.".into()),
+            cx,
+        ))
+        .children(cancel_button(actions))
+}
+
+fn running_pane(percent: u8, actions: &RecordingsActions, cx: &App) -> Div {
+    pane_frame()
+        .child(pane_text(
+            "Transcribing",
+            Some(format!("{percent}%").into()),
+            cx,
+        ))
+        .child(
+            Progress::new("transcription-progress")
+                .value(f32::from(percent))
+                .w(px(280.))
+                .accessibility_label("Transcription progress"),
+        )
+        .children(cancel_button(actions))
+}
+
+fn failed_pane(reason: Option<SharedString>, actions: &RecordingsActions, cx: &App) -> Div {
+    pane_frame()
+        .child(
+            pane_text("Transcription failed", reason, cx).child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("The recording itself is intact."),
+            ),
+        )
+        .child(
+            Button::new("retry-transcription")
+                .primary()
+                .label("Retry")
+                .on_click(click(&actions.retry)),
+        )
+}
+
+fn unreadable_pane(reason: SharedString, cx: &App) -> Div {
+    pane_frame().child(pane_text("Could not open the transcript", Some(reason), cx))
+}
+
+fn ready_pane(list: Option<AnyElement>, actions: &RecordingsActions) -> Div {
+    let copy = actions.copy_transcript.clone();
+    v_flex()
+        .flex_1()
+        .min_h_0()
+        .gap_2()
+        .child(
+            h_flex()
+                .flex_shrink_0()
+                .items_center()
+                .child(div().font_semibold().child("Transcript"))
+                .child(div().flex_1())
+                .child(
+                    Clipboard::new("copy-transcript")
+                        .tooltip("Copy transcript")
+                        .accessibility_label("Copy transcript")
+                        .value_fn(move |window, cx| copy(window, cx)),
+                ),
+        )
+        .child(div().flex_1().min_h_0().children(list))
+}
+
+/// The area under the player: exactly one state.
+fn transcript_pane_view(
+    pane: TranscriptPane,
+    list: Option<AnyElement>,
+    actions: &RecordingsActions,
+    cx: &App,
+) -> Div {
+    match pane {
+        TranscriptPane::NoTranscript => no_transcript_pane(actions, cx),
+        TranscriptPane::Queued => queued_pane(actions, cx),
+        TranscriptPane::Running { percent } => running_pane(percent, actions, cx),
+        TranscriptPane::Failed { reason } => failed_pane(reason, actions, cx),
+        TranscriptPane::Ready => ready_pane(list, actions),
+        TranscriptPane::Unreadable { reason } => unreadable_pane(reason, cx),
+    }
+}
+
 pub(crate) fn recordings_tab(
     view: RecordingsView<'_>,
     actions: RecordingsActions,
@@ -484,9 +630,8 @@ pub(crate) fn recordings_tab(
         playing,
         play_label,
         error,
-        transcript_view,
-        controls,
-        failure,
+        pane,
+        transcript_list,
     } = view;
     let list =
         if let Some(message) = error {
@@ -513,9 +658,10 @@ pub(crate) fn recordings_tab(
 
     let detail = match selected {
         Some(row) => v_flex()
+            .size_full()
+            .min_h_0()
             .gap_3()
             .child(title_row(row, &actions, cx))
-            .child(failure.unwrap_or_else(|| SharedString::from("")))
             .child(
                 h_flex()
                     .gap_2()
@@ -532,30 +678,7 @@ pub(crate) fn recordings_tab(
                             .on_click(click(&actions.stop)),
                     ),
             )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("transcribe-recording")
-                            .label("Transcribe")
-                            .disabled(!controls.transcribe_enabled)
-                            .on_click(click(&actions.transcribe)),
-                    )
-                    .child(
-                        Button::new("cancel-transcription")
-                            .label("Cancel")
-                            .disabled(!controls.cancel_enabled)
-                            .on_click(click(&actions.cancel_job)),
-                    )
-                    .when(controls.retry_enabled, |row| {
-                        row.child(
-                            Button::new("retry-transcription")
-                                .label("Retry")
-                                .on_click(click(&actions.retry)),
-                        )
-                    }),
-            )
-            .child(transcript_view)
+            .child(transcript_pane_view(pane, transcript_list, &actions, cx))
             .into_any_element(),
         None => Empty::new()
             .header(
@@ -703,30 +826,51 @@ pub(crate) fn rows_from_catalog(catalog: &LibraryCatalog) -> Vec<RecordingRow> {
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TranscriptControls {
-    pub(crate) transcribe_enabled: bool,
-    pub(crate) cancel_enabled: bool,
-    pub(crate) retry_enabled: bool,
+/// The one state shown below the player.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TranscriptPane {
+    NoTranscript,
+    Queued,
+    Running { percent: u8 },
+    Failed { reason: Option<SharedString> },
+    Ready,
+    Unreadable { reason: SharedString },
 }
 
-/// Transcribe is off while that row is queued or running. Cancel is on only then.
-/// Retry is the Transcribe action for a Failed row.
-pub(crate) fn transcript_controls(
-    status: crate::domain::recording::TranscriptStatus,
+/// Pick the pane for the selected recording.
+///
+/// `failure` is the reason for this recording's failure, if any. `read_error` is set
+/// when a Ready transcript could not be read.
+pub(crate) fn transcript_pane(
+    status: TranscriptStatus,
     job_active: bool,
-) -> TranscriptControls {
-    use crate::domain::recording::TranscriptStatus;
-    let active = job_active
-        || matches!(
-            status,
-            TranscriptStatus::Queued | TranscriptStatus::Progress(_)
-        );
-    TranscriptControls {
-        transcribe_enabled: !active && status != TranscriptStatus::Failed,
-        cancel_enabled: active,
-        retry_enabled: status == TranscriptStatus::Failed && !active,
+    failure: Option<SharedString>,
+    read_error: Option<SharedString>,
+) -> TranscriptPane {
+    match status {
+        TranscriptStatus::Queued => TranscriptPane::Queued,
+        TranscriptStatus::Progress(percent) => TranscriptPane::Running { percent },
+        // A job that has not reported yet still shows as queued.
+        TranscriptStatus::None | TranscriptStatus::Failed if job_active => TranscriptPane::Queued,
+        TranscriptStatus::Failed => TranscriptPane::Failed { reason: failure },
+        TranscriptStatus::Ready => match read_error {
+            Some(reason) => TranscriptPane::Unreadable { reason },
+            None => TranscriptPane::Ready,
+        },
+        TranscriptStatus::None => TranscriptPane::NoTranscript,
     }
+}
+
+/// The failure reason belongs to the recording that failed, not to whichever is selected.
+pub(crate) fn failure_reason(
+    detail: &str,
+    failed_recording: Option<RecordingId>,
+    selected: Option<RecordingId>,
+) -> Option<SharedString> {
+    if detail.is_empty() || selected.is_none() || failed_recording != selected {
+        return None;
+    }
+    Some(SharedString::from(detail.to_string()))
 }
 
 pub(crate) fn play_button_label(phase: PlayerPhase) -> SharedString {
@@ -1009,55 +1153,77 @@ mod tests {
     }
 
     #[test]
-    fn transcript_controls_follow_row_status() {
-        use super::{transcript_controls, TranscriptControls};
-        use crate::domain::recording::TranscriptStatus;
+    fn pane_follows_status() {
+        use super::{transcript_pane, TranscriptPane};
 
         // Arrange
-        let idle = TranscriptStatus::None;
-        let queued = TranscriptStatus::Queued;
-        let running = TranscriptStatus::Progress(42);
-        let failed = TranscriptStatus::Failed;
+        let reason = Some(SharedString::from("model crashed"));
 
         // Act
-        let idle_controls = transcript_controls(idle, false);
-        let queued_controls = transcript_controls(queued, true);
-        let running_controls = transcript_controls(running, true);
-        let failed_controls = transcript_controls(failed, false);
+        let none = transcript_pane(TranscriptStatus::None, false, None, None);
+        let queued = transcript_pane(TranscriptStatus::Queued, true, None, None);
+        let running = transcript_pane(TranscriptStatus::Progress(42), true, None, None);
+        let failed = transcript_pane(TranscriptStatus::Failed, false, reason.clone(), None);
+        let ready = transcript_pane(TranscriptStatus::Ready, false, None, None);
 
         // Assert
-        assert_eq!(
-            idle_controls,
-            TranscriptControls {
-                transcribe_enabled: true,
-                cancel_enabled: false,
-                retry_enabled: false,
-            }
-        );
-        assert_eq!(
-            queued_controls,
-            TranscriptControls {
-                transcribe_enabled: false,
-                cancel_enabled: true,
-                retry_enabled: false,
-            }
-        );
-        assert_eq!(
-            running_controls,
-            TranscriptControls {
-                transcribe_enabled: false,
-                cancel_enabled: true,
-                retry_enabled: false,
-            }
-        );
-        assert_eq!(
-            failed_controls,
-            TranscriptControls {
-                transcribe_enabled: false,
-                cancel_enabled: false,
-                retry_enabled: true,
-            }
-        );
+        assert_eq!(none, TranscriptPane::NoTranscript);
+        assert_eq!(queued, TranscriptPane::Queued);
+        assert_eq!(running, TranscriptPane::Running { percent: 42 });
+        assert_eq!(failed, TranscriptPane::Failed { reason });
+        assert_eq!(ready, TranscriptPane::Ready);
+    }
+
+    #[test]
+    fn pane_with_an_active_job_and_no_status_is_queued() {
+        use super::{transcript_pane, TranscriptPane};
+
+        // Arrange / Act
+        let none = transcript_pane(TranscriptStatus::None, true, None, None);
+        let failed = transcript_pane(TranscriptStatus::Failed, true, None, None);
+        let ready = transcript_pane(TranscriptStatus::Ready, true, None, None);
+
+        // Assert
+        assert_eq!(none, TranscriptPane::Queued);
+        assert_eq!(failed, TranscriptPane::Queued);
+        assert_eq!(ready, TranscriptPane::Ready);
+    }
+
+    #[test]
+    fn unreadable_transcript_on_a_ready_recording_shows_the_reason() {
+        use super::{transcript_pane, TranscriptPane};
+
+        // Arrange
+        let error = SharedString::from("The transcript could not be read.");
+
+        // Act
+        let pane = transcript_pane(TranscriptStatus::Ready, false, None, Some(error.clone()));
+        let ignored = transcript_pane(TranscriptStatus::None, false, None, Some(error.clone()));
+
+        // Assert
+        assert_eq!(pane, TranscriptPane::Unreadable { reason: error });
+        assert_eq!(ignored, TranscriptPane::NoTranscript);
+    }
+
+    #[test]
+    fn failure_reason_belongs_to_the_failed_recording_only() {
+        use super::failure_reason;
+
+        // Arrange
+        let failed = Some(RecordingId::from_raw(1));
+        let other = Some(RecordingId::from_raw(2));
+
+        // Act
+        let own = failure_reason("disk full", failed, failed);
+        let foreign = failure_reason("disk full", failed, other);
+        let empty = failure_reason("", failed, failed);
+        let nothing_selected = failure_reason("disk full", failed, None);
+
+        // Assert
+        assert_eq!(own.as_deref(), Some("disk full"));
+        assert_eq!(foreign, None);
+        assert_eq!(empty, None);
+        assert_eq!(nothing_selected, None);
     }
 
     fn row_for(id: u64, name: &str, started: Option<u64>) -> RecordingRow {

@@ -1,6 +1,6 @@
 # Skrivli Recordings page redesign plan
 
-**Status:** Phases 0 to 2 done. Phases 3 to 7 are not started. The code snippets have not been compiled.
+**Status:** Phases 0 to 3 done. Phases 4 to 7 are not started. The code snippets have not been compiled.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
 
@@ -248,7 +248,7 @@ Button::new("recording-more")
 **Goal:** show one clear state and one clear action below the player.
 
 **Add**
-- [ ] Add this enum and a pure mapping to `views/recordings.rs`:
+- [x] Add this enum and a pure mapping to `views/recordings.rs`:
 
   ```rust
   pub(crate) enum TranscriptPane {
@@ -261,16 +261,16 @@ Button::new("recording-more")
   }
   ```
 
-- [ ] Add a render function for each state, following the table in section 1. Use Kit's `Progress` for the bar and `Spinner` for the row badge.
-- [ ] Add a "Transcript" heading with a Copy icon button. Use Kit's `Clipboard` with `value_fn`, reading `presentation.loaded_transcript()`. It copies the file's text, including timestamps.
-- [ ] Add a pure parser in `domain/transcript.rs`, `parse_transcript(text) -> Vec<TranscriptParagraph>`, where each paragraph has `start_ms: Option<u64>` and `text`:
+- [x] Add a render function for each state, following the table in section 1. Use Kit's `Progress` for the bar and `Spinner` for the row badge.
+- [x] Add a "Transcript" heading with a Copy icon button. Use Kit's `Clipboard` with `value_fn`, reading `presentation.loaded_transcript()`. It copies the file's text, including timestamps.
+- [x] Add a pure parser in `domain/transcript.rs`, `parse_transcript(text) -> Vec<TranscriptParagraph>`, where each paragraph has `start_ms: Option<u64>` and `text`:
   - A new item starts at a blank line or a line beginning with `[HH:MM:SS]`. This matches what `format_transcript` writes, which is one timestamp per paragraph.
   - Text with no timestamp is kept as an item with `start_ms: None`, since users can edit the file. No text is ever dropped.
-- [ ] Add a `transcript_list` that fills the remaining height. Each item has a muted timestamp column and text that wraps across as many lines as it needs.
-- [ ] Use **GPUI's `list` element with its `ListState`** for the list, not Kit's `List`. Kit's `ListState` measures one item and gives every row that size (`gpui-component-0.9.0/src/list/list.rs`, `prepare_items_if_needed`, and `list/cache.rs`), so paragraphs of different lengths would not fit. GPUI's `list` measures each item and only draws those in view.
-- [ ] Store the paragraphs and the list state on `MainWindow`. Import GPUI's `ListState` under another name, because Kit has a type with the same name.
-- [ ] Reset the list state only when the loaded text changes. A progress update must not move the scroll position, which is the rule already recorded in `decisions.md` for the editor.
-- [ ] Add PageUp, PageDown, Home and End scrolling while the list has focus, using `ListState::scroll_to`.
+- [x] Add a `transcript_list` that fills the remaining height. Each item has a muted timestamp column and text that wraps across as many lines as it needs.
+- [x] Use **GPUI's `list` element with its `ListState`** for the list, not Kit's `List`. Kit's `ListState` measures one item and gives every row that size (`gpui-component-0.9.0/src/list/list.rs`, `prepare_items_if_needed`, and `list/cache.rs`), so paragraphs of different lengths would not fit. GPUI's `list` measures each item and only draws those in view.
+- [x] Store the paragraphs and the list state on `MainWindow`. Import GPUI's `ListState` under another name, because Kit has a type with the same name.
+- [x] Reset the list state only when the loaded text changes. A progress update must not move the scroll position, which is the rule already recorded in `decisions.md` for the editor.
+- [x] Add PageUp, PageDown, Home and End scrolling while the list has focus, using `ListState::scroll_to`.
 
 **Sketch (not compiled)**
 
@@ -298,28 +298,32 @@ list(self.transcript_list.clone(), move |index, _window, cx| {
 ```
 
 **Change**
-- [ ] Change `load_selected_transcript` so it parses the text on the background task and stores the paragraphs, keeping `set_loaded_transcript` for Copy.
-- [ ] Change Cancel to use the job ID as it does today. Do not fall back to `JobId::from_raw(0)` silently: render Cancel only when the selected recording has a job.
+- [x] Change `load_selected_transcript` so it parses the text on the background task and stores the paragraphs, keeping `set_loaded_transcript` for Copy.
+- [x] Change Cancel to use the job ID as it does today. Do not fall back to `JobId::from_raw(0)` silently: render Cancel only when the selected recording has a job.
 
 **Remove**
-- [ ] Remove `TranscriptControls`, `transcript_controls` and the `play_button_label` helper once nothing uses them. Move their test cases to `TranscriptPane`.
-- [ ] Remove the always-visible Transcribe, Cancel and Retry buttons and the `failure` text line.
-- [ ] Remove the transcript `Editor`: the `transcript_editor` field, `EditorState`, its creation at `main_window.rs:203`, its render at `main_window.rs:1346`, and the `set_value` calls. Replace `clear_transcript_editor` with a function that clears the paragraphs.
+- [x] Remove `TranscriptControls`, `transcript_controls` and the `play_button_label` helper once nothing uses them. Move their test cases to `TranscriptPane`.
+- [x] Remove the always-visible Transcribe, Cancel and Retry buttons and the `failure` text line.
+- [x] Remove the transcript `Editor`: the `transcript_editor` field, `EditorState`, its creation at `main_window.rs:203`, its render at `main_window.rs:1346`, and the `set_value` calls. Replace `clear_transcript_editor` with a function that clears the paragraphs.
 
 **Tests to write first**
-- [ ] Every `TranscriptStatus` maps to the right pane, with and without an active job.
-- [ ] A transcript read error on a Ready recording gives `Unreadable`.
-- [ ] `Failed` carries the reason only for the recording that failed.
-- [ ] `parse_transcript`: two paragraphs from `format_transcript` output, a timestamp past one hour, Unicode, an empty file, text with no timestamp, and several lines under one timestamp.
-- [ ] Round trip: every word in `format_transcript` output appears in the parsed paragraphs.
+- [x] Every `TranscriptStatus` maps to the right pane, with and without an active job.
+- [x] A transcript read error on a Ready recording gives `Unreadable`.
+- [x] `Failed` carries the reason only for the recording that failed.
+- [x] `parse_transcript`: two paragraphs from `format_transcript` output, a timestamp past one hour, Unicode, an empty file, text with no timestamp, and several lines under one timestamp.
+- [x] Round trip: every word in `format_transcript` output appears in the parsed paragraphs.
 
 **Spec**
-- [ ] `skrivli-product.md`: add the states to section 6. Remove the selection promises at line 23 ("selectable, copyable"), line 39 ("Select and copy") and line 170 ("supports selection, select-all, copy"), and describe a scrolling list with a Copy button.
-- [ ] `skrivli-app-design.md`: update lines 22, 512 and 628, which name the read-only `Editor` and text selection. Line 512 says a plain `div` is not the transcript view, so replace that rule.
-- [ ] `skrivli-implementation-plan.md`: add a note to M7.1 (line 326) saying this plan replaces the editor, and change the manual check at line 381 and the checkpoint at line 435 so they no longer require selection.
-- [ ] `decisions.md`: record that selectable text was dropped, and why GPUI's `list` was used rather than Kit's `List`.
+- [x] `skrivli-product.md`: add the states to section 6. Remove the selection promises at line 23 ("selectable, copyable"), line 39 ("Select and copy") and line 170 ("supports selection, select-all, copy"), and describe a scrolling list with a Copy button.
+- [x] `skrivli-app-design.md`: update lines 22, 512 and 628, which name the read-only `Editor` and text selection. Line 512 says a plain `div` is not the transcript view, so replace that rule.
+- [x] `skrivli-implementation-plan.md`: add a note to M7.1 (line 326) saying this plan replaces the editor, and change the manual check at line 381 and the checkpoint at line 435 so they no longer require selection.
+- [x] `decisions.md`: record that selectable text was dropped, and why GPUI's `list` was used rather than Kit's `List`.
 
 **Done when:** clicking Transcribe moves through Queued, Running and Ready on screen, and the row badge and status bar show the same percentage. With no model installed, Transcribe opens the model dialog and then starts. A long transcript scrolls smoothly, paragraphs of different lengths wrap without overlapping or being cut off when the window is resized, and Copy pastes the full text with Unicode intact.
+
+---
+
+**Evidence (Phase 3):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` and `cargo build` pass. New tests cover `parse_transcript` (two paragraphs from `format_transcript`, a timestamp past one hour, Unicode, empty input, text with no timestamp, several lines under one timestamp, word round trip), `transcript_pane` (every status, with and without an active job, unreadable on Ready only) and `failure_reason` (only for the failed recording). The editor, `EditorState`, `TranscriptControls`, `transcript_controls`, the always-visible Transcribe, Cancel and Retry buttons and the `failure` line are gone. The list uses GPUI's `list` with `ListState` imported as `ParagraphListState`, checked against `gpui-pre-0.3.11` (`list`, `ListState::new/reset/scroll_by/scroll_to/scroll_to_end/viewport_bounds`). Copy, Progress and Spinner are Kit components, and the Copy and Check icons come with Kit's `Clipboard`, so no SVG was embedded. Decisions in D-21. **Deviations:** `play_button_label` stays because the Play button still uses it (Phase 6 removes it). `RecordingsActions::cancel_job` is now an `Option`, so Cancel is rendered only when the selected recording has a job (no `JobId::from_raw(0)` fallback). `select_library_row` clears the loaded transcript when the selection changes, so another recording's text never shows. A job that is active while the status is None or Failed shows as Queued. The row badge shows a Spinner only for the *n*% badge. A Ready recording has no Transcribe button until Phase 4. Page keys work only while the list has focus (clicking it focuses it). **Not verified:** the running app (all pane layouts, Queued to Running to Ready on screen, the no-model flow, smooth scrolling of a long transcript, wrapping on resize, Copy with Unicode, PageUp, PageDown, Home and End).
 
 ---
 

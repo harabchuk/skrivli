@@ -19,7 +19,7 @@ This document defines a new Windows-first application built from scratch with Ru
 - Timestamp, synchronize and mix both streams into one audio recording without losing the timeline when one source is silent.
 - Save to a **user-selected directory** and persist that selection.
 - Optionally transcribe **after recording stops**, on-device, with no upload to a cloud service.
-- Display a selectable, copyable **plain-text transcript** in the Recordings detail pane.
+- Display a **plain-text transcript** in the Recordings detail pane as a scrolling paragraph list, with a Copy button for the whole text.
 - Support two main tabs: **Record** (devices, controls and meters) and **Recordings** (library, playback and transcript).
 - Support tray-based app lifecycle and start/stop, keyboard shortcut and resilient local recording storage.
 
@@ -75,7 +75,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 
 - Use **`gpui-kit` as the primary UI dependency** in `Cargo.toml`. It supplies the matching GPUI runtime and re-exports GPUI Base, GPUI Component and default assets. Avoid independently mixing versions of its constituent crates.
 - Bootstrap using the **GPUI Kit application and window APIs**, and initialize components with `gpui_kit::init(cx)` before rendering any styled widgets. Consult the pinned release for exact signatures.
-- Prefer Kit components for buttons, selection controls, inputs, tabs, data tables, menus, dialogs, tooltips and read-only transcript display. Implement bespoke controls only for application-specific needs such as audio meters.
+- Prefer Kit components for buttons, selection controls, inputs, tabs, data tables, menus, dialogs and tooltips. The transcript is a paragraph list built on GPUI's `list` element (see D-21). Implement bespoke controls only for application-specific needs such as audio meters.
 - Use Kit themes, design tokens, focus, overlays and accessibility patterns; do not build a parallel design system.
 - Do **not** include optional `gpui-shell` JavaScript extension hosting in v1.
 - Verify Windows behavior of the pinned GPUI Kit release on a real device, particularly window setup, overlays, text selection and keyboard interactions. Native tray, hotkeys, and folder picking remain platform adapters when necessary.
@@ -509,7 +509,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Responsive **split-pane** layout: recording list left, selected detail right. At narrow widths, a stacked/detail-navigation fallback is acceptable.
 - List columns: **Name | Date | Duration | Size | Transcript**. Sort newest first; clickable sorting, keyboard selection, stable selection keyed by recording ID/path.
 - Transcript statuses: `—`, `Queued`, `42%`, `Ready`, `Failed`.
-- Right pane: empty state until selected; then **Play / Stop**, file metadata, and a finished transcript in GPUI Kit `Editor` with `readonly(true)` (`EditorState`, gpui-kit 0.9.0). That editor can select, select-all, copy, and move by keyboard. `<basename>.txt` is read on `background_spawn` and stored on the entity. A progress tick does not recreate the entity or call `set_value` (that call resets scroll). A missing `.txt` on a Ready row shows `user_message`, not a panic. A plain `div().child(text)` is not the transcript view.
+- Right pane: empty state until selected; then **Play / Stop**, file metadata, and one transcript area chosen by `views/recordings.rs` `TranscriptPane` (`NoTranscript`, `Queued`, `Running`, `Failed`, `Ready`, `Unreadable`), mapped by the pure `transcript_pane`. A finished transcript is a scrolling list: `<basename>.txt` is read and parsed with `domain::transcript::parse_transcript` on `background_spawn`; `MainWindow` stores the paragraphs and a GPUI `ListState` (imported as `ParagraphListState`, because Kit has its own `ListState`). The list state resets only when the loaded text changes, so a progress tick or a reload of identical text keeps the scroll position. PageUp, PageDown, Home and End scroll it while it has focus. The Kit `Clipboard` button copies `Presentation::loaded_transcript()`. Text selection is not supported (D-21). A missing `.txt` on a Ready row shows the `Unreadable` pane with `user_message`, not a panic. Cancel is rendered only when the selected recording has an active job.
 - Actions: Play, Transcribe, Cancel, Retry, Model, Open folder, Rename, Delete, Refresh (header icon buttons for Open folder and Refresh). Transcribe is disabled while that recording is queued or running. Cancel is enabled only then. Retry is a `Transcribe` command for a row whose status is Failed. The list is a Kit `v_virtual_list` over `LibraryItem` values (day headers and rows) that `MainWindow` rebuilds from `RecordingRow`s; a progress tick changes one row's badge in place without reordering or resetting scroll, and the status strip updates alongside. Rows are always newest first; there is no sorting. Delete goes to the Windows Recycle Bin through a Windows Shell adapter and includes associated audio/`.txt`/`.json`; ask for confirmation and handle partial failures. Rename and delete notify the transcription host before files change. A queued or running job for that recording is cancelled, or a rename that lands before the transcript write retargets the same id.
 - Double-click/Enter can start playback; selection change stops playback by design.
 - Background directory watcher debounces changes; the library scans WAV/FLAC files and matches sidecars/transcripts. Preserve selected recording after refresh.
@@ -625,7 +625,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | **M4 — Robustness** | Endpoint changes, disk checks, privacy flow, partial-file recovery, shutdown behavior | Device loss and interrupted recording preserve usable data |
 | **M5 — Recording library** | Library scan/watch, sidecars, list, playback, rename/delete/open folder | Files remain correctly paired and selected (implemented; hardware browse/playback spot-check still recommended) |
 | **M6 — Transcription** | Pinned whisper.cpp binding, decoder/resampler, model manager, FIFO worker, text formatter | Offline transcription yields correct `.txt` and supports cancel |
-| **M7 — Transcript UI** | GPUI Kit text selection/copy, transcript statuses, progress and notification | Entire recording-to-transcript flow works from UI |
+| **M7 — Transcript UI** | Paragraph list with Copy button, transcript statuses, progress and notification | Entire recording-to-transcript flow works from UI |
 | **M8 — Settings and polish** | Settings UI, hotkey/autostart, DPI and keyboard accessibility, optional FLAC | User preferences persist and critical interactions are accessible |
 | **M9 — Release** | Release build, portable ZIP, licensing/README/privacy notes, manual test pass | Clean Windows machine can run app and record/transcribe |
 
