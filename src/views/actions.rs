@@ -412,7 +412,7 @@ mod tests {
         assert!(effects.effects.is_empty());
         assert!(again.effects.is_empty());
         assert_eq!(state.shell_pulses(), 5);
-        assert_eq!(state.status_line("00:00:05"), "Ready");
+        assert_eq!(state.status_line("00:00:05"), "");
     }
 
     #[test]

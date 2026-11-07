@@ -288,7 +288,10 @@ impl Presentation {
     }
 
     /// `elapsed` is passed in because the window owns the recording start time.
+    /// The Record tab shows recording state and notices itself, so only
+    /// transcription remains here on that tab.
     pub(crate) fn status_line(&self, elapsed: &str) -> String {
+        let on_record_tab = self.tab == AppTab::Record;
         let activity = match self.record_phase {
             RecordPhase::Starting => Some("Starting".to_string()),
             RecordPhase::Recording => Some(format!("Recording {elapsed}")),
@@ -305,10 +308,12 @@ impl Presentation {
         let parts: Vec<String> = activity
             .into_iter()
             .chain(self.notice.map(str::to_string))
+            .filter(|_| !on_record_tab)
             .chain(transcription)
             .collect();
         if parts.is_empty() {
-            "Ready".to_string()
+            let idle = if on_record_tab { "" } else { "Ready" };
+            idle.to_string()
         } else {
             parts.join(" · ")
         }
@@ -473,6 +478,7 @@ mod tests {
     fn model_progress_keeps_the_latest_percent() {
         // Arrange
         let mut state = presentation();
+        state.set_tab(AppTab::Recordings);
         state.set_record_phase(RecordPhase::Recording);
 
         // Act
@@ -610,9 +616,38 @@ mod tests {
     }
 
     #[test]
+    fn status_line_on_record_tab_leaves_recording_state_to_the_view() {
+        // Arrange
+        let mut state = presentation();
+        state.set_notice(Some("Saved."));
+        state.set_record_phase(RecordPhase::Recording);
+
+        // Act
+        let line = state.status_line("00:00:07");
+
+        // Assert
+        assert_eq!(line, "");
+    }
+
+    #[test]
+    fn status_line_on_record_tab_keeps_transcription_progress() {
+        // Arrange
+        let mut state = presentation();
+        state.set_record_phase(RecordPhase::Recording);
+        state.apply_transcription(snapshot(JobPhase::Transcribing, 42, None));
+
+        // Act
+        let line = state.status_line("00:00:07");
+
+        // Assert
+        assert_eq!(line, "Transcribing 42%");
+    }
+
+    #[test]
     fn status_line_reads_naturally_for_every_phase() {
         // Arrange
         let mut state = presentation();
+        state.set_tab(AppTab::Recordings);
         let idle = state.status_line("00:00:05");
 
         // Act
@@ -650,6 +685,7 @@ mod tests {
     fn status_line_puts_a_notice_with_the_activity() {
         // Arrange
         let mut state = presentation();
+        state.set_tab(AppTab::Recordings);
         state.set_notice(Some("Saved."));
         let alone = state.status_line("00:00:05");
         state.set_record_phase(RecordPhase::Recording);

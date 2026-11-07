@@ -32,7 +32,7 @@ People who take meetings or calls on Windows and want a private, local recording
 
 1. Install by unzipping a portable package and launching Skrivli.
 2. On first useful transcription, choose a transcription model from the list and download it. The dialog can be closed at any time except while a download is running; closing it abandons that transcription. When the download finishes, the model becomes the one in use, the dialog closes, and the transcription starts without a second click.
-3. On the **Record** tab, pick microphone and system audio source if needed.
+3. On the **Record** tab, check the microphone and system audio sources, and use Change on either one if needed.
 4. Start recording (window, tray, or keyboard shortcut). Speak and/or play audio as usual.
 5. Stop recording. A finished audio file appears in the chosen folder and in the **Recordings** tab.
 6. Open a recording, play it back, and optionally create a transcript.
@@ -48,7 +48,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 
 - Resizable main window with two tabs: **Record** and **Recordings**.
 - Remembers size and position across launches (restored safely on the available display).
-- Status area shows recording state, elapsed time, and transcription progress when relevant.
+- Status area shows transcription progress on both tabs. On the Recordings tab it also shows recording state, elapsed time, and notices; the Record tab shows those itself.
 - A Settings gear on the tab bar opens Settings; Settings shows the transcription model in use (with its description and size) and a Change model button that opens the model dialog on top (Choose model when none is installed), the close-to-tray switch with a one-line explanation, and the app version in its footer. Opening the recordings folder and Exit remain available from the Recordings tab and the tray.
 - A theme button next to Settings cycles theme preference. Order is System → opposite of Windows → the other palette → System (light OS: System, Dark, Light; dark OS: System, Light, Dark). The icon and tooltip name the current choice; the preference is remembered across launches.
 
@@ -86,13 +86,13 @@ If only one source is available (for example, no microphone permission or no pla
 
 Users can:
 
-- Choose microphone and system audio devices from lists of available Windows devices.
-- See live level meters for microphone and system audio (with clear numeric levels, not color alone).
+- See the current microphone and system audio device by name, and use a small Change button on either to pick from the available Windows devices.
+- See live level meters for microphone and system audio (with clear numeric levels, not color alone). Peak hold is a tick on the meter, with its value in a tooltip on the level.
 - Adjust microphone gain with a manual slider.
 - Start and stop recording; see a clear recording indicator and elapsed timer.
 - Read inline warnings for missing devices, permission problems, or storage issues.
 
-Device choices are locked while a recording is active. The gain slider can stay adjustable during capture and is disabled while saving. Recordings save to the configured directory (default: a Skrivli folder under Documents when writable); the save location is chosen in Settings.
+Device choices are locked while a recording is active; a lock icon replaces Change. The gain slider can stay adjustable during capture and is disabled while saving. Recordings save to the configured directory (default: a Skrivli folder under Documents when writable); the save location is chosen in Settings.
 
 ### Starting and stopping
 
