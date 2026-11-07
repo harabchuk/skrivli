@@ -74,6 +74,8 @@ pub(crate) struct LoadedSidecar {
     pub(crate) format: RecordingFormat,
     pub(crate) problems: Vec<String>,
     pub(crate) transcript: TranscriptStatus,
+    /// The stored status was `"cancelled"` (which `transcript` reports as Failed).
+    pub(crate) transcript_cancelled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,6 +186,7 @@ fn parse_sidecar_text(text: &str) -> Option<LoadedSidecar> {
         format,
         problems: body.problems,
         transcript,
+        transcript_cancelled: body.transcription.status.eq_ignore_ascii_case("cancelled"),
     })
 }
 
@@ -532,6 +535,45 @@ mod tests {
             fs::read_to_string(dir.join("clip.txt")).expect("txt"),
             "keep me\n"
         );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cancelled_status_loads_apart_from_failed() {
+        // Arrange
+        let dir = temp_dir("cancelled");
+        let wav = dir.join("clip.wav");
+        fs::write(&wav, b"RIFF....WAVE").expect("wav");
+        write_sidecar(
+            &wav,
+            &Sidecar {
+                id: 5,
+                started_at_unix_ms: 1,
+                ended_at_unix_ms: 2,
+                duration_ms: 1,
+                microphone_id: "m".into(),
+                system_audio_id: "s".into(),
+                problems: Vec::new(),
+            },
+        )
+        .expect("sidecar");
+
+        // Act
+        update_transcription(&wav, TranscriptionWrite::Cancelled, None).expect("cancelled");
+        let cancelled = load_sidecar(&wav);
+        update_transcription(&wav, TranscriptionWrite::Failed, None).expect("failed");
+        let failed = load_sidecar(&wav);
+
+        // Assert
+        match (cancelled, failed) {
+            (SidecarLoad::Loaded(c), SidecarLoad::Loaded(f)) => {
+                assert_eq!(c.transcript, TranscriptStatus::Failed);
+                assert!(c.transcript_cancelled);
+                assert_eq!(f.transcript, TranscriptStatus::Failed);
+                assert!(!f.transcript_cancelled);
+            }
+            other => panic!("expected loaded, got {other:?}"),
+        }
         let _ = fs::remove_dir_all(dir);
     }
 }

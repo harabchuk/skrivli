@@ -128,7 +128,7 @@ Skrivli does not silently delete usable partial recordings.
 ### Detail and playback
 
 - Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · WAV`), then playback controls (play / stop).
-- A pencil icon next to the name (shown when the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
+- A pencil icon next to the name (shown when the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Transcribe again…** (enabled only when the recording has a transcript and no job is queued or running) and **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
 - A warning note appears under the title when a recording was recovered after an interruption ("The end of this recording may be missing"), when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
 - Changing selection stops playback.
 - Users can also open the recordings folder (list header icon button) and refresh the list (list header icon button).
@@ -143,7 +143,7 @@ Skrivli does not silently delete usable partial recordings.
 | Queued | Waiting to run |
 | *n*% | In progress |
 | Transcript (green) | Transcript available |
-| Failed | Last attempt failed; audio is still intact |
+| Failed | Last attempt failed and there is no transcript; audio is still intact. A failed or cancelled attempt on a recording that already has a transcript shows the transcript again, with no badge change |
 | Recovered | Recovered after an interruption; shown when no transcript is running, queued or failed |
 
 ---
@@ -163,7 +163,8 @@ Transcription runs **after** a recording is finished. It does not produce live c
 
 ### Creating a transcript
 
-- From a selected recording: create transcript, cancel, or retry after failure. A recording that already has a transcript has no Transcribe button for now, so it cannot be overwritten by accident. Transcribing again is planned.
+- From a selected recording: create transcript, cancel, or retry after failure. A recording that already has a transcript has no Transcribe button, so it cannot be overwritten by accident. Cancelling a first transcription returns the recording to "No transcript yet", not Failed.
+- **Transcribe again…** in the `⋯` menu asks "Replace this transcript?", naming the model in use, with **Replace** and **Cancel**. After Replace the area shows the same Queued and Running states as a first run, and the old transcript is hidden while the job runs. The old transcript is replaced only when the new one is ready. If the user cancels the job, the old transcript returns with no error. If the job fails, the old transcript returns and the status bar says "Transcription failed. Your previous transcript is unchanged." If the app closes during the job, the old transcript is still there after restart. With no model installed, the model dialog opens first and the job starts when a model is ready.
 - Jobs run one at a time in a queue; progress is visible in the UI and status strip.
 - Auto-transcribe after each new recording is available but **off by default**.
 - Completion can show a Windows/tray notification (when allowed); opening it focuses the matching recording when possible.

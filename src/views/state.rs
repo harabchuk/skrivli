@@ -1,11 +1,29 @@
 //! Presentation snapshots owned by the GPUI shell.
 
 use crate::domain::ids::{JobId, RecordingId};
-use crate::domain::recording::TranscriptStatus;
+use crate::domain::recording::{settled_transcript_status, TranscriptStatus};
 use crate::services::models::{ModelFile, ModelPhase, ModelSnapshot};
-use crate::services::transcription::{JobPhase, TranscriptionSnapshot};
+use crate::services::transcription::{JobPhase, TranscriptionSnapshot, NOTICE_FAILED};
 
 pub(crate) use crate::domain::recording::RecordPhase;
+
+/// Shown when a re-run fails and the earlier transcript is still on disk.
+pub(crate) const NOTICE_FAILED_KEPT: &str =
+    "Transcription failed. Your previous transcript is unchanged.";
+
+/// The status-bar notice for a job update. A plain failure becomes the "previous transcript
+/// is unchanged" notice when a transcript file already exists.
+fn settled_notice(
+    phase: JobPhase,
+    notice: &'static str,
+    has_transcript_file: bool,
+) -> &'static str {
+    if phase == JobPhase::Failed && has_transcript_file && notice == NOTICE_FAILED {
+        NOTICE_FAILED_KEPT
+    } else {
+        notice
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppTab {
@@ -170,11 +188,22 @@ impl Presentation {
 
     /// Reduce a transcription snapshot into the status strip and the selected row.
     /// A progress tick does not replace the loaded transcript, the selection, or the tab.
-    pub(crate) fn apply_transcription(&mut self, snapshot: TranscriptionSnapshot) {
+    ///
+    /// `has_transcript_file` says whether a transcript already exists beside the recording,
+    /// so a failed or cancelled re-run settles back to Ready instead of Failed.
+    pub(crate) fn apply_transcription(
+        &mut self,
+        snapshot: TranscriptionSnapshot,
+        has_transcript_file: bool,
+    ) {
         let Some(recording_id) = snapshot.recording_id else {
             return;
         };
-        let status = snapshot.transcript_status();
+        let status = settled_transcript_status(
+            snapshot.transcript_status(),
+            snapshot.phase == JobPhase::Cancelled,
+            has_transcript_file,
+        );
         self.transcript_status = Some(status);
         self.transcript_recording = Some(recording_id);
         self.active_job = match snapshot.phase {
@@ -190,7 +219,7 @@ impl Presentation {
             other => other.display(),
         };
         if let Some(notice) = snapshot.notice {
-            self.notice = Some(notice);
+            self.notice = Some(settled_notice(snapshot.phase, notice, has_transcript_file));
         }
     }
 
@@ -374,7 +403,10 @@ pub(crate) fn model_install_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{model_install_state, ModelInstallState, ModelStatus, Presentation};
+    use super::{
+        model_install_state, ModelInstallState, ModelStatus, Presentation, NOTICE_FAILED,
+        NOTICE_FAILED_KEPT,
+    };
     use crate::domain::ids::{JobId, RecordingId};
     use crate::domain::recording::{RecordPhase, TranscriptStatus};
     use crate::services::models::{ModelFile, ModelPhase, ModelSnapshot};
@@ -412,7 +444,7 @@ mod tests {
         state.set_loaded_transcript(loaded.clone());
 
         // Act
-        state.apply_transcription(snapshot(JobPhase::Transcribing, 42, None));
+        state.apply_transcription(snapshot(JobPhase::Transcribing, 42, None), false);
 
         // Assert
         assert_eq!(state.loaded_transcript(), loaded);
@@ -436,14 +468,17 @@ mod tests {
         state.set_loaded_transcript("stay");
 
         // Act
-        state.apply_transcription(TranscriptionSnapshot {
-            job_id: Some(JobId::from_raw(9)),
-            recording_id: Some(id),
-            phase: JobPhase::Done,
-            progress_percent: 100,
-            notice: Some("Transcript ready."),
-            detail: Some("Ready"),
-        });
+        state.apply_transcription(
+            TranscriptionSnapshot {
+                job_id: Some(JobId::from_raw(9)),
+                recording_id: Some(id),
+                phase: JobPhase::Done,
+                progress_percent: 100,
+                notice: Some("Transcript ready."),
+                detail: Some("Ready"),
+            },
+            true,
+        );
 
         // Assert
         assert_eq!(state.tab(), AppTab::Record);
@@ -454,6 +489,42 @@ mod tests {
     }
 
     #[test]
+    fn failed_rerun_settles_to_ready_with_the_unchanged_notice() {
+        // Arrange
+        let mut state = presentation();
+        state.set_tab(AppTab::Recordings);
+        let mut failed = snapshot(
+            JobPhase::Failed,
+            10,
+            Some("Could not run speech recognition."),
+        );
+        failed.notice = Some(NOTICE_FAILED);
+
+        // Act
+        state.apply_transcription(failed, true);
+
+        // Assert
+        assert_eq!(state.transcript_status(), Some(TranscriptStatus::Ready));
+        assert_eq!(state.active_job(), None);
+        assert_eq!(state.status_line("00:00:05"), NOTICE_FAILED_KEPT);
+    }
+
+    #[test]
+    fn cancelled_run_settles_by_whether_a_transcript_exists() {
+        // Arrange
+        let mut first_run = presentation();
+        let mut rerun = presentation();
+
+        // Act
+        first_run.apply_transcription(snapshot(JobPhase::Cancelled, 10, None), false);
+        rerun.apply_transcription(snapshot(JobPhase::Cancelled, 10, None), true);
+
+        // Assert
+        assert_eq!(first_run.transcript_status(), Some(TranscriptStatus::None));
+        assert_eq!(rerun.transcript_status(), Some(TranscriptStatus::Ready));
+    }
+
+    #[test]
     fn transcription_failure_detail_is_user_message() {
         // Arrange
         let mut state = presentation();
@@ -461,11 +532,14 @@ mod tests {
         state.set_selected_recording(Some(RecordingId::from_raw(4)));
 
         // Act
-        state.apply_transcription(snapshot(
-            JobPhase::Failed,
-            10,
-            Some("Could not run speech recognition."),
-        ));
+        state.apply_transcription(
+            snapshot(
+                JobPhase::Failed,
+                10,
+                Some("Could not run speech recognition."),
+            ),
+            false,
+        );
 
         // Assert
         assert_eq!(state.transcript_status(), Some(TranscriptStatus::Failed));
@@ -634,7 +708,7 @@ mod tests {
         // Arrange
         let mut state = presentation();
         state.set_record_phase(RecordPhase::Recording);
-        state.apply_transcription(snapshot(JobPhase::Transcribing, 42, None));
+        state.apply_transcription(snapshot(JobPhase::Transcribing, 42, None), false);
 
         // Act
         let line = state.status_line("00:00:07");
@@ -672,7 +746,7 @@ mod tests {
     fn status_line_shows_transcription_progress() {
         // Arrange
         let mut state = presentation();
-        state.apply_transcription(snapshot(JobPhase::Transcribing, 42, None));
+        state.apply_transcription(snapshot(JobPhase::Transcribing, 42, None), false);
 
         // Act
         let line = state.status_line("00:00:05");

@@ -1733,6 +1733,89 @@ mod tests {
     }
 
     #[test]
+    fn failing_rerun_leaves_the_old_transcript_byte_identical() {
+        // Arrange
+        let dir = temp_dir("rerun-fail");
+        let wav = dir.join("clip.wav");
+        write_pcm_wav(&wav, 8_000);
+        seed_sidecar(&wav, 41);
+        let old = "[00:00:00] old café text
+"
+        .as_bytes()
+        .to_vec();
+        fs::write(dir.join("clip.txt"), &old).expect("old txt");
+        let model = dir.join("ggml-base.bin");
+        fs::write(&model, b"ggml").expect("model");
+        let fake = FakeInference {
+            fail_load: false,
+            fail_chunk: true,
+            hold_ms: 0,
+            check_cancel_before_return: false,
+            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
+            calls: Arc::new(Mutex::new(Vec::new())),
+            segments: Vec::new(),
+        };
+        let (host, handle) =
+            TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
+
+        // Act
+        host.enqueue(RecordingId::from_raw(41), wav, model, "base-q5_1");
+        wait_until(&host, |snap| snap.phase == JobPhase::Failed);
+        host.shutdown();
+        let _ = handle.join();
+
+        // Assert
+        assert_eq!(fs::read(dir.join("clip.txt")).expect("txt"), old);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cancelled_rerun_leaves_the_old_transcript_byte_identical() {
+        // Arrange
+        let dir = temp_dir("rerun-cancel");
+        let wav = dir.join("clip.wav");
+        write_pcm_wav(&wav, 48_000);
+        seed_sidecar(&wav, 42);
+        let old = "[00:00:00] old café text
+"
+        .as_bytes()
+        .to_vec();
+        fs::write(dir.join("clip.txt"), &old).expect("old txt");
+        let model = dir.join("ggml-base.bin");
+        fs::write(&model, b"ggml").expect("model");
+        let fake = FakeInference {
+            fail_load: false,
+            fail_chunk: false,
+            hold_ms: 800,
+            check_cancel_before_return: true,
+            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
+            calls: Arc::new(Mutex::new(Vec::new())),
+            segments: vec![InferenceSegment {
+                start_ms: 0,
+                end_ms: 10,
+                text: "new".into(),
+            }],
+        };
+        let (host, handle) =
+            TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
+
+        // Act
+        host.enqueue(RecordingId::from_raw(42), wav, model, "base-q5_1");
+        wait_until(&host, |snap| {
+            matches!(snap.phase, JobPhase::Preparing | JobPhase::Transcribing)
+        });
+        let job = host.snapshot().job_id.expect("job");
+        host.cancel(job);
+        wait_until(&host, |snap| snap.phase == JobPhase::Cancelled);
+        host.shutdown();
+        let _ = handle.join();
+
+        // Assert
+        assert_eq!(fs::read(dir.join("clip.txt")).expect("txt"), old);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn failed_snapshot_detail_is_user_message_not_engine_text() {
         // Arrange
         let dir = temp_dir("fail-detail");

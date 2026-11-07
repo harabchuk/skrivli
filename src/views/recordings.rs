@@ -386,6 +386,8 @@ pub(crate) struct RecordingsActions {
     pub(crate) rename: ClickAction,
     pub(crate) delete: ClickAction,
     pub(crate) transcribe: ClickAction,
+    /// Opens the "Replace this transcript?" confirmation.
+    pub(crate) transcribe_again: ClickAction,
     /// Present only when the selected recording has a job to cancel.
     pub(crate) cancel_job: Option<ClickAction>,
     pub(crate) retry: ClickAction,
@@ -404,6 +406,8 @@ pub(crate) struct RecordingsView<'a> {
     pub(crate) play_label: SharedString,
     pub(crate) error: Option<SharedString>,
     pub(crate) pane: TranscriptPane,
+    /// Whether the `⋯` menu offers Transcribe again.
+    pub(crate) can_transcribe_again: bool,
     /// The scrolling paragraph list. Used only by the Ready pane.
     pub(crate) transcript_list: Option<AnyElement>,
 }
@@ -424,8 +428,14 @@ fn note_line(text: SharedString, cx: &App) -> Div {
 }
 
 /// Name, detail line, notes, and the icon actions for the selected recording.
-fn title_row(row: &RecordingRow, actions: &RecordingsActions, cx: &App) -> Div {
+fn title_row(
+    row: &RecordingRow,
+    actions: &RecordingsActions,
+    can_transcribe_again: bool,
+    cx: &App,
+) -> Div {
     let show_in_folder = actions.open_folder.clone();
+    let transcribe_again = actions.transcribe_again.clone();
     v_flex()
         .gap_1()
         .child(
@@ -473,7 +483,14 @@ fn title_row(row: &RecordingRow, actions: &RecordingsActions, cx: &App) -> Div {
                         .accessibility_label("More actions")
                         .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
                             let open = show_in_folder.clone();
+                            let again = transcribe_again.clone();
                             menu.item(
+                                PopupMenuItem::new("Transcribe again…")
+                                    .icon(IconName::RefreshCw)
+                                    .disabled(!can_transcribe_again)
+                                    .on_click(move |event, window, cx| again(event, window, cx)),
+                            )
+                            .item(
                                 PopupMenuItem::new("Show in folder")
                                     .icon(IconName::FolderOpen)
                                     .on_click(move |event, window, cx| open(event, window, cx)),
@@ -631,6 +648,7 @@ pub(crate) fn recordings_tab(
         play_label,
         error,
         pane,
+        can_transcribe_again,
         transcript_list,
     } = view;
     let list =
@@ -661,7 +679,7 @@ pub(crate) fn recordings_tab(
             .size_full()
             .min_h_0()
             .gap_3()
-            .child(title_row(row, &actions, cx))
+            .child(title_row(row, &actions, can_transcribe_again, cx))
             .child(
                 h_flex()
                     .gap_2()
@@ -817,6 +835,27 @@ pub(crate) fn open_delete_dialog(
     });
 }
 
+pub(crate) fn open_transcribe_again_dialog(
+    window: &mut Window,
+    cx: &mut App,
+    model_name: SharedString,
+    on_confirm: impl Fn(&mut Window, &mut App) + Clone + 'static,
+) {
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let on_confirm = on_confirm.clone();
+        alert
+            .title("Replace this transcript?")
+            .w(DIALOG_WIDTH)
+            .description(transcribe_again_description(&model_name))
+            .confirm()
+            .ok_text("Replace")
+            .on_ok(move |_, window, cx| {
+                on_confirm(window, cx);
+                true
+            })
+    });
+}
+
 pub(crate) fn rows_from_catalog(catalog: &LibraryCatalog) -> Vec<RecordingRow> {
     let (zone, today) = local_clock();
     catalog
@@ -859,6 +898,18 @@ pub(crate) fn transcript_pane(
         },
         TranscriptStatus::None => TranscriptPane::NoTranscript,
     }
+}
+
+/// The `⋯` menu offers Transcribe again only for a Ready recording with no active job.
+pub(crate) fn can_transcribe_again(status: TranscriptStatus, job_active: bool) -> bool {
+    status == TranscriptStatus::Ready && !job_active
+}
+
+/// Body of the "Replace this transcript?" dialog.
+pub(crate) fn transcribe_again_description(model_name: &str) -> String {
+    format!(
+        "The current transcript stays until the new one is ready, then it is replaced.          Transcribing uses the {model_name} model and runs on this PC."
+    )
 }
 
 /// The failure reason belongs to the recording that failed, not to whichever is selected.
@@ -1150,6 +1201,31 @@ mod tests {
 
         // Assert
         assert_eq!(actual, cases.map(|(_, _, badge)| badge));
+    }
+
+    #[test]
+    fn transcribe_again_is_enabled_only_for_ready_without_a_job() {
+        use super::{can_transcribe_again, transcribe_again_description};
+        // Arrange
+        let statuses = [
+            TranscriptStatus::None,
+            TranscriptStatus::Queued,
+            TranscriptStatus::Progress(10),
+            TranscriptStatus::Failed,
+            TranscriptStatus::Ready,
+        ];
+
+        for status in statuses {
+            for job_active in [false, true] {
+                // Act
+                let enabled = can_transcribe_again(status, job_active);
+
+                // Assert
+                let expected = status == TranscriptStatus::Ready && !job_active;
+                assert_eq!(enabled, expected, "{status:?} {job_active}");
+            }
+        }
+        assert!(transcribe_again_description("Base").contains("Base"));
     }
 
     #[test]

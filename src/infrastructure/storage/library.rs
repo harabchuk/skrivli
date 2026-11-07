@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use crate::common::error::AppError;
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::{
-    synthetic_recording_id, RecordingContainer, RecordingInfo, SidecarState, TranscriptStatus,
+    settled_transcript_status, synthetic_recording_id, RecordingContainer, RecordingInfo,
+    SidecarState, TranscriptStatus,
 };
 use crate::infrastructure::storage::sidecar::{
     interrupt_in_progress_transcription, load_sidecar, sidecar_path_for, sidecar_state,
@@ -295,10 +296,15 @@ fn entry_from_sidecar(
     transcript_path: Option<PathBuf>,
     sidecar_path: Option<PathBuf>,
 ) -> LibraryEntry {
-    let transcript = if transcript_path.is_some() && doc.transcript == TranscriptStatus::None {
+    let has_transcript_file = transcript_path.is_some();
+    let transcript = if has_transcript_file && doc.transcript == TranscriptStatus::None {
         TranscriptStatus::Ready
     } else {
-        doc.transcript
+        settled_transcript_status(
+            doc.transcript,
+            doc.transcript_cancelled,
+            has_transcript_file,
+        )
     };
     LibraryEntry {
         info: RecordingInfo::new(
@@ -391,8 +397,10 @@ mod tests {
 
     use super::{associated_paths, colliding_ids, rename_recording, scan_library, LibraryCatalog};
     use crate::domain::ids::RecordingId;
-    use crate::domain::recording::SidecarState;
-    use crate::infrastructure::storage::sidecar::{write_sidecar, Sidecar};
+    use crate::domain::recording::{SidecarState, TranscriptStatus};
+    use crate::infrastructure::storage::sidecar::{
+        update_transcription, write_sidecar, Sidecar, TranscriptionWrite,
+    };
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -405,6 +413,56 @@ mod tests {
 
     fn write_wav(path: &std::path::Path, bytes: &[u8]) {
         fs::write(path, bytes).expect("wav");
+    }
+
+    #[test]
+    fn scan_settles_failed_and_cancelled_against_the_transcript_file() {
+        // Arrange
+        let dir = temp_dir("settle");
+        let cases = [
+            ("failed-with", 21_u64, TranscriptionWrite::Failed, true),
+            ("failed-without", 22, TranscriptionWrite::Failed, false),
+            ("cancel-with", 23, TranscriptionWrite::Cancelled, true),
+            ("cancel-without", 24, TranscriptionWrite::Cancelled, false),
+        ];
+        for (name, id, write, has_txt) in cases {
+            let wav = dir.join(format!("{name}.wav"));
+            write_wav(&wav, b"RIFF");
+            write_sidecar(
+                &wav,
+                &Sidecar {
+                    id,
+                    started_at_unix_ms: 100,
+                    ended_at_unix_ms: 200,
+                    duration_ms: 100,
+                    microphone_id: "m".into(),
+                    system_audio_id: "s".into(),
+                    problems: Vec::new(),
+                },
+            )
+            .expect("side");
+            update_transcription(&wav, write, None).expect("status");
+            if has_txt {
+                fs::write(dir.join(format!("{name}.txt")), "old").expect("txt");
+            }
+        }
+
+        // Act
+        let catalog = scan_library(&dir);
+
+        // Assert
+        let status = |name: &str| {
+            catalog
+                .entries
+                .iter()
+                .find(|entry| entry.info.name() == name)
+                .map(|entry| entry.info.transcript())
+        };
+        assert_eq!(status("failed-with"), Some(TranscriptStatus::Ready));
+        assert_eq!(status("failed-without"), Some(TranscriptStatus::Failed));
+        assert_eq!(status("cancel-with"), Some(TranscriptStatus::Ready));
+        assert_eq!(status("cancel-without"), Some(TranscriptStatus::None));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

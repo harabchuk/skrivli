@@ -23,7 +23,7 @@ use gpui_kit::{
 use crate::domain::audio::format_elapsed;
 use crate::domain::gain::{db_fs, format_gain};
 use crate::domain::ids::RecordingId;
-use crate::domain::recording::{RecordPhase, TranscriptStatus};
+use crate::domain::recording::{settled_transcript_status, RecordPhase, TranscriptStatus};
 use crate::domain::theme::ThemePreference;
 use crate::domain::transcript::{parse_transcript, TranscriptParagraph};
 use crate::domain::window_frame::LogicalRect;
@@ -56,10 +56,10 @@ use super::model_prompt::{
 };
 use super::recording::{record_tab, DeviceChoice, RecordView};
 use super::recordings::{
-    failure_reason, library_header, library_items, open_delete_dialog, open_rename_dialog,
-    play_button_label, recording_list_row, recordings_tab, rows_from_catalog, set_row_status,
-    transcript_pane, ClickAction, LibraryItem, RecordingRow, RecordingsActions, RecordingsView,
-    TranscriptPane,
+    can_transcribe_again, failure_reason, library_header, library_items, open_delete_dialog,
+    open_rename_dialog, open_transcribe_again_dialog, play_button_label, recording_list_row,
+    recordings_tab, rows_from_catalog, set_row_status, transcript_pane, ClickAction, LibraryItem,
+    RecordingRow, RecordingsActions, RecordingsView, TranscriptPane,
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
@@ -601,10 +601,21 @@ impl MainWindow {
     ) {
         let tab = self.presentation.tab();
         self.transcription_snapshot = snapshot.clone();
-        self.presentation.apply_transcription(snapshot.clone());
+        let has_transcript_file = snapshot.recording_id.is_some_and(|id| {
+            self.library_catalog
+                .find(id)
+                .is_some_and(|entry| entry.transcript_path.is_some())
+        });
+        self.presentation
+            .apply_transcription(snapshot.clone(), has_transcript_file);
         self.presentation.set_tab(tab);
         if let Some(id) = snapshot.recording_id {
-            if set_row_status(&mut self.library_rows, id, snapshot.transcript_status()) {
+            let status = settled_transcript_status(
+                snapshot.transcript_status(),
+                snapshot.phase == JobPhase::Cancelled,
+                has_transcript_file,
+            );
+            if set_row_status(&mut self.library_rows, id, status) {
                 self.library_items = library_items(&self.library_rows);
                 cx.notify();
             }
@@ -615,7 +626,11 @@ impl MainWindow {
         ) {
             self.library.refresh();
         }
-        if snapshot.phase == JobPhase::Done && snapshot.recording_id == self.library_selected {
+        if matches!(
+            snapshot.phase,
+            JobPhase::Done | JobPhase::Failed | JobPhase::Cancelled
+        ) && snapshot.recording_id == self.library_selected
+        {
             self.load_selected_transcript(window, cx);
         }
     }
@@ -1104,6 +1119,23 @@ impl MainWindow {
         });
     }
 
+    fn transcribe_again_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.library_selected else {
+            return;
+        };
+        let status = self.row_transcript_status(id);
+        if !can_transcribe_again(status, self.job_active_for(Some(id))) {
+            return;
+        }
+        let model_name = SharedString::from(model_copy(self.settings.selected_model()).name);
+        let entity = cx.entity();
+        open_transcribe_again_dialog(window, cx, model_name, move |window, cx| {
+            entity.update(cx, |view, cx| {
+                view.handle(AppCommand::Transcribe { recording_id: id }, window, cx);
+            });
+        });
+    }
+
     fn delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.library_selected else {
             return;
@@ -1436,6 +1468,7 @@ impl Render for MainWindow {
                     failure,
                     self.transcript_error.map(SharedString::from),
                 );
+                let can_again = selected_id.is_some() && can_transcribe_again(status, job_active);
                 let transcript_list =
                     (pane == TranscriptPane::Ready).then(|| self.transcript_list_element(cx));
                 let job_id = self
@@ -1451,6 +1484,7 @@ impl Render for MainWindow {
                 let rename_entity = entity.clone();
                 let delete_entity = entity.clone();
                 let transcribe_entity = entity.clone();
+                let again_entity = entity.clone();
                 let cancel_entity = entity.clone();
                 let retry_entity = entity.clone();
                 let actions = RecordingsActions {
@@ -1490,6 +1524,10 @@ impl Render for MainWindow {
                             view.handle(AppCommand::Transcribe { recording_id: id }, window, cx);
                         });
                     }),
+                    transcribe_again: Rc::new(move |_event, window, cx| {
+                        again_entity
+                            .update(cx, |view, cx| view.transcribe_again_selected(window, cx));
+                    }),
                     cancel_job: job_id.map(|job_id| -> ClickAction {
                         Rc::new(move |_event, window, cx| {
                             cancel_entity.update(cx, |view, cx| {
@@ -1524,6 +1562,7 @@ impl Render for MainWindow {
                         play_label: play_button_label(self.player_snapshot.phase),
                         error,
                         pane,
+                        can_transcribe_again: can_again,
                         transcript_list,
                     },
                     actions,

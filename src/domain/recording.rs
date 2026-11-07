@@ -114,6 +114,23 @@ impl TranscriptStatus {
     }
 }
 
+/// Status after a job ends without a new transcript, or after a restart.
+///
+/// An existing transcript file always wins over a failed or cancelled run, because the
+/// old text is only replaced when a new one is ready. A cancelled first run goes back to
+/// "no transcript" instead of Failed.
+pub(crate) fn settled_transcript_status(
+    stored: TranscriptStatus,
+    cancelled: bool,
+    has_transcript_file: bool,
+) -> TranscriptStatus {
+    match (stored, cancelled, has_transcript_file) {
+        (TranscriptStatus::Failed, _, true) => TranscriptStatus::Ready,
+        (TranscriptStatus::Failed, true, false) => TranscriptStatus::None,
+        (status, _, _) => status,
+    }
+}
+
 /// Whether the JSON sidecar loaded cleanly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SidecarState {
@@ -344,6 +361,32 @@ mod tests {
             false,
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn settled_status_covers_every_combination() {
+        use super::settled_transcript_status as settle;
+        use TranscriptStatus::{Failed, None as Nothing, Progress, Queued, Ready};
+        // Arrange
+        let cases = [
+            (Failed, false, false, Failed),
+            (Failed, true, false, Nothing),
+            (Failed, false, true, Ready),
+            (Failed, true, true, Ready),
+            (Ready, false, true, Ready),
+            (Ready, true, false, Ready),
+            (Nothing, true, false, Nothing),
+            (Queued, false, true, Queued),
+            (Progress(7), true, true, Progress(7)),
+        ];
+
+        for (stored, cancelled, file, expected) in cases {
+            // Act
+            let status = settle(stored, cancelled, file);
+
+            // Assert
+            assert_eq!(status, expected, "{stored:?} {cancelled} {file}");
+        }
     }
 
     #[test]

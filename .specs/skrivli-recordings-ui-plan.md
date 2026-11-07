@@ -1,6 +1,6 @@
 # Skrivli Recordings page redesign plan
 
-**Status:** Phases 0 to 3 done. Phases 4 to 7 are not started. The code snippets have not been compiled.
+**Status:** Phases 0 to 4 done. Phases 5 to 7 are not started. The code snippets have not been compiled.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
 
@@ -346,7 +346,7 @@ list(self.transcript_list.clone(), move |index, _window, cx| {
 | App closes during the job | After restart the recording shows the old transcript |
 
 **Add**
-- [ ] Add a pure function in `domain/recording.rs`:
+- [x] Add a pure function in `domain/recording.rs`:
 
   ```rust
   /// Status after a job ends without a new transcript, or after a restart.
@@ -363,35 +363,39 @@ list(self.transcript_list.clone(), move |index, _window, cx| {
   }
   ```
 
-- [ ] Add **Transcribe again…** above **Show in folder** in the `⋯` menu.
-- [ ] Add `open_transcribe_again_dialog` next to `open_delete_dialog`, using the same dialog style. It sends the existing `AppCommand::Transcribe`. Do not add a new command.
-- [ ] Add the "previous transcript is unchanged" notice.
+- [x] Add **Transcribe again…** above **Show in folder** in the `⋯` menu.
+- [x] Add `open_transcribe_again_dialog` next to `open_delete_dialog`, using the same dialog style. It sends the existing `AppCommand::Transcribe`. Do not add a new command.
+- [x] Add the "previous transcript is unchanged" notice.
 
 **Change**
-- [ ] Change `update_transcription`'s read side so `"cancelled"` can be told apart from `"failed"` when the library loads a sidecar. Today both become `Failed` at `sidecar.rs:196`.
-- [ ] Change `storage/library.rs:298` to use `settled_transcript_status`. This also covers a crash, because `interrupt_in_progress_transcription` writes Failed at startup.
-- [ ] Change `MainWindow::apply_transcription` to settle Failed and Cancelled against the catalog entry's `transcript_path`, so the presentation overlay in `status_for` shows the same answer. `TranscriptionSnapshot::transcript_status` alone cannot do this, because it does not know about the file.
-- [ ] Change the reload at `main_window.rs:622` so the transcript also loads after Failed and Cancelled, not only Done.
-- [ ] Change first-run Cancel so the recording returns to "No transcript yet" instead of Failed (problem 2).
+- [x] Change `update_transcription`'s read side so `"cancelled"` can be told apart from `"failed"` when the library loads a sidecar. Today both become `Failed` at `sidecar.rs:196`.
+- [x] Change `storage/library.rs:298` to use `settled_transcript_status`. This also covers a crash, because `interrupt_in_progress_transcription` writes Failed at startup.
+- [x] Change `MainWindow::apply_transcription` to settle Failed and Cancelled against the catalog entry's `transcript_path`, so the presentation overlay in `status_for` shows the same answer. `TranscriptionSnapshot::transcript_status` alone cannot do this, because it does not know about the file.
+- [x] Change the reload at `main_window.rs:622` so the transcript also loads after Failed and Cancelled, not only Done.
+- [x] Change first-run Cancel so the recording returns to "No transcript yet" instead of Failed (problem 2).
 
 **Remove**
-- [ ] Remove the Transcribe path for Ready recordings from the pane. Transcribe again is the only way to overwrite (problem 4).
+- [x] Remove the Transcribe path for Ready recordings from the pane. Transcribe again is the only way to overwrite (problem 4).
 
 **Do not change**
 - The commit path in `commit_transcript` and `write_transcript_text`. It already writes to a temp file and replaces the old one only at the end. Add a test to protect that, not new code.
 
 **Tests to write first**
-- [ ] `settled_transcript_status`: every combination of stored status, cancelled and file present.
-- [ ] Service test with fake inference: a failing re-run leaves the old `.txt` byte-identical.
-- [ ] Service test: a cancelled re-run leaves the old `.txt` byte-identical.
-- [ ] Library scan: `"failed"` with a `.txt` loads as Ready, `"failed"` without one loads as Failed, and `"cancelled"` without one loads as None.
-- [ ] Menu rule: the item is enabled only for Ready with no active job.
+- [x] `settled_transcript_status`: every combination of stored status, cancelled and file present.
+- [x] Service test with fake inference: a failing re-run leaves the old `.txt` byte-identical.
+- [x] Service test: a cancelled re-run leaves the old `.txt` byte-identical.
+- [x] Library scan: `"failed"` with a `.txt` loads as Ready, `"failed"` without one loads as Failed, and `"cancelled"` without one loads as None.
+- [x] Menu rule: the item is enabled only for Ready with no active job.
 
 **Spec**
-- [ ] `skrivli-product.md`: add Transcribe again to section 6, including that the old transcript is hidden during the job and kept unless the new one succeeds. Correct the status table's Failed row. Add Cancel returning to the previous state.
-- [ ] `skrivli-app-design.md`: record the settling rule.
+- [x] `skrivli-product.md`: add Transcribe again to section 6, including that the old transcript is hidden during the job and kept unless the new one succeeds. Correct the status table's Failed row. Add Cancel returning to the previous state.
+- [x] `skrivli-app-design.md`: record the settling rule.
 
 **Done when:** all rows in the behavior table are confirmed in the running app, including killing the process during a job.
+
+---
+
+**Evidence (Phase 4):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` and `cargo build` pass. New tests: `settled_transcript_status` (all combinations), sidecar load of `"cancelled"` versus `"failed"`, library scan (failed with and without a `.txt`, cancelled with and without), `Presentation` settling and the "previous transcript is unchanged" notice, the menu rule `can_transcribe_again`, and two service tests where a failing and a cancelled re-run leave the old `.txt` byte-identical (these protect `write_transcript_text`, which was not changed). `LoadedSidecar` gained `transcript_cancelled`. `Presentation::apply_transcription` now takes `has_transcript_file`. The dialog reuses `AppCommand::Transcribe` and names the model with `model_copy`. **Deviations:** the Ready pane never had a Transcribe button after Phase 3, so nothing needed removing there. A Ready recording whose transcript cannot be read (Unreadable) also gets Transcribe again enabled, because its status is Ready. **Not verified:** the running app, including every row of the behavior table, the `⋯` item disabled state and dialog look, and killing the process during a job.
 
 ---
 
