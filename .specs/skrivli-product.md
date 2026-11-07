@@ -118,7 +118,9 @@ Skrivli does not silently delete usable partial recordings.
 
 ### Browsing
 
-- The **Recordings** tab lists saved recordings, newest first, with name, date, duration, size, and transcript status.
+- The **Recordings** tab lists saved recordings, newest first, in a fixed-width list grouped under **Today**, **Yesterday** and **Earlier** headings. A heading appears only for a day that has recordings. Times are shown in the PC's local time zone.
+- Each row shows the recording name, a muted line with when, how long and how large it is (`14:32 · 12:41 · 38.0 MB` for today and yesterday, `Nov 3 · 31:04 · 93.0 MB` for earlier days), and a transcript badge on the right. The selected row has a tinted background and an accent bar on its left edge.
+- The list header shows the word "Recordings", the number of recordings, a Refresh icon button and an Open folder icon button. The list is not sortable and has no search.
 - The list updates when files change in the folder (including changes made outside the app).
 - Empty and error states are clear when there is nothing to show or the folder cannot be read.
 - In-progress captures are not treated as finished library entries until saved (except when presenting recovered files).
@@ -127,7 +129,7 @@ Skrivli does not silently delete usable partial recordings.
 
 - Selecting a recording shows details and playback controls (play / stop).
 - Changing selection stops playback.
-- Users can open the containing folder in Explorer, refresh the list, rename, or delete.
+- Users can open the containing folder in Explorer (header icon button), refresh the list (header icon button), rename, or delete.
 - Rename keeps related files together (audio, transcript, and metadata) when possible; partial failures are reported.
 - Delete asks for confirmation and sends files to the Recycle Bin rather than permanent erasure by default.
 
@@ -135,11 +137,12 @@ Skrivli does not silently delete usable partial recordings.
 
 | Status | Meaning |
 | --- | --- |
-| — | No transcript yet |
+| (no badge) | No transcript yet |
 | Queued | Waiting to run |
 | *n*% | In progress |
-| Ready | Transcript available |
+| Transcript (green) | Transcript available |
 | Failed | Last attempt failed; audio is still intact |
+| Recovered | Recovered after an interruption; shown when no transcript is running, queued or failed |
 
 ---
 

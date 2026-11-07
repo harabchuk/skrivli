@@ -1,18 +1,18 @@
-//! Recordings tab: library table, detail pane, playback and file actions.
-
-use std::ops::Range;
+//! Recordings tab: grouped library list, detail pane, playback and file actions.
 
 use crate::ui::components::dialog_style::{dialog_footer, DIALOG_WIDTH};
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose};
 use gpui_kit::component::empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitle};
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::table::{Column, ColumnSort, DataTable, TableDelegate, TableState};
-use gpui_kit::component::{h_flex, v_flex, Disableable as _, WindowExt as _};
+use gpui_kit::component::{
+    h_flex, v_flex, ActiveTheme as _, Disableable as _, IconName, StyledExt as _, WindowExt as _,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, AnyElement, App, AppContext as _, ClickEvent, Context, Entity, IntoElement,
-    ParentElement, SharedString, Styled, Window,
+    div, px, AnyElement, App, AppContext as _, ClickEvent, Div, InteractiveElement as _,
+    IntoElement, ParentElement, SharedString, Stateful, StatefulInteractiveElement as _, Styled,
+    Window,
 };
 
 use jiff::tz::TimeZone;
@@ -33,28 +33,18 @@ pub(crate) struct RecordingRow {
     pub(crate) name: SharedString,
     pub(crate) date: SharedString,
     pub(crate) duration: SharedString,
-    pub(crate) size: SharedString,
     pub(crate) transcript: SharedString,
     pub(crate) detail: SharedString,
-    // The grouped list and detail header read these from phase 1 on.
-    #[allow(dead_code)]
     pub(crate) day: RecordingDay,
-    #[allow(dead_code)]
     pub(crate) meta: SharedString,
+    // The detail header reads this from phase 2 on.
     #[allow(dead_code)]
     pub(crate) detail_line: SharedString,
-    #[allow(dead_code)]
     pub(crate) badge: RowBadge,
+    recovered: bool,
 }
 
 impl RecordingRow {
-    /// Build a row using the system time zone and the current time.
-    #[cfg(test)]
-    pub(crate) fn from_info(info: &RecordingInfo) -> Self {
-        let (zone, today) = local_clock();
-        Self::from_info_in(info, &zone, today)
-    }
-
     /// Build a row with an explicit time zone and "today", so tests are exact.
     pub(crate) fn from_info_in(info: &RecordingInfo, zone: &TimeZone, today: CivilTime) -> Self {
         let started = info
@@ -93,13 +83,13 @@ impl RecordingRow {
             name: SharedString::from(info.name().to_string()),
             date: SharedString::from(date),
             duration: SharedString::from(duration),
-            size: SharedString::from(size),
             transcript: SharedString::from(info.transcript().display()),
             detail: SharedString::from(detail),
             day,
             meta: SharedString::from(meta),
             detail_line: SharedString::from(detail_line),
             badge: RowBadge::from_status(info.transcript(), info.recovered()),
+            recovered: info.recovered(),
         }
     }
 }
@@ -213,141 +203,150 @@ impl RowBadge {
     }
 }
 
-pub(crate) struct RecordingsDelegate {
-    rows: Vec<RecordingRow>,
-    columns: Vec<Column>,
+/// Height of a day header in the list, in logical pixels.
+pub(crate) const HEADER_HEIGHT_PX: f32 = 32.0;
+/// Height of a recording row in the list, in logical pixels.
+pub(crate) const ROW_HEIGHT_PX: f32 = 56.0;
+/// Fixed width of the recordings list.
+const LIST_WIDTH_PX: f32 = 330.0;
+
+/// One entry of the grouped list: a day header or a recording.
+#[derive(Clone, Debug)]
+pub(crate) enum LibraryItem {
+    Header(RecordingDay),
+    Recording(RecordingRow),
 }
 
-impl RecordingsDelegate {
-    pub(crate) fn set_transcript_display(
-        &mut self,
-        id: RecordingId,
-        display: impl Into<SharedString>,
-    ) -> bool {
-        let Some(row) = self.rows.iter_mut().find(|row| row.id == id) else {
-            return false;
-        };
-        row.transcript = display.into();
-        true
-    }
-
-    pub(crate) fn new() -> Self {
-        Self {
-            rows: Vec::new(),
-            columns: vec![
-                Column::new("name", "Name").width(px(180.)).sortable(),
-                Column::new("date", "Date")
-                    .width(px(130.))
-                    .sortable()
-                    .descending(),
-                Column::new("duration", "Duration")
-                    .width(px(80.))
-                    .sortable(),
-                Column::new("size", "Size").width(px(80.)).sortable(),
-                Column::new("transcript", "Transcript").width(px(90.)),
-            ],
+impl LibraryItem {
+    pub(crate) fn height_px(&self) -> f32 {
+        match self {
+            Self::Header(_) => HEADER_HEIGHT_PX,
+            Self::Recording(_) => ROW_HEIGHT_PX,
         }
-    }
-
-    pub(crate) fn set_rows(&mut self, rows: Vec<RecordingRow>) {
-        self.rows = rows;
-    }
-
-    pub(crate) fn rows(&self) -> &[RecordingRow] {
-        &self.rows
-    }
-
-    pub(crate) fn row_id(&self, index: usize) -> Option<RecordingId> {
-        self.rows.get(index).map(|row| row.id)
-    }
-
-    pub(crate) fn index_of(&self, id: RecordingId) -> Option<usize> {
-        self.rows.iter().position(|row| row.id == id)
     }
 }
 
-impl TableDelegate for RecordingsDelegate {
-    fn columns_count(&self, _: &App) -> usize {
-        self.columns.len()
-    }
-
-    fn rows_count(&self, _: &App) -> usize {
-        self.rows.len()
-    }
-
-    fn column(&self, col_ix: usize, _: &App) -> Column {
-        self.columns[col_ix].clone()
-    }
-
-    fn perform_sort(
-        &mut self,
-        col_ix: usize,
-        sort: ColumnSort,
-        _: &mut Window,
-        _: &mut Context<TableState<Self>>,
-    ) {
-        let key = self.columns.get(col_ix).map(|col| col.key.clone());
-        let Some(key) = key else {
-            return;
-        };
-        match key.as_ref() {
-            "name" => match sort {
-                ColumnSort::Ascending => self.rows.sort_by(|a, b| a.name.cmp(&b.name)),
-                ColumnSort::Descending => self.rows.sort_by(|a, b| b.name.cmp(&a.name)),
-                ColumnSort::Default => self.rows.sort_by(|a, b| b.date.cmp(&a.date)),
-            },
-            "date" => match sort {
-                ColumnSort::Ascending => self.rows.sort_by(|a, b| a.date.cmp(&b.date)),
-                ColumnSort::Descending | ColumnSort::Default => {
-                    self.rows.sort_by(|a, b| b.date.cmp(&a.date))
-                }
-            },
-            "duration" => match sort {
-                ColumnSort::Ascending => self.rows.sort_by(|a, b| a.duration.cmp(&b.duration)),
-                ColumnSort::Descending => self.rows.sort_by(|a, b| b.duration.cmp(&a.duration)),
-                ColumnSort::Default => self.rows.sort_by(|a, b| b.date.cmp(&a.date)),
-            },
-            "size" => match sort {
-                ColumnSort::Ascending => self.rows.sort_by(|a, b| a.size.cmp(&b.size)),
-                ColumnSort::Descending => self.rows.sort_by(|a, b| b.size.cmp(&a.size)),
-                ColumnSort::Default => self.rows.sort_by(|a, b| b.date.cmp(&a.date)),
-            },
-            _ => {}
+/// Build list items in catalog order, with a header wherever the day changes.
+pub(crate) fn library_items(rows: &[RecordingRow]) -> Vec<LibraryItem> {
+    let mut items = Vec::with_capacity(rows.len() + 3);
+    let mut current = None;
+    for row in rows {
+        if current != Some(row.day) {
+            current = Some(row.day);
+            items.push(LibraryItem::Header(row.day));
         }
+        items.push(LibraryItem::Recording(row.clone()));
     }
+    items
+}
 
-    fn render_td(
-        &mut self,
-        row_ix: usize,
-        col_ix: usize,
-        _: &mut Window,
-        _: &mut Context<TableState<Self>>,
-    ) -> impl IntoElement {
-        let row = &self.rows[row_ix];
-        let text = match self.columns[col_ix].key.as_ref() {
-            "name" => row.name.clone(),
-            "date" => row.date.clone(),
-            "duration" => row.duration.clone(),
-            "size" => row.size.clone(),
-            "transcript" => row.transcript.clone(),
-            _ => SharedString::from(""),
-        };
-        div().child(text)
-    }
+/// Update one row's transcript status in place. Returns false for an unknown id.
+pub(crate) fn set_row_status(
+    rows: &mut [RecordingRow],
+    id: RecordingId,
+    status: TranscriptStatus,
+) -> bool {
+    let Some(row) = rows.iter_mut().find(|row| row.id == id) else {
+        return false;
+    };
+    row.transcript = SharedString::from(status.display());
+    row.badge = RowBadge::from_status(status, row.recovered);
+    true
+}
 
-    fn visible_rows_changed(
-        &mut self,
-        _: Range<usize>,
-        _: &mut Window,
-        _: &mut Context<TableState<Self>>,
-    ) {
+fn day_label(day: RecordingDay) -> &'static str {
+    match day {
+        RecordingDay::Today => "Today",
+        RecordingDay::Yesterday => "Yesterday",
+        RecordingDay::Earlier => "Earlier",
     }
+}
+
+/// A muted day heading between groups of rows.
+pub(crate) fn library_header(day: RecordingDay, cx: &App) -> Div {
+    div()
+        .h(px(HEADER_HEIGHT_PX))
+        .px_3()
+        .flex()
+        .items_end()
+        .pb_1()
+        .text_xs()
+        .font_medium()
+        .text_color(cx.theme().muted_foreground)
+        .child(day_label(day))
+}
+
+/// One recording in the list: name, metadata, and a status badge on the right.
+pub(crate) fn recording_list_row(
+    row: &RecordingRow,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    let background = theme.list_active;
+    let hover = theme.list_hover;
+    let bar = theme.primary;
+    div()
+        .id(SharedString::from(format!(
+            "recording-row-{}",
+            row.id.raw()
+        )))
+        .relative()
+        .h(px(ROW_HEIGHT_PX))
+        .px_3()
+        .rounded(px(8.))
+        .flex()
+        .items_center()
+        .gap_2()
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .when(selected, move |el| {
+            el.bg(background).child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(px(10.))
+                    .bottom(px(10.))
+                    .w(px(3.))
+                    .rounded(px(2.))
+                    .bg(bar),
+            )
+        })
+        .on_click(on_click)
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(div().truncate().font_medium().child(row.name.clone()))
+                .child(
+                    div()
+                        .truncate()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(row.meta.clone()),
+                ),
+        )
+        .child(row_badge(row.badge, cx))
+}
+
+fn row_badge(badge: RowBadge, cx: &App) -> Div {
+    let theme = cx.theme();
+    let (text, color) = match badge {
+        RowBadge::None => return div(),
+        RowBadge::Queued => (SharedString::from("Queued"), theme.muted_foreground),
+        RowBadge::Progress(percent) => (SharedString::from(format!("{percent}%")), theme.primary),
+        RowBadge::Ready => (SharedString::from("Transcript"), theme.success),
+        RowBadge::Failed => (SharedString::from("Failed"), theme.danger),
+        RowBadge::Recovered => (SharedString::from("Recovered"), theme.warning),
+    };
+    div().flex_none().text_xs().text_color(color).child(text)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn recordings_tab(
-    table: &Entity<TableState<RecordingsDelegate>>,
-    catalog: &LibraryCatalog,
+    list: Option<AnyElement>,
+    count: usize,
     selected: Option<&RecordingRow>,
     playing: bool,
     play_label: SharedString,
@@ -367,31 +366,28 @@ pub(crate) fn recordings_tab(
     open_model: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let _ = cx;
-    let list = if let Some(message) = error {
-        Empty::new()
-            .header(
-                EmptyHeader::new()
-                    .title(EmptyTitle::new().child("Recordings unavailable"))
-                    .description(EmptyDescription::new().child(message)),
-            )
-            .into_any_element()
-    } else if catalog.entries.is_empty() {
-        Empty::new()
-            .header(
-                EmptyHeader::new()
-                    .title(EmptyTitle::new().child("No recordings"))
-                    .description(EmptyDescription::new().child(
-                        "Saved recordings will appear here. Record from the Record tab or refresh.",
-                    )),
-            )
-            .into_any_element()
-    } else {
-        DataTable::new(table)
-            .stripe(true)
-            .bordered(true)
-            .into_any_element()
-    };
+    let list =
+        if let Some(message) = error {
+            Empty::new()
+                .header(
+                    EmptyHeader::new()
+                        .title(EmptyTitle::new().child("Recordings unavailable"))
+                        .description(EmptyDescription::new().child(message)),
+                )
+                .into_any_element()
+        } else if let Some(list) = list {
+            list
+        } else {
+            Empty::new()
+                .header(
+                    EmptyHeader::new()
+                        .title(EmptyTitle::new().child("No recordings"))
+                        .description(EmptyDescription::new().child(
+                            "Saved recordings will appear here. Record from the Record tab.",
+                        )),
+                )
+                .into_any_element()
+        };
 
     let detail = match selected {
         Some(row) => v_flex()
@@ -479,54 +475,66 @@ pub(crate) fn recordings_tab(
             .into_any_element(),
     };
 
-    v_flex()
-        .size_full()
-        .min_h_0()
-        .gap_3()
-        .child(
-            h_flex()
-                .gap_2()
-                .flex_shrink_0()
-                .child(
-                    Button::new("refresh-library")
-                        .label("Refresh")
-                        .on_click(refresh),
-                )
-                .child(
-                    Button::new("open-recordings-folder-tab")
-                        .label("Open folder")
-                        .on_click(open_folder),
-                ),
-        )
-        .child(
-            // h_flex centres on the cross axis by default; stretch so the table
-            // column gets a real height for uniform_list virtualization.
-            h_flex()
-                .flex_1()
-                .min_h_0()
-                .items_stretch()
-                .gap_3()
-                .overflow_hidden()
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w(px(280.))
-                        .min_h_0()
-                        .h_full()
-                        .overflow_hidden()
-                        .child(div().size_full().min_h_0().child(list)),
-                )
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w(px(200.))
-                        .min_h_0()
-                        .h_full()
-                        .overflow_hidden()
-                        .gap_2()
-                        .child(detail),
-                ),
-        )
+    v_flex().size_full().min_h_0().child(
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .items_stretch()
+            .gap_3()
+            .overflow_hidden()
+            .child(
+                v_flex()
+                    .flex_none()
+                    .w(px(LIST_WIDTH_PX))
+                    .min_h_0()
+                    .h_full()
+                    .overflow_hidden()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .flex_shrink_0()
+                            .px_3()
+                            .py_1()
+                            .gap_2()
+                            .items_center()
+                            .child(div().font_semibold().child("Recordings"))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(count.to_string()),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Button::new("refresh-library")
+                                    .ghost()
+                                    .icon(IconName::RefreshCw)
+                                    .tooltip("Refresh")
+                                    .accessibility_label("Refresh recordings")
+                                    .on_click(refresh),
+                            )
+                            .child(
+                                Button::new("open-recordings-folder-tab")
+                                    .ghost()
+                                    .icon(IconName::FolderOpen)
+                                    .tooltip("Open recordings folder")
+                                    .accessibility_label("Open recordings folder")
+                                    .on_click(open_folder),
+                            ),
+                    )
+                    .child(div().flex_1().min_h_0().child(list)),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w(px(200.))
+                    .min_h_0()
+                    .h_full()
+                    .overflow_hidden()
+                    .gap_2()
+                    .child(detail),
+            ),
+    )
 }
 
 pub(crate) fn open_rename_dialog(
@@ -637,7 +645,10 @@ pub(crate) fn play_button_label(phase: PlayerPhase) -> SharedString {
 
 #[cfg(test)]
 mod tests {
-    use super::{RecordingRow, RowBadge};
+    use super::{
+        library_items, set_row_status, LibraryItem, RecordingRow, RowBadge, HEADER_HEIGHT_PX,
+        ROW_HEIGHT_PX,
+    };
     use crate::domain::ids::RecordingId;
     use crate::domain::recording::{
         RecordingContainer, RecordingDay, RecordingInfo, SidecarState, TranscriptStatus,
@@ -911,60 +922,108 @@ mod tests {
         );
     }
 
-    #[test]
-    fn progress_tick_updates_transcript_cell_without_reordering_rows() {
-        use super::RecordingsDelegate;
-        use crate::domain::recording::{
-            RecordingContainer, RecordingInfo, SidecarState, TranscriptStatus,
-        };
+    fn row_for(id: u64, name: &str, started: Option<u64>) -> RecordingRow {
+        let info = RecordingInfo::new(
+            RecordingId::from_raw(id),
+            name,
+            RecordingContainer::Wav,
+            started,
+            Some(1_000),
+            1,
+            None,
+            TranscriptStatus::None,
+            SidecarState::Present,
+            false,
+            Vec::new(),
+        );
+        RecordingRow::from_info_in(&info, &jiff::tz::TimeZone::UTC, today_utc())
+    }
 
-        // Arrange
-        let mut delegate = RecordingsDelegate::new();
-        let first = RecordingRow::from_info(&RecordingInfo::new(
-            RecordingId::from_raw(1),
-            "alpha",
-            RecordingContainer::Wav,
-            Some(2),
-            Some(1),
-            1,
-            None,
-            TranscriptStatus::None,
-            SidecarState::Present,
-            false,
-            Vec::new(),
-        ));
-        let second = RecordingRow::from_info(&RecordingInfo::new(
-            RecordingId::from_raw(2),
-            "beta",
-            RecordingContainer::Wav,
-            Some(1),
-            Some(1),
-            1,
-            None,
-            TranscriptStatus::None,
-            SidecarState::Present,
-            false,
-            Vec::new(),
-        ));
-        delegate.set_rows(vec![first, second]);
-        let names_before: Vec<_> = delegate
-            .rows()
+    fn item_names(items: &[LibraryItem]) -> Vec<String> {
+        items
             .iter()
-            .map(|row| row.name.to_string())
-            .collect();
+            .map(|item| match item {
+                LibraryItem::Header(day) => format!("#{day:?}"),
+                LibraryItem::Recording(row) => row.name.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn items_have_a_header_only_for_days_with_recordings() {
+        // Arrange
+        let rows = vec![
+            row_for(1, "a", Some(ms("2026-11-07T10:00:00Z"))),
+            row_for(2, "b", Some(ms("2026-11-07T09:00:00Z"))),
+            row_for(3, "c", Some(ms("2026-10-01T09:00:00Z"))),
+        ];
 
         // Act
-        let updated = delegate.set_transcript_display(RecordingId::from_raw(2), "42%");
+        let items = library_items(&rows);
+
+        // Assert
+        assert_eq!(
+            item_names(&items),
+            ["#Today", "a", "b", "#Earlier", "c"].map(String::from)
+        );
+    }
+
+    #[test]
+    fn items_keep_catalog_order_and_handle_an_empty_catalog() {
+        // Arrange
+        let rows = vec![
+            row_for(1, "newest", Some(ms("2026-11-06T10:00:00Z"))),
+            row_for(2, "middle", Some(ms("2026-11-03T10:00:00Z"))),
+            row_for(3, "oldest", Some(ms("2026-10-01T10:00:00Z"))),
+        ];
+
+        // Act
+        let items = library_items(&rows);
+        let empty = library_items(&[]);
+
+        // Assert
+        assert_eq!(
+            item_names(&items),
+            ["#Yesterday", "newest", "#Earlier", "middle", "oldest"].map(String::from)
+        );
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn progress_tick_updates_one_row_without_reordering() {
+        // Arrange
+        let mut rows = vec![
+            row_for(1, "alpha", Some(ms("2026-11-07T10:00:00Z"))),
+            row_for(2, "beta", Some(ms("2026-11-07T09:00:00Z"))),
+        ];
+
+        // Act
+        let updated = set_row_status(
+            &mut rows,
+            RecordingId::from_raw(2),
+            TranscriptStatus::Progress(42),
+        );
+        let missing = set_row_status(&mut rows, RecordingId::from_raw(9), TranscriptStatus::Ready);
 
         // Assert
         assert!(updated);
-        let names_after: Vec<_> = delegate
-            .rows()
-            .iter()
-            .map(|row| row.name.to_string())
-            .collect();
-        assert_eq!(names_after, names_before);
-        assert_eq!(delegate.rows()[0].transcript.as_ref(), "—");
-        assert_eq!(delegate.rows()[1].transcript.as_ref(), "42%");
+        assert!(!missing);
+        let names: Vec<_> = rows.iter().map(|row| row.name.to_string()).collect();
+        assert_eq!(names, ["alpha", "beta"]);
+        assert_eq!(rows[0].badge, RowBadge::None);
+        assert_eq!(rows[1].badge, RowBadge::Progress(42));
+        assert_eq!(rows[1].transcript.as_ref(), "42%");
+    }
+
+    #[test]
+    fn item_heights_differ_for_headers_and_rows() {
+        // Arrange
+        let items = library_items(&[row_for(1, "a", Some(ms("2026-11-07T10:00:00Z")))]);
+
+        // Act
+        let heights: Vec<_> = items.iter().map(LibraryItem::height_px).collect();
+
+        // Assert
+        assert_eq!(heights, [HEADER_HEIGHT_PX, ROW_HEIGHT_PX]);
     }
 }

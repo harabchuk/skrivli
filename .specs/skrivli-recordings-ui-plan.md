@@ -1,6 +1,6 @@
 # Skrivli Recordings page redesign plan
 
-**Status:** Phase 0 done. Phases 1 to 7 are not started. The code snippets have not been compiled.
+**Status:** Phases 0 and 1 done. Phases 2 to 7 are not started. The code snippets have not been compiled.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
 
@@ -136,22 +136,22 @@ Each phase should be one reviewable commit or PR, and should leave the app worki
 **Goal:** replace the table with rows that are easy to scan.
 
 **Add**
-- [ ] Add `LibraryItem { Header(RecordingDay), Recording(RecordingRow) }` and a pure function that builds the items from the catalog, in catalog order.
-- [ ] Add a `recording_list_row` element in `views/recordings.rs`: bold name, muted metadata line, and the badge on the right.
-- [ ] Add a selected style with a tinted background and a 3 px accent bar on the left, plus a hover style.
-- [ ] Add a list header: "Recordings", the count, and an Open folder icon button.
-- [ ] Render the list with Kit's `v_virtual_list`, because headers and rows have different heights and the library can hold hundreds of files. Check its API in `gpui-component-0.9.0/src/virtual_list.rs` first.
-- [ ] Give the list a fixed 330 px width in the normal layout.
+- [x] Add `LibraryItem { Header(RecordingDay), Recording(RecordingRow) }` and a pure function that builds the items from the catalog, in catalog order.
+- [x] Add a `recording_list_row` element in `views/recordings.rs`: bold name, muted metadata line, and the badge on the right.
+- [x] Add a selected style with a tinted background and a 3 px accent bar on the left, plus a hover style.
+- [x] Add a list header: "Recordings", the count, and an Open folder icon button.
+- [x] Render the list with Kit's `v_virtual_list`, because headers and rows have different heights and the library can hold hundreds of files. Check its API in `gpui-component-0.9.0/src/virtual_list.rs` first.
+- [x] Give the list a fixed 330 px width in the normal layout.
 
 **Change**
-- [ ] Change `select_library_row` in `main_window.rs` so it is called from a row click instead of `TableEvent::SelectRow`.
-- [ ] Change `apply_library`, `apply_transcription` and the `selected_row` lookup to use the new row data. Keep the behavior where a progress tick updates one row without reordering, and keep its test.
+- [x] Change `select_library_row` in `main_window.rs` so it is called from a row click instead of `TableEvent::SelectRow`.
+- [x] Change `apply_library`, `apply_transcription` and the `selected_row` lookup to use the new row data. Keep the behavior where a progress tick updates one row without reordering, and keep its test.
 
 **Remove**
-- [ ] Remove `RecordingsDelegate`, `DataTable` and `TableState`, including the `recordings_table` field and `table_sub`.
-- [ ] Remove the Size and Transcript columns and all column sorting. This also fixes problem 6.
-- [ ] Remove the Refresh button, but first confirm that the list updates when a file is added, renamed and deleted in Explorer. `skrivli-implementation-plan.md` names `storage/watcher.rs`, but that file is not in `infrastructure/storage/`. **If the list does not update, keep a Refresh icon button next to Open folder.**
-- [ ] Remove `AppCommand::RefreshLibrary` only if nothing else sends it. Internal calls to `library.refresh()` stay.
+- [x] Remove `RecordingsDelegate`, `DataTable` and `TableState`, including the `recordings_table` field and `table_sub`.
+- [x] Remove the Size and Transcript columns and all column sorting. This also fixes problem 6.
+- [x] **Kept** the Refresh button (now an icon button). Original wording: remove the Refresh button, but first confirm that the list updates when a file is added, renamed and deleted in Explorer. `skrivli-implementation-plan.md` names `storage/watcher.rs`, but that file is not in `infrastructure/storage/`. **If the list does not update, keep a Refresh icon button next to Open folder.**
+- [x] **Kept** `AppCommand::RefreshLibrary`, because the Refresh button still sends it. Original wording: remove it only if nothing else sends it. Internal calls to `library.refresh()` stay.
 
 **Sketch (not compiled)**
 
@@ -179,13 +179,17 @@ fn recording_list_row(row: &RecordingRow, selected: bool, cx: &App) -> Stateful<
 ```
 
 **Tests to write first**
-- [ ] Items contain a header only for days that have recordings.
-- [ ] Items keep newest-first order.
-- [ ] Updating progress changes one row and keeps the order.
+- [x] Items contain a header only for days that have recordings.
+- [x] Items keep newest-first order.
+- [x] Updating progress changes one row and keeps the order.
 
 **Spec:** update section 5 "Browsing" in `skrivli-product.md`, and replace the status table's `—` and `Ready` wording to match the badges.
 
 **Done when:** the list is grouped, scrolls smoothly with at least 200 files, and clicking a row selects it.
+
+---
+
+**Evidence (Phase 1):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass. New unit tests cover headers only for days with recordings, catalog order, empty input, item heights, and a progress tick that changes one row and keeps the order. `RecordingsDelegate`, the table, the Size and Transcript columns, sorting and the `allow(dead_code)` on `day`, `meta` and `badge` are gone (`detail_line` keeps its allow until Phase 2). The list uses `gpui_kit::base::v_virtual_list` with a `VirtualListScrollHandle` and an explicit `Rc<Vec<Size>>` of item heights, cached on `MainWindow` and rebuilt only when the catalog changes. **Refresh decision:** a watcher exists and is wired (`platform/windows/watcher.rs`, with a 30 s fallback rescan), but add, rename and delete in Explorer were not checked in the running app, so the icon button stays (see D-20). **Not verified:** the look of the list (selected bar, hover, badge colors, truncation), scrolling with 200+ files, and clicking a row, since the app was not run. The old Date text line in the detail pane still reads from `RecordingRow::date`; Phase 2 removes it.
 
 ---
 

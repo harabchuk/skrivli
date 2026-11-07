@@ -6,17 +6,18 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use gpui_kit::base::{v_virtual_list, VirtualListScrollHandle};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::table::{TableEvent, TableSelection, TableState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, IconName, WindowExt as _};
 use gpui_kit::prelude::*;
+use gpui_kit::Pixels;
 use gpui_kit::{
-    div, px, App, ClickEvent, Context, Entity, FocusHandle, IntoElement, ParentElement, Render,
-    SharedString, Styled, Subscription, Task, Window,
+    div, px, size, App, ClickEvent, Context, Entity, FocusHandle, IntoElement, ParentElement,
+    Render, SharedString, Size, Styled, Subscription, Task, Window,
 };
 
 use crate::domain::audio::format_elapsed;
@@ -54,8 +55,9 @@ use super::model_prompt::{
 };
 use super::recording::{record_tab, DeviceChoice, RecordView};
 use super::recordings::{
-    open_delete_dialog, open_rename_dialog, play_button_label, recordings_tab, rows_from_catalog,
-    transcript_controls, RecordingsDelegate,
+    library_header, library_items, open_delete_dialog, open_rename_dialog, play_button_label,
+    recording_list_row, recordings_tab, rows_from_catalog, set_row_status, transcript_controls,
+    LibraryItem, RecordingRow,
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
@@ -89,8 +91,10 @@ pub(crate) struct MainWindow {
     model_prompt_open: bool,
     /// Set only when Transcribe found no model. Starts once a model is ready.
     pending_transcription: Option<RecordingId>,
-    recordings_table: Entity<TableState<RecordingsDelegate>>,
-    _table_sub: Subscription,
+    library_rows: Vec<RecordingRow>,
+    library_items: Vec<LibraryItem>,
+    library_item_sizes: Rc<Vec<Size<Pixels>>>,
+    library_scroll: VirtualListScrollHandle,
     levels: Arc<LevelSnapshot>,
     gain_control: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
@@ -134,21 +138,6 @@ impl MainWindow {
     ) -> Self {
         let focus = cx.focus_handle().tab_stop(true);
         window.focus(&focus, cx);
-        let recordings_table = cx.new(|cx| {
-            TableState::new(RecordingsDelegate::new(), window, cx)
-                .row_selectable(true)
-                .sortable(true)
-        });
-        let table_sub = cx.subscribe_in(
-            &recordings_table,
-            window,
-            |this, table, event: &TableEvent, window, cx| {
-                if let TableEvent::SelectRow(row) = event {
-                    let id = table.read(cx).delegate().row_id(*row);
-                    this.select_library_row(id, window, cx);
-                }
-            },
-        );
         let labels = vec![SharedString::from("Default communications")];
         let choices = vec![StoredEndpoint::Default];
         let system_labels = vec![SharedString::from("Default output device")];
@@ -244,8 +233,10 @@ impl MainWindow {
             prompt_model_id,
             model_prompt_open: false,
             pending_transcription: None,
-            recordings_table,
-            _table_sub: table_sub,
+            library_rows: Vec::new(),
+            library_items: Vec::new(),
+            library_item_sizes: Rc::new(Vec::new()),
+            library_scroll: VirtualListScrollHandle::new(),
             levels,
             gain_control,
             targets,
@@ -606,12 +597,10 @@ impl MainWindow {
         self.presentation.apply_transcription(snapshot.clone());
         self.presentation.set_tab(tab);
         if let Some(id) = snapshot.recording_id {
-            let display = snapshot.transcript_status().display();
-            self.recordings_table.update(cx, |table, cx| {
-                if table.delegate_mut().set_transcript_display(id, display) {
-                    cx.notify();
-                }
-            });
+            if set_row_status(&mut self.library_rows, id, snapshot.transcript_status()) {
+                self.library_items = library_items(&self.library_rows);
+                cx.notify();
+            }
         }
         if matches!(
             snapshot.phase,
@@ -968,28 +957,22 @@ impl MainWindow {
         if let Some(notice) = snapshot.notice {
             self.presentation.set_notice(Some(notice));
         }
-        let rows = rows_from_catalog(&self.library_catalog);
-        let selected = self.library_selected;
-        let overlay = self
+        self.library_rows = rows_from_catalog(&self.library_catalog);
+        if let Some((id, status)) = self
             .presentation
             .transcript_recording()
-            .zip(self.presentation.transcript_status());
-        self.recordings_table.update(cx, |table, cx| {
-            table.delegate_mut().set_rows(rows);
-            if let Some((id, status)) = overlay {
-                let _ = table
-                    .delegate_mut()
-                    .set_transcript_display(id, status.display());
-            }
-            // Rebuild column layout after row data changes (Kit TableState contract).
-            table.refresh(cx);
-            if let Some(id) = selected {
-                if let Some(index) = table.delegate().index_of(id) {
-                    table.set_selection(TableSelection::Row(index), cx);
-                }
-            }
-            cx.notify();
-        });
+            .zip(self.presentation.transcript_status())
+        {
+            let _ = set_row_status(&mut self.library_rows, id, status);
+        }
+        self.library_items = library_items(&self.library_rows);
+        self.library_item_sizes = Rc::new(
+            self.library_items
+                .iter()
+                .map(|item| size(px(1.), px(item.height_px())))
+                .collect(),
+        );
+        cx.notify();
         if selection_changed {
             self.load_selected_transcript(window, cx);
         }
@@ -1313,14 +1296,40 @@ impl Render for MainWindow {
             )
             .into_any_element(),
             AppTab::Recordings => {
-                let selected_row = self.library_selected.and_then(|id| {
-                    self.recordings_table
-                        .read(cx)
-                        .delegate()
-                        .rows()
-                        .iter()
-                        .find(|row| row.id == id)
-                        .cloned()
+                let selected_row = self
+                    .library_selected
+                    .and_then(|id| self.library_rows.iter().find(|row| row.id == id).cloned());
+                let library_list = (!self.library_items.is_empty()).then(|| {
+                    v_virtual_list(
+                        entity.clone(),
+                        "recordings-list",
+                        self.library_item_sizes.clone(),
+                        |this, range, _window, cx| {
+                            range
+                                .filter_map(|index| this.library_items.get(index).cloned())
+                                .map(|item| match item {
+                                    LibraryItem::Header(day) => {
+                                        library_header(day, cx).into_any_element()
+                                    }
+                                    LibraryItem::Recording(row) => {
+                                        let id = row.id;
+                                        let selected = this.library_selected == Some(id);
+                                        recording_list_row(
+                                            &row,
+                                            selected,
+                                            cx.listener(move |this, _event, window, cx| {
+                                                this.select_library_row(Some(id), window, cx);
+                                            }),
+                                            cx,
+                                        )
+                                        .into_any_element()
+                                    }
+                                })
+                                .collect()
+                        },
+                    )
+                    .track_scroll(&self.library_scroll)
+                    .into_any_element()
                 });
                 let playing = self.player_snapshot.phase == PlayerPhase::Playing;
                 let error = self.library_catalog.error.map(SharedString::from);
@@ -1367,8 +1376,8 @@ impl Render for MainWindow {
                 let retry_entity = entity.clone();
                 let model_entity = entity.clone();
                 recordings_tab(
-                    &self.recordings_table,
-                    &self.library_catalog,
+                    library_list,
+                    self.library_rows.len(),
                     selected_row.as_ref(),
                     playing,
                     play_button_label(self.player_snapshot.phase),

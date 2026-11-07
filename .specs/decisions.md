@@ -102,7 +102,7 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 - **Watch:** `FindFirstChangeNotificationW` with ~350 ms debounce plus a 30 s poll fallback. Missing folders poll until they appear.
 - **Delete:** `SHFileOperationW` with `FOF_ALLOWUNDO` (Recycle Bin) for audio + `.json` + `.txt` after confirm.
 - **Playback:** streaming PCM16 WAV via `cpal` 0.16 on a dedicated player thread; selection change stops playback. Device sample-rate negotiation beyond canonical 48 kHz stereo is best-effort (request WAV rate/channels on the default output device).
-- **UI:** GPUI Kit `DataTable` + detail pane; Rename uses Kit dialog + `Input`; Delete uses confirm alert. Narrow stacked fallback not implemented (fixed split).
+- **UI:** Grouped list (Kit `v_virtual_list` of day headers and rows, 330 px wide) + detail pane (the `DataTable` was replaced in Recordings UI plan phase 1); Rename uses Kit dialog + `Input`; Delete uses confirm alert. Narrow stacked fallback not implemented (fixed split).
 
 **Not exercised on hardware this session:** large-folder browse (hundreds of files), live Explorer edits while the app is open, and audible WASAPI playback of a real recording.
 
@@ -248,3 +248,7 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 **Outcome:** `jiff = "0.2.39"` with default features is used to turn Unix milliseconds into local civil time. The default features include the Windows system zone lookup and a bundled time zone database, so no extra setup is needed. A test that read the system zone gave the expected local offset on the dev PC. A test also confirmed the New York spring-forward change (01:59 to 03:01). `jiff` appears only in `views/recordings.rs`. `domain/` keeps its own `CivilTime`, and `recording_day` compares plain dates. `TimeZone::system()` is called only in `local_clock`, where the views build row data.
 
 **Not verified:** behavior on a PC whose system zone cannot be detected. Jiff then falls back to UTC.
+
+## D-20 — Recordings list is a virtual list; Refresh kept (Phase 1 of the Recordings UI plan)
+
+**Outcome:** the Recordings table (`DataTable`) was replaced by Kit's `v_virtual_list` with fixed heights (32 px headers, 56 px rows), built from `LibraryItem` values in catalog order. A Windows directory watcher is wired in production (`FindFirstChangeNotificationW` on file and directory name changes, size and write time, plus a 30 s full rescan, feeding `LibraryHost`), and a test covers create. Add, rename and delete in Explorer were **not** checked in the running app, so the Refresh icon button stays beside Open folder. Remove it, and `AppCommand::RefreshLibrary`, after that manual check.
