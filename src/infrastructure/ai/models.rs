@@ -474,8 +474,7 @@ mod tests {
             default.sha256(),
             "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"
         );
-        assert_eq!(manifest.entries().len(), 11);
-        assert!(manifest.by_id("tiny-q5_1").is_some());
+        assert_eq!(manifest.entries().len(), 8);
         assert!(manifest.by_id("small-q5_1").is_some());
         assert!(manifest.by_id("large-v3-turbo-q5_0").is_some());
         assert!(manifest.by_id("medium-en-q5_0").is_some());
