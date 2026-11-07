@@ -482,7 +482,7 @@ mod tests {
         // Assert
         assert_eq!(
             error.user_message(),
-            "The speech model file is not supported."
+            "The transcription model file is not supported."
         );
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -507,11 +507,11 @@ mod tests {
         // Assert
         assert_eq!(
             missing_err.user_message(),
-            "The speech model file is missing."
+            "The transcription model file is missing."
         );
         assert_eq!(
             unsupported.user_message(),
-            "The speech model file is not supported."
+            "The transcription model file is not supported."
         );
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -570,7 +570,7 @@ mod tests {
         // Assert
         assert_eq!(
             error.user_message(),
-            "The downloaded speech model could not be verified."
+            "The downloaded transcription model could not be verified."
         );
         assert!(!dest.exists());
         assert!(!dir.join("ggml-base-q5_1.bin.tmp").exists());

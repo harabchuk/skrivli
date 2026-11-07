@@ -36,7 +36,7 @@ pub(crate) fn catalog_row_label(id: &str, bytes: u64) -> String {
 pub(crate) fn selected_model_line(id: Option<&str>, bytes: Option<u64>) -> String {
     match (id.filter(|id| !id.is_empty()), bytes) {
         (Some(id), Some(bytes)) => format!("Selected: {id} ({})", format_size(bytes)),
-        _ => "Choose a speech model.".to_string(),
+        _ => "Choose a transcription model.".to_string(),
     }
 }
 
@@ -90,7 +90,7 @@ pub(crate) fn open_model_prompt(
         let cancel = on_cancel.clone();
         let retry = on_retry.clone();
         dialog
-            .title("Speech model")
+            .title("Transcription model")
             .w(px(560.))
             .close_button(false)
             .overlay_closable(false)
@@ -123,7 +123,7 @@ pub(crate) fn open_model_prompt(
 
 pub(crate) fn open_model_alert(window: &mut Window, cx: &mut App, message: &'static str) {
     window.open_alert_dialog(cx, move |alert, _, _| {
-        alert.title("Speech model").description(message)
+        alert.title("Transcription model").description(message)
     });
 }
 
@@ -185,7 +185,7 @@ mod tests {
 
         // Assert
         assert_eq!(selected, "Selected: base-q5_1 (56.9 MB)");
-        assert_eq!(empty, "Choose a speech model.");
+        assert_eq!(empty, "Choose a transcription model.");
         assert!(rows.iter().all(|row| row != &selected));
     }
 

@@ -11,7 +11,7 @@ When a feature is added, changed, deferred, or removed, update this document so 
 
 ## 1. Product overview
 
-Skrivli is a local Windows app for capturing meetings, calls, and other spoken sessions. It records your microphone and what plays through your computer at the same time, saves one continuous audio file on your machine, and can turn a finished recording into a timestamped plain-text transcript — entirely offline after you install a speech model.
+Skrivli is a local Windows app for capturing meetings, calls, and other spoken sessions. It records your microphone and what plays through your computer at the same time, saves one continuous audio file on your machine, and can turn a finished recording into a timestamped plain-text transcript — entirely offline after you install a transcription model.
 
 There is no account, no cloud sync, and no automatic upload of audio or transcripts. Files stay where you put them.
 
@@ -31,7 +31,7 @@ People who take meetings or calls on Windows and want a private, local recording
 ## 2. Core user journey (v1)
 
 1. Install by unzipping a portable package and launching Skrivli.
-2. On first useful transcription, choose a speech model from the list and download it. That dialog stays open until the chosen model is installed.
+2. On first useful transcription, choose a transcription model from the list and download it. That dialog stays open until the chosen model is installed.
 3. On the **Record** tab, pick microphone and system audio source if needed.
 4. Start recording (window, tray, or keyboard shortcut). Speak and/or play audio as usual.
 5. Stop recording. A finished audio file appears in the chosen folder and in the **Recordings** tab.
@@ -149,7 +149,7 @@ Transcription runs **after** a recording is finished. It does not produce live c
 
 ### Models
 
-- Speech models are **not** bundled with the app.
+- Transcription models are **not** bundled with the app.
 - On first transcription without a model, the user picks a model from the always-visible list. The chosen model is shown apart from the list, with its size and a notice that the download needs a network. Download starts only from the Download button. The dialog cannot be closed until that model is installed. Cancel and Retry apply to the download itself.
 - Downloads happen only when the user starts them, with progress, cancel, and verification feedback. Corrupt or unsupported models are reported distinctly.
 - After installation, transcription works fully offline.
@@ -225,7 +225,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 - Delivered as a portable ZIP: unpack, run, no mandatory installer for v1.
 - Works from paths with spaces or Unicode characters when Windows allows normal app writes.
 - Does not require a developer machine or hidden manually installed runtimes beyond what the package documents.
-- Speech models are separate: size and network use are disclosed when the user chooses to download.
+- Transcription models are separate: size and network use are disclosed when the user chooses to download.
 - Privacy notes and licensing notices ship with the package.
 
 ### Happy-path acceptance (clean PC)

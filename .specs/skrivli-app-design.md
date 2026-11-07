@@ -571,7 +571,7 @@ cargo build --release
 ```
 
 - Optional `scripts/start.ps1` and `scripts/test.ps1` wrap Cargo; keep Cargo as the application build and test entry point.
-- Initial deliverable is a portable ZIP with executable, required native runtime files, licensing notices and a README. Later consider WiX/MSIX if installation, autostart and shell integration require it. Do not bundle speech models by default; download on user request.
+- Initial deliverable is a portable ZIP with executable, required native runtime files, licensing notices and a README. Later consider WiX/MSIX if installation, autostart and shell integration require it. Do not bundle transcription models by default; download on user request.
 
 ---
 

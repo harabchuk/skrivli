@@ -120,8 +120,8 @@ fn pick_model_file() -> Result<Option<PathBuf>, AppError> {
     let dialog: IFileOpenDialog =
         unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }
             .map_err(|error| AppError::message("choose model", error.to_string()))?;
-    let title = wide("Choose a speech model");
-    let filter_name = wide("Speech models");
+    let title = wide("Choose a transcription model");
+    let filter_name = wide("Transcription models");
     let filter_spec = wide("*.bin");
     unsafe {
         let current = dialog

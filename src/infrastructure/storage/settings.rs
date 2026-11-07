@@ -12,7 +12,7 @@ pub(crate) use crate::domain::theme::ThemePreference;
 
 pub(crate) const SCHEMA_VERSION: u32 = 4;
 
-/// Default speech model variant id (manifest `base-q5_1`).
+/// Default transcription model variant id (manifest `base-q5_1`).
 pub(crate) const DEFAULT_MODEL_ID: &str = "base-q5_1";
 
 fn default_mic_gain() -> f32 {

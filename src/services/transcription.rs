@@ -26,7 +26,7 @@ use crate::services::ports::{InferencePort, InferenceSegment, JobIdentity, Trans
 pub(crate) const NOTICE_DONE: &str = "Transcript ready.";
 pub(crate) const NOTICE_FAILED: &str = "Transcription failed.";
 pub(crate) const NOTICE_CANCELLED: &str = "Transcription cancelled.";
-pub(crate) const NOTICE_MODEL: &str = "The speech model file is missing or unsupported.";
+pub(crate) const NOTICE_MODEL: &str = "The transcription model file is missing or unsupported.";
 const DETAIL_IDENTITY: &str = "The recording changed before the transcript was saved.";
 
 /// Tunables for windowed decode. Production uses domain defaults; tests shrink them.
@@ -1173,10 +1173,10 @@ fn is_cancel_error(error: &AppError) -> bool {
 fn is_model_error(error: &AppError) -> bool {
     matches!(
         error.user_message(),
-        "The speech model file is missing."
-            | "The speech model file could not be read."
-            | "The speech model file is not supported."
-            | "Could not load the speech model."
+        "The transcription model file is missing."
+            | "The transcription model file could not be read."
+            | "The transcription model file is not supported."
+            | "Could not load the transcription model."
     )
 }
 

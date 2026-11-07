@@ -29,7 +29,7 @@ pub(crate) enum AppCommand {
         job_id: JobId,
     },
     RefreshLibrary,
-    /// Download the speech model selected in the prompt. User-initiated only.
+    /// Download the transcription model selected in the prompt. User-initiated only.
     DownloadModel,
     CancelModelDownload,
     RetryModelDownload,

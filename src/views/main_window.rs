@@ -713,7 +713,7 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if message == "The speech model file is missing." {
+        if message == "The transcription model file is missing." {
             self.open_model_prompt(window, cx);
             return;
         }
@@ -1189,9 +1189,9 @@ fn read_transcript_file(
 fn is_distinct_model_message(message: &str) -> bool {
     matches!(
         message,
-        "The speech model file is missing."
-            | "The speech model file is not supported."
-            | "The downloaded speech model could not be verified."
+        "The transcription model file is missing."
+            | "The transcription model file is not supported."
+            | "The downloaded transcription model could not be verified."
     )
 }
 

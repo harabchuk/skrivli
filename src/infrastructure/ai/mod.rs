@@ -1,4 +1,4 @@
-//! Local speech models and whisper.cpp inference.
+//! Local transcription models and whisper.cpp inference.
 
 pub(crate) mod fetch;
 pub(crate) mod models;

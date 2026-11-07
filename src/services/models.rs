@@ -175,7 +175,7 @@ fn worker_loop(
                     ));
                 }
                 Err(error) => {
-                    tracing::error!(error = %error, "picked speech model was not accepted");
+                    tracing::error!(error = %error, "picked transcription model was not accepted");
                     on_change(snapshot(
                         ModelPhase::Failed,
                         0,
@@ -252,7 +252,7 @@ fn run_download(
     let mut reader = match source.open(&url) {
         Ok(reader) => reader,
         Err(error) => {
-            tracing::error!(error = %error, "speech model download did not start");
+            tracing::error!(error = %error, "transcription model download did not start");
             on_change(snapshot(
                 ModelPhase::Failed,
                 0,
@@ -304,7 +304,7 @@ fn run_download(
             ));
         }
         Err(error) if error.user_message() == "The model download was cancelled." => {
-            tracing::info!("speech model download cancelled");
+            tracing::info!("transcription model download cancelled");
             on_change(snapshot(
                 ModelPhase::Cancelled,
                 last_percent,
@@ -315,7 +315,7 @@ fn run_download(
             ));
         }
         Err(error) => {
-            tracing::error!(error = %error, "speech model download failed");
+            tracing::error!(error = %error, "transcription model download failed");
             on_change(snapshot(
                 ModelPhase::Failed,
                 last_percent,
@@ -602,7 +602,7 @@ mod tests {
         // Assert
         assert_eq!(
             snap.failure,
-            Some("The downloaded speech model could not be verified.")
+            Some("The downloaded transcription model could not be verified.")
         );
         assert!(!dir.join("ggml-base-q5_1.bin").exists());
         let _ = std::fs::remove_dir_all(dir);
@@ -676,10 +676,13 @@ mod tests {
         let _ = handle.join();
 
         // Assert
-        assert_eq!(missing.failure, Some("The speech model file is missing."));
+        assert_eq!(
+            missing.failure,
+            Some("The transcription model file is missing.")
+        );
         assert_eq!(
             unsupported.failure,
-            Some("The speech model file is not supported.")
+            Some("The transcription model file is not supported.")
         );
         assert!(ready
             .models
