@@ -254,7 +254,6 @@ pub(crate) fn recordings_tab(
             .child(format!("Duration {}", row.duration))
             .child(format!("Transcript {}", row.transcript))
             .child(failure.unwrap_or_else(|| SharedString::from("")))
-            .child(transcript_view)
             .child(if playing {
                 SharedString::from("Playing")
             } else {
@@ -319,6 +318,7 @@ pub(crate) fn recordings_tab(
                             .on_click(delete),
                     ),
             )
+            .child(transcript_view)
             .into_any_element(),
         None => Empty::new()
             .header(
