@@ -1,5 +1,6 @@
 //! Resizable shell: Record and Recordings tabs, settings gear, and the status strip.
 
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
@@ -23,9 +24,11 @@ use gpui_kit::{
 use crate::domain::audio::format_elapsed;
 use crate::domain::gain::{db_fs, format_gain};
 use crate::domain::ids::RecordingId;
-use crate::domain::recording::{settled_transcript_status, RecordPhase, TranscriptStatus};
+use crate::domain::recording::{
+    settled_transcript_status, RecordPhase, RecordingContainer, TranscriptStatus,
+};
 use crate::domain::theme::ThemePreference;
-use crate::domain::transcript::{parse_transcript, TranscriptParagraph};
+use crate::domain::transcript::{current_paragraph, parse_transcript, TranscriptParagraph};
 use crate::domain::window_frame::LogicalRect;
 use crate::infrastructure::ai::models::{path_for_variant, validate_model_file, ModelManifest};
 use crate::infrastructure::audio::devices::DeviceCatalog;
@@ -56,10 +59,11 @@ use super::model_prompt::{
 };
 use super::recording::{record_tab, DeviceChoice, RecordView};
 use super::recordings::{
-    can_transcribe_again, failure_reason, library_header, library_items, open_delete_dialog,
-    open_rename_dialog, open_transcribe_again_dialog, play_button_label, recording_list_row,
-    recordings_tab, rows_from_catalog, set_row_status, transcript_pane, ClickAction, LibraryItem,
-    RecordingRow, RecordingsActions, RecordingsView, TranscriptPane,
+    can_transcribe_again, failure_reason, library_header, library_items, may_auto_scroll,
+    open_delete_dialog, open_rename_dialog, open_transcribe_again_dialog, play_action,
+    recording_list_row, recordings_tab, rows_from_catalog, seek_position_ms, seek_value,
+    set_row_status, shown_position_ms, transcript_pane, ClickAction, LibraryItem, PlayAction,
+    PlayerCard, RecordingRow, RecordingsActions, RecordingsView, TranscriptPane, SEEK_STEPS,
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
@@ -87,6 +91,10 @@ pub(crate) struct MainWindow {
     transcription_snapshot: TranscriptionSnapshot,
     transcript_paragraphs: Rc<Vec<TranscriptParagraph>>,
     transcript_list: ParagraphListState,
+    /// When the user last scrolled the transcript by hand.
+    transcript_scrolled_at: Rc<Cell<Option<Instant>>>,
+    /// The paragraph last highlighted, so auto-scroll runs only when it changes.
+    current_paragraph: Option<usize>,
     transcript_focus: FocusHandle,
     transcript_generation: u64,
     transcript_error: Option<&'static str>,
@@ -109,6 +117,14 @@ pub(crate) struct MainWindow {
     system_choices: Vec<StoredEndpoint>,
     gain_slider: Entity<SliderState>,
     _gain_sub: Subscription,
+    seek_slider: Entity<SliderState>,
+    _seek_sub: Subscription,
+    /// Position under the thumb while the user drags it. Playback updates are ignored.
+    seek_drag: Option<u64>,
+    /// Where Play starts when nothing is playing: the slider position, 0 by default.
+    idle_position_ms: u64,
+    /// The value last written to the seek slider.
+    seek_slider_value: f32,
     mic_meter: PeakHold,
     system_meter: PeakHold,
     _meters: Task<()>,
@@ -161,6 +177,34 @@ impl MainWindow {
                 this.set_slider_gain(value.start(), cx);
             },
         );
+        let seek_slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(SEEK_STEPS)
+                .step(1.0)
+                .default_value(0.0)
+        });
+        let seek_sub = cx.subscribe_in(
+            &seek_slider,
+            window,
+            |this, _slider, event: &SliderEvent, _window, cx| match event {
+                SliderEvent::Change(value) => {
+                    this.seek_drag =
+                        Some(seek_position_ms(value.start(), this.selected_duration_ms()));
+                    cx.notify();
+                }
+                SliderEvent::Release(value) => {
+                    let position_ms = seek_position_ms(value.start(), this.selected_duration_ms());
+                    this.seek_drag = None;
+                    if this.snapshot_is_selected() {
+                        this.player.seek(position_ms);
+                    } else {
+                        this.idle_position_ms = position_ms;
+                    }
+                    cx.notify();
+                }
+            },
+        );
         let executor = cx.background_executor().clone();
         let bridge = cx.spawn_in(window, async move |this, async_cx| loop {
             executor.timer(Duration::from_millis(150)).await;
@@ -194,6 +238,11 @@ impl MainWindow {
             session.update(cx, |view, cx| view.on_close_requested(window, cx))
         });
         let transcript_list = ParagraphListState::new(0, ListAlignment::Top, px(400.));
+        let transcript_scrolled_at = Rc::new(Cell::new(None));
+        let scrolled_at = Rc::clone(&transcript_scrolled_at);
+        transcript_list.set_scroll_handler(move |_event, _window, _cx| {
+            scrolled_at.set(Some(Instant::now()));
+        });
         let transcript_focus = cx.focus_handle().tab_stop(true);
         let prompt_model_id = settings.selected_model().to_string();
         // Status surfaces need the installed list before the dialog ever opens.
@@ -229,6 +278,8 @@ impl MainWindow {
             transcription_snapshot: TranscriptionSnapshot::idle(),
             transcript_paragraphs: Rc::new(Vec::new()),
             transcript_list,
+            transcript_scrolled_at,
+            current_paragraph: None,
             transcript_focus,
             transcript_generation: 0,
             transcript_error: None,
@@ -250,6 +301,11 @@ impl MainWindow {
             system_choices,
             gain_slider,
             _gain_sub: gain_sub,
+            seek_slider,
+            _seek_sub: seek_sub,
+            seek_drag: None,
+            idle_position_ms: 0,
+            seek_slider_value: 0.,
             mic_meter: PeakHold::new(),
             system_meter: PeakHold::new(),
             _meters: meters,
@@ -801,6 +857,7 @@ impl MainWindow {
         }
         self.presentation.set_loaded_transcript(text);
         self.transcript_list.reset(paragraphs.len());
+        self.current_paragraph = None;
         self.transcript_paragraphs = Rc::new(paragraphs);
     }
 
@@ -808,6 +865,7 @@ impl MainWindow {
     /// different lengths wrap without overlapping.
     fn transcript_list_element(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let paragraphs = self.transcript_paragraphs.clone();
+        let current = self.current_paragraph;
         let state = self.transcript_list.clone();
         let key_state = state.clone();
         let focus = self.transcript_focus.clone();
@@ -839,7 +897,10 @@ impl MainWindow {
                     h_flex()
                         .items_start()
                         .gap_3()
+                        .px_2()
                         .py_1()
+                        .rounded(px(6.))
+                        .when(current == Some(index), |row| row.bg(cx.theme().accent))
                         .child(
                             div()
                                 .flex_none()
@@ -1032,6 +1093,7 @@ impl MainWindow {
         let selection_changed = self.library_selected != snapshot.selected;
         if selection_changed {
             self.player.stop();
+            self.reset_player_position();
         }
         self.library_catalog = snapshot.catalog;
         self.library_selected = snapshot.selected;
@@ -1065,6 +1127,83 @@ impl MainWindow {
         if let Some(notice) = self.player_snapshot.notice {
             self.presentation.set_notice(Some(notice));
         }
+        if self.player_snapshot.phase == PlayerPhase::Idle {
+            self.idle_position_ms = 0;
+        }
+        self.follow_playback();
+    }
+
+    fn reset_player_position(&mut self) {
+        self.idle_position_ms = 0;
+        self.seek_drag = None;
+        self.current_paragraph = None;
+    }
+
+    /// Whether the player is playing or paused on the selected recording.
+    fn snapshot_is_selected(&self) -> bool {
+        matches!(
+            self.player_snapshot.phase,
+            PlayerPhase::Playing | PlayerPhase::Paused
+        ) && self.player_snapshot.recording_id.is_some()
+            && self.player_snapshot.recording_id == self.library_selected
+    }
+
+    fn selected_duration_ms(&self) -> Option<u64> {
+        let catalog = || {
+            self.library_selected
+                .and_then(|id| self.library_catalog.find(id))
+                .and_then(|entry| entry.info.duration_ms())
+        };
+        if self.snapshot_is_selected() {
+            self.player_snapshot.duration_ms.or_else(catalog)
+        } else {
+            catalog()
+        }
+    }
+
+    /// Highlight the paragraph being played. Scroll to it only when it changes, and not
+    /// soon after the user scrolled the list by hand.
+    fn follow_playback(&mut self) {
+        let current = if self.snapshot_is_selected() {
+            current_paragraph(
+                &self.transcript_paragraphs,
+                self.player_snapshot.position_ms,
+            )
+        } else {
+            None
+        };
+        if current == self.current_paragraph {
+            return;
+        }
+        self.current_paragraph = current;
+        let since_scroll = self.transcript_scrolled_at.get().map(|at| at.elapsed());
+        if let Some(index) = current.filter(|_| may_auto_scroll(since_scroll)) {
+            self.transcript_list.scroll_to_reveal_item(index);
+        }
+    }
+
+    /// Keep the seek slider on the shown position, unless the user is dragging it.
+    fn sync_seek_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.seek_drag.is_some() {
+            return;
+        }
+        let position_ms = self.shown_position_ms();
+        let value = seek_value(position_ms, self.selected_duration_ms());
+        if (value - self.seek_slider_value).abs() < f32::EPSILON {
+            return;
+        }
+        self.seek_slider_value = value;
+        self.seek_slider
+            .update(cx, |slider, cx| slider.set_value(value, window, cx));
+    }
+
+    fn shown_position_ms(&self) -> u64 {
+        shown_position_ms(
+            self.snapshot_is_selected(),
+            self.player_snapshot.position_ms,
+            self.idle_position_ms,
+            self.seek_drag,
+        )
     }
 
     fn select_library_row(
@@ -1075,6 +1214,7 @@ impl MainWindow {
     ) {
         if self.library_selected != id {
             self.player.stop();
+            self.reset_player_position();
             self.clear_transcript();
         }
         self.library_selected = id;
@@ -1091,12 +1231,20 @@ impl MainWindow {
         let Some(entry) = self.library_catalog.find(id) else {
             return;
         };
-        if entry.info.container() != crate::domain::recording::RecordingContainer::Wav {
-            self.presentation
-                .set_notice(Some("Only WAV playback is available."));
+        if entry.info.container() != RecordingContainer::Wav {
             return;
         }
-        self.player.play(id, entry.audio_path.clone(), 0);
+        match play_action(
+            self.player_snapshot.phase,
+            self.snapshot_is_selected(),
+            self.idle_position_ms,
+        ) {
+            PlayAction::Pause => self.player.pause(),
+            PlayAction::Resume => self.player.resume(),
+            PlayAction::Play { start_ms } => {
+                self.player.play(id, entry.audio_path.clone(), start_ms);
+            }
+        }
     }
 
     fn rename_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1350,7 +1498,8 @@ fn logical_bounds(window: &Window) -> Option<LogicalRect> {
 }
 
 impl Render for MainWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_seek_slider(window, cx);
         let selected = match self.presentation.tab() {
             AppTab::Record => 0,
             AppTab::Recordings => 1,
@@ -1448,7 +1597,12 @@ impl Render for MainWindow {
                     .track_scroll(&self.library_scroll)
                     .into_any_element()
                 });
-                let playing = self.player_snapshot.phase == PlayerPhase::Playing;
+                let playing = self.snapshot_is_selected()
+                    && self.player_snapshot.phase == PlayerPhase::Playing;
+                let playable = self
+                    .library_selected
+                    .and_then(|id| self.library_catalog.find(id))
+                    .is_some_and(|entry| entry.info.container() == RecordingContainer::Wav);
                 let error = self.library_catalog.error.map(SharedString::from);
                 let selected_id = self.library_selected;
                 let status = selected_id
@@ -1478,7 +1632,6 @@ impl Render for MainWindow {
                 let refresh_entity = entity.clone();
                 let folder_entity = entity.clone();
                 let play_entity = entity.clone();
-                let stop_entity = entity.clone();
                 let rename_entity = entity.clone();
                 let delete_entity = entity.clone();
                 let transcribe_entity = entity.clone();
@@ -1499,12 +1652,6 @@ impl Render for MainWindow {
                     play: Rc::new(move |_event, _window, cx| {
                         play_entity.update(cx, |view, cx| {
                             view.play_selected();
-                            cx.notify();
-                        });
-                    }),
-                    stop: Rc::new(move |_event, _window, cx| {
-                        stop_entity.update(cx, |view, cx| {
-                            view.player.stop();
                             cx.notify();
                         });
                     }),
@@ -1556,8 +1703,13 @@ impl Render for MainWindow {
                         list: library_list,
                         count: self.library_rows.len(),
                         selected: selected_row.as_ref(),
-                        playing,
-                        play_label: play_button_label(self.player_snapshot.phase),
+                        player: PlayerCard {
+                            playing,
+                            playable,
+                            position_ms: self.shown_position_ms(),
+                            duration_ms: self.selected_duration_ms(),
+                            seek: &self.seek_slider,
+                        },
                         error,
                         pane,
                         can_transcribe_again: can_again,

@@ -1,6 +1,6 @@
 # Skrivli Recordings page redesign plan
 
-**Status:** Phases 0 to 5 done (Phase 5 hardware checks open). Phases 6 and 7 are not started. The code snippets have not been compiled.
+**Status:** Phases 0 to 6 done (Phase 5 hardware checks and Phase 6 manual checks open). Phase 7 is not started. The code snippets have not been compiled.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
 
@@ -490,20 +490,20 @@ Answer these on real hardware before the rest of the phase, and record the resul
 **Goal:** give the user a real player, and connect it to the transcript.
 
 **Add**
-- [ ] Add a `player_card`: round Play/Pause button, current time, seek bar, total time. Times use `format_duration_ms`.
-- [ ] Add a seek `Slider` with its own `SliderState` in `MainWindow`, following the existing `gain_slider`.
-- [ ] Add a `seek_drag: Option<u64>` field. While the user drags, show the drag position and ignore position updates. Send the seek only on `SliderEvent::Release`.
-- [ ] Add a pure `current_paragraph(paragraphs, position_ms) -> Option<usize>`. Paragraphs with no timestamp are skipped.
-- [ ] Add a tinted background to the current paragraph's list item while a recording is playing or paused. A paragraph can span up to 60 seconds (`PARAGRAPH_MAX_SPAN`), so the highlight moves by paragraph, not by line.
-- [ ] Add auto-scroll with `ListState::scroll_to_reveal_item`. Call it only when the current paragraph changes, and not within 5 seconds of the user scrolling the list.
+- [x] Add a `player_card`: round Play/Pause button, current time, seek bar, total time. Times use `format_duration_ms`.
+- [x] Add a seek `Slider` with its own `SliderState` in `MainWindow`, following the existing `gain_slider`.
+- [x] Add a `seek_drag: Option<u64>` field. While the user drags, show the drag position and ignore position updates. Send the seek only on `SliderEvent::Release`.
+- [x] Add a pure `current_paragraph(paragraphs, position_ms) -> Option<usize>`. Paragraphs with no timestamp are skipped.
+- [x] Add a tinted background to the current paragraph's list item while a recording is playing or paused. A paragraph can span up to 60 seconds (`PARAGRAPH_MAX_SPAN`), so the highlight moves by paragraph, not by line.
+- [x] Add auto-scroll with `ListState::scroll_to_reveal_item`. Call it only when the current paragraph changes, and not within 5 seconds of the user scrolling the list.
 
 **Change**
-- [ ] Change the Play action: Idle plays from the slider position, Playing pauses, and Paused resumes.
-- [ ] Change the player to show position 0 when `player_snapshot.recording_id` is not the selected recording.
-- [ ] Change non-WAV recordings so the player is disabled with the tooltip "Only WAV playback is available", replacing the notice at `main_window.rs:1030`.
+- [x] Change the Play action: Idle plays from the slider position, Playing pauses, and Paused resumes.
+- [x] Change the player to show position 0 when `player_snapshot.recording_id` is not the selected recording.
+- [x] Change non-WAV recordings so the player is disabled with the tooltip "Only WAV playback is available", replacing the notice at `main_window.rs:1030`.
 
 **Remove**
-- [ ] Remove the Stop button, the "Playing…" label and the separate "Playing" text line.
+- [x] Remove the Stop button, the "Playing…" label and the separate "Playing" text line.
 
 **Sketch (not compiled)**
 
@@ -529,13 +529,19 @@ h_flex()
 ```
 
 **Tests to write first**
-- [ ] `current_paragraph`: before the first paragraph, between paragraphs, after the last, and with paragraphs that have no timestamp.
-- [ ] Play action: each phase produces the right command.
-- [ ] Position shows 0 when the snapshot is for another recording.
+- [x] `current_paragraph`: before the first paragraph, between paragraphs, after the last, and with paragraphs that have no timestamp.
+- [x] Play action: each phase produces the right command.
+- [x] Position shows 0 when the snapshot is for another recording.
 
 **Spec:** in section 5 of `skrivli-product.md`, change "play / stop" to play, pause and seek, and add the paragraph highlight.
 
 **Done when:** on a recording longer than one hour, dragging, pausing, resuming and changing selection all work, and the bar never jumps during a drag. The highlight follows playback, and scrolling by hand is not pulled back straight away.
+
+---
+
+---
+
+**Evidence (Phase 6):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (327 lib tests, no hardware) and `cargo build` pass. New tests: `current_paragraph` (before the first, between, on a boundary, after the last, untimed paragraphs, empty list), `play_action` (each phase, and a snapshot for another recording), `shown_position_ms` (other recording, resting position, drag wins), `seek_value`/`seek_position_ms` (round trip, unknown length, overshoot) and `may_auto_scroll` (5 s rule). The tests for the pure functions were red against `unimplemented` stubs first; the Play and Pause icons, the card and the window wiring were not test-driven. `play_button_label`, the Stop button, `RecordingsActions::stop` and the `allow(dead_code)` on `pause`, `resume`, `seek` and the commands are gone. **Design notes:** the seek slider runs 0 to 100000 (a fraction of the length), because Kit's `SliderState` cannot change its maximum after creation; `seek_drag` is set on `SliderEvent::Change` and the seek goes out on `Release` (while Idle the position is kept in `idle_position_ms` and used by the next Play). `idle_position_ms` resets on selection change and when playback returns to Idle. Play and Pause icons are embedded Lucide SVGs, since Kit's default set lacks them. The list's scroll handler (`ListState::set_scroll_handler`) records the time of the last user scroll. **Deviations:** the Play/Pause button is disabled for non-WAV files, and Kit may not show a tooltip on a disabled button (check). A failed seek is still only logged. **Not verified (app not run):** the card's look, Play/Pause/seek on a recording longer than one hour, no jump of the bar during a drag, a brief flicker back to the old position after releasing a seek, the highlight tint, auto-scroll and the 5 s pause after manual scroll, the non-WAV tooltip.
 
 ---
 

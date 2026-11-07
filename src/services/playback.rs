@@ -47,8 +47,6 @@ impl PlayerSnapshot {
     }
 }
 
-// Pause, Resume and Seek are driven by the player card in Phase 6.
-#[allow(dead_code)]
 enum PlayerCommand {
     Play {
         id: RecordingId,
@@ -91,17 +89,14 @@ impl PlayerHost {
         let _ = self.tx.send(PlayerCommand::Play { id, path, start_ms });
     }
 
-    #[allow(dead_code)]
     pub(crate) fn pause(&self) {
         let _ = self.tx.send(PlayerCommand::Pause);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn resume(&self) {
         let _ = self.tx.send(PlayerCommand::Resume);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn seek(&self, position_ms: u64) {
         let _ = self.tx.send(PlayerCommand::Seek { position_ms });
     }

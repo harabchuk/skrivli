@@ -8,6 +8,7 @@ use gpui_kit::component::empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitl
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::progress::Progress;
+use gpui_kit::component::slider::{Slider, SliderState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
@@ -15,15 +16,17 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, Anchor, AnyElement, App, AppContext as _, ClickEvent, Div, InteractiveElement as _,
-    IntoElement, ParentElement, SharedString, Stateful, StatefulInteractiveElement as _, Styled,
-    Window,
+    div, px, Anchor, AnyElement, App, AppContext as _, ClickEvent, Div, Entity,
+    InteractiveElement as _, IntoElement, ParentElement, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled, Window,
 };
 
 // Lucide icons (ISC). Pencil and Trash are in the full catalog but not in Kit's
-// default `Assets`, so they are embedded here. Ellipsis, FolderOpen and
+// default `Assets`, so they are embedded here, as are Lucide Play and Pause. Ellipsis, FolderOpen and
 // TriangleAlert are in the default set.
 const PENCIL_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>"#;
+const PLAY_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>"#;
+const PAUSE_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/></svg>"#;
 const TRASH_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>"#;
 
 use std::rc::Rc;
@@ -382,7 +385,6 @@ pub(crate) struct RecordingsActions {
     pub(crate) refresh: ClickAction,
     pub(crate) open_folder: ClickAction,
     pub(crate) play: ClickAction,
-    pub(crate) stop: ClickAction,
     pub(crate) rename: ClickAction,
     pub(crate) delete: ClickAction,
     pub(crate) transcribe: ClickAction,
@@ -402,14 +404,80 @@ pub(crate) struct RecordingsView<'a> {
     pub(crate) list: Option<AnyElement>,
     pub(crate) count: usize,
     pub(crate) selected: Option<&'a RecordingRow>,
-    pub(crate) playing: bool,
-    pub(crate) play_label: SharedString,
+    pub(crate) player: PlayerCard<'a>,
     pub(crate) error: Option<SharedString>,
     pub(crate) pane: TranscriptPane,
     /// Whether the `⋯` menu offers Transcribe again.
     pub(crate) can_transcribe_again: bool,
     /// The scrolling paragraph list. Used only by the Ready pane.
     pub(crate) transcript_list: Option<AnyElement>,
+}
+
+/// Data for the player card under the title row.
+pub(crate) struct PlayerCard<'a> {
+    /// Shows Pause instead of Play.
+    pub(crate) playing: bool,
+    /// False for formats the player cannot open. The card is then disabled.
+    pub(crate) playable: bool,
+    pub(crate) position_ms: u64,
+    pub(crate) duration_ms: Option<u64>,
+    pub(crate) seek: &'a Entity<SliderState>,
+}
+
+const NOT_PLAYABLE_TOOLTIP: &str = "Only WAV playback is available";
+
+fn time_label(text: String, cx: &App) -> Div {
+    div()
+        .flex_none()
+        .min_w(px(48.))
+        .text_sm()
+        .text_color(cx.theme().muted_foreground)
+        .child(text)
+}
+
+/// Round Play/Pause button, current time, seek bar, total time.
+fn player_card(card: PlayerCard<'_>, play_pause: &ClickAction, cx: &App) -> Div {
+    let PlayerCard {
+        playing,
+        playable,
+        position_ms,
+        duration_ms,
+        seek,
+    } = card;
+    let label = if playing { "Pause" } else { "Play" };
+    let tooltip = if playable {
+        label
+    } else {
+        NOT_PLAYABLE_TOOLTIP
+    };
+    let total = duration_ms.map_or_else(|| "—".to_string(), format_duration_ms);
+    h_flex()
+        .flex_shrink_0()
+        .h(px(52.))
+        .gap_3()
+        .px_3()
+        .items_center()
+        .border_1()
+        .border_color(cx.theme().border)
+        .rounded(px(10.))
+        .child(
+            Button::new("play-pause")
+                .primary()
+                .rounded(px(20.))
+                .icon(Icon::default().data(if playing { PAUSE_SVG } else { PLAY_SVG }))
+                .tooltip(tooltip)
+                .accessibility_label(label)
+                .disabled(!playable)
+                .on_click(click(play_pause)),
+        )
+        .child(time_label(format_duration_ms(position_ms), cx))
+        .child(
+            Slider::new(seek)
+                .flex_1()
+                .disabled(!playable || duration_ms.is_none())
+                .accessibility_label("Seek"),
+        )
+        .child(time_label(total, cx))
 }
 
 fn click(action: &ClickAction) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
@@ -644,8 +712,7 @@ pub(crate) fn recordings_tab(
         list,
         count,
         selected,
-        playing,
-        play_label,
+        player,
         error,
         pane,
         can_transcribe_again,
@@ -680,22 +747,7 @@ pub(crate) fn recordings_tab(
             .min_h_0()
             .gap_3()
             .child(title_row(row, &actions, can_transcribe_again, cx))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("play-recording")
-                            .primary()
-                            .label(play_label)
-                            .on_click(click(&actions.play)),
-                    )
-                    .child(
-                        Button::new("stop-recording-playback")
-                            .label("Stop")
-                            .disabled(!playing)
-                            .on_click(click(&actions.stop)),
-                    ),
-            )
+            .child(player_card(player, &actions.play, cx))
             .child(transcript_pane_view(pane, transcript_list, &actions, cx))
             .into_any_element(),
         None => Empty::new()
@@ -924,24 +976,90 @@ pub(crate) fn failure_reason(
     Some(SharedString::from(detail.to_string()))
 }
 
-pub(crate) fn play_button_label(phase: PlayerPhase) -> SharedString {
+/// How long after the user scrolls the transcript before playback may scroll it again.
+pub(crate) const AUTO_SCROLL_PAUSE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether the list may follow playback, given the time since the user last scrolled it.
+pub(crate) fn may_auto_scroll(since_user_scroll: Option<std::time::Duration>) -> bool {
+    since_user_scroll.is_none_or(|elapsed| elapsed >= AUTO_SCROLL_PAUSE)
+}
+
+/// Slider resolution. The slider runs 0..=SEEK_STEPS and maps to the recording length.
+pub(crate) const SEEK_STEPS: f32 = 100_000.;
+
+/// What the round Play/Pause button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PlayAction {
+    Play { start_ms: u64 },
+    Pause,
+    Resume,
+}
+
+/// Idle (or another recording, or an error) plays from the slider position, Playing
+/// pauses, and Paused resumes.
+pub(crate) fn play_action(
+    phase: PlayerPhase,
+    snapshot_is_selected: bool,
+    slider_position_ms: u64,
+) -> PlayAction {
     match phase {
-        PlayerPhase::Playing => SharedString::from("Playing…"),
-        _ => SharedString::from("Play"),
+        PlayerPhase::Playing if snapshot_is_selected => PlayAction::Pause,
+        PlayerPhase::Paused if snapshot_is_selected => PlayAction::Resume,
+        _ => PlayAction::Play {
+            start_ms: slider_position_ms,
+        },
     }
+}
+
+/// Position to show for the selected recording: the drag position while dragging, the
+/// player position when the snapshot is for this recording, and otherwise the resting
+/// position (0 unless the user moved the slider while idle).
+pub(crate) fn shown_position_ms(
+    snapshot_is_selected: bool,
+    snapshot_position_ms: u64,
+    resting_ms: u64,
+    seek_drag: Option<u64>,
+) -> u64 {
+    seek_drag.unwrap_or(if snapshot_is_selected {
+        snapshot_position_ms
+    } else {
+        resting_ms
+    })
+}
+
+/// Slider value for a position. Zero when the length is unknown.
+pub(crate) fn seek_value(position_ms: u64, duration_ms: Option<u64>) -> f32 {
+    match duration_ms {
+        Some(length) if length > 0 => {
+            (position_ms.min(length) as f64 / length as f64 * f64::from(SEEK_STEPS)) as f32
+        }
+        _ => 0.,
+    }
+}
+
+/// Position for a slider value, clamped to the recording length.
+pub(crate) fn seek_position_ms(value: f32, duration_ms: Option<u64>) -> u64 {
+    let Some(length) = duration_ms else {
+        return 0;
+    };
+    let fraction = f64::from(value.clamp(0., SEEK_STEPS)) / f64::from(SEEK_STEPS);
+    ((fraction * length as f64) as u64).min(length)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        library_items, set_row_status, LibraryItem, RecordingRow, RowBadge, HEADER_HEIGHT_PX,
+        library_items, may_auto_scroll, play_action, seek_position_ms, seek_value, set_row_status,
+        shown_position_ms, LibraryItem, PlayAction, RecordingRow, RowBadge, HEADER_HEIGHT_PX,
         ROW_HEIGHT_PX,
     };
     use crate::domain::ids::RecordingId;
     use crate::domain::recording::{
         RecordingContainer, RecordingDay, RecordingInfo, SidecarState, TranscriptStatus,
     };
+    use crate::services::playback::PlayerPhase;
     use gpui_kit::SharedString;
+    use std::time::Duration;
 
     #[test]
     fn row_maps_metadata_for_display() {
@@ -1404,5 +1522,106 @@ mod tests {
 
         // Assert
         assert_eq!(heights, [HEADER_HEIGHT_PX, ROW_HEIGHT_PX]);
+    }
+
+    #[test]
+    fn play_action_maps_each_phase_to_a_command() {
+        // Arrange
+        let slider_ms = 42_000;
+
+        // Act
+        let idle = play_action(PlayerPhase::Idle, false, slider_ms);
+        let playing = play_action(PlayerPhase::Playing, true, slider_ms);
+        let paused = play_action(PlayerPhase::Paused, true, slider_ms);
+        let failed = play_action(PlayerPhase::Error, false, slider_ms);
+
+        // Assert
+        assert_eq!(idle, PlayAction::Play { start_ms: 42_000 });
+        assert_eq!(playing, PlayAction::Pause);
+        assert_eq!(paused, PlayAction::Resume);
+        assert_eq!(failed, PlayAction::Play { start_ms: 42_000 });
+    }
+
+    #[test]
+    fn play_action_plays_when_the_snapshot_is_for_another_recording() {
+        // Arrange
+        let slider_ms = 5_000;
+
+        // Act
+        let action = play_action(PlayerPhase::Playing, false, slider_ms);
+
+        // Assert
+        assert_eq!(action, PlayAction::Play { start_ms: 5_000 });
+    }
+
+    #[test]
+    fn position_is_zero_when_the_snapshot_is_for_another_recording() {
+        // Arrange / Act
+        let other = shown_position_ms(false, 9_000, 0, None);
+        let own = shown_position_ms(true, 9_000, 0, None);
+
+        // Assert
+        assert_eq!(other, 0);
+        assert_eq!(own, 9_000);
+    }
+
+    #[test]
+    fn resting_position_shows_when_idle() {
+        // Arrange / Act
+        let shown = shown_position_ms(false, 0, 12_000, None);
+
+        // Assert
+        assert_eq!(shown, 12_000);
+    }
+
+    #[test]
+    fn auto_scroll_waits_five_seconds_after_the_user_scrolls() {
+        // Arrange
+        let never = None;
+        let just_now = Some(Duration::from_millis(4_999));
+        let later = Some(Duration::from_secs(5));
+
+        // Act / Assert
+        assert!(may_auto_scroll(never));
+        assert!(!may_auto_scroll(just_now));
+        assert!(may_auto_scroll(later));
+    }
+
+    #[test]
+    fn drag_position_wins_over_playback_position() {
+        // Arrange / Act
+        let shown = shown_position_ms(true, 9_000, 0, Some(30_000));
+
+        // Assert
+        assert_eq!(shown, 30_000);
+    }
+
+    #[test]
+    fn seek_value_and_position_round_trip() {
+        // Arrange
+        let duration = Some(4_000_000);
+
+        // Act
+        let value = seek_value(1_000_000, duration);
+        let position = seek_position_ms(value, duration);
+
+        // Assert
+        assert!((value - 25_000.).abs() < 0.5);
+        assert!(position.abs_diff(1_000_000) <= 40);
+    }
+
+    #[test]
+    fn seek_handles_unknown_length_and_overshoot() {
+        // Arrange / Act
+        let value = seek_value(5_000, None);
+        let position = seek_position_ms(50_000., None);
+        let clamped = seek_position_ms(1_000_000., Some(10_000));
+        let past_end = seek_value(20_000, Some(10_000));
+
+        // Assert
+        assert_eq!(value, 0.);
+        assert_eq!(position, 0);
+        assert_eq!(clamped, 10_000);
+        assert_eq!(past_end, 100_000.);
     }
 }

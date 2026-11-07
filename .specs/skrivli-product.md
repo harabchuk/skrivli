@@ -127,10 +127,12 @@ Skrivli does not silently delete usable partial recordings.
 
 ### Detail and playback
 
-- Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · WAV`), then playback controls (play / stop).
+- Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · WAV`), then a player card.
 - A pencil icon next to the name (shown when the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Transcribe again…** (enabled only when the recording has a transcript and no job is queued or running) and **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
 - A warning note appears under the title when a recording was recovered after an interruption ("The end of this recording may be missing"), when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
-- Changing selection stops playback.
+- The player card has a round Play/Pause button, the current time, a seek bar and the total time. Play starts from the seek bar position, Pause keeps the position, and Play again resumes. Dragging the seek bar moves nothing until it is released. When a recording ends the player returns to the start. Only WAV recordings can be played: for other formats the player is disabled with the tooltip "Only WAV playback is available".
+- While a recording plays or is paused, the transcript paragraph being spoken is highlighted and the list scrolls to it when it changes. If you scroll the transcript yourself, it is not scrolled again for 5 seconds.
+- Changing selection, renaming or deleting stops playback.
 - Users can also open the recordings folder (list header icon button) and refresh the list (list header icon button).
 - Rename keeps related files together (audio, transcript, and metadata) when possible; partial failures are reported.
 - Delete asks for confirmation and sends files to the Recycle Bin rather than permanent erasure by default.

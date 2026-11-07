@@ -364,12 +364,27 @@ fn parse_digits(part: &str) -> Option<u64> {
     part.parse().ok()
 }
 
+/// Index of the paragraph being spoken at `position_ms`: the last one that starts at or
+/// before it. Paragraphs with no timestamp are skipped, and `None` means the position is
+/// before the first timestamped paragraph.
+pub(crate) fn current_paragraph(
+    paragraphs: &[TranscriptParagraph],
+    position_ms: u64,
+) -> Option<usize> {
+    paragraphs
+        .iter()
+        .enumerate()
+        .filter(|(_, paragraph)| paragraph.start_ms.is_some_and(|start| start <= position_ms))
+        .map(|(index, _)| index)
+        .next_back()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        cleanup_repeated_lines, format_timestamp, format_transcript, parse_transcript,
-        plan_windows, stitch_segments, TranscriptSegment, PARAGRAPH_MAX_SPAN, PARAGRAPH_PAUSE,
-        WINDOW_DURATION, WINDOW_OVERLAP,
+        cleanup_repeated_lines, current_paragraph, format_timestamp, format_transcript,
+        parse_transcript, plan_windows, stitch_segments, TranscriptSegment, PARAGRAPH_MAX_SPAN,
+        PARAGRAPH_PAUSE, WINDOW_DURATION, WINDOW_OVERLAP,
     };
     use std::time::Duration;
 
@@ -677,5 +692,85 @@ Second line."
             parsed,
             ["alpha", "beta", "gamma", "delta", "épsilon", "zeta"]
         );
+    }
+
+    const TIMED: &str = "[00:00:00] one
+
+[00:00:10] two
+
+[00:00:20] three
+";
+
+    #[test]
+    fn current_paragraph_is_none_before_the_first_timestamp() {
+        // Arrange
+        let paragraphs = parse_transcript(
+            "[00:00:05] one
+",
+        );
+
+        // Act
+        let index = current_paragraph(&paragraphs, 4_999);
+
+        // Assert
+        assert_eq!(index, None);
+    }
+
+    #[test]
+    fn current_paragraph_picks_the_last_one_that_has_started() {
+        // Arrange
+        let paragraphs = parse_transcript(TIMED);
+
+        // Act
+        let at_start = current_paragraph(&paragraphs, 0);
+        let between = current_paragraph(&paragraphs, 15_000);
+        let on_boundary = current_paragraph(&paragraphs, 10_000);
+
+        // Assert
+        assert_eq!(at_start, Some(0));
+        assert_eq!(between, Some(1));
+        assert_eq!(on_boundary, Some(1));
+    }
+
+    #[test]
+    fn current_paragraph_stays_on_the_last_one_after_the_end() {
+        // Arrange
+        let paragraphs = parse_transcript(TIMED);
+
+        // Act
+        let index = current_paragraph(&paragraphs, 3_600_000);
+
+        // Assert
+        assert_eq!(index, Some(2));
+    }
+
+    #[test]
+    fn current_paragraph_skips_paragraphs_without_a_timestamp() {
+        // Arrange
+        let paragraphs = parse_transcript(
+            "[00:00:00] one
+
+note without time
+",
+        );
+
+        // Act
+        let index = current_paragraph(&paragraphs, 30_000);
+
+        // Assert
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(index, Some(0));
+    }
+
+    #[test]
+    fn current_paragraph_is_none_for_an_empty_list() {
+        // Arrange
+        let paragraphs = parse_transcript("");
+
+        // Act
+        let index = current_paragraph(&paragraphs, 1_000);
+
+        // Assert
+        assert_eq!(index, None);
     }
 }
