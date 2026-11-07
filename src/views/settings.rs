@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(
             row,
             SettingsModelRow {
-                title: "Base".to_string(),
+                title: "Base (Multilingual)".to_string(),
                 description: "Good balance for most meetings · 56.9 MB".to_string(),
                 button: "Change model…",
                 in_use: true,

@@ -429,14 +429,22 @@ mod tests {
                         "filename": "ggml-base-q5_1.bin",
                         "bytes": {bytes},
                         "sha256": "{sha}",
-                        "default": true
+                        "default": true,
+                        "name": "Base",
+                        "description": "Test model",
+                        "speed": 2,
+                        "accuracy": 2
                     }},
                     {{
                         "id": "tiny-q5_1",
                         "filename": "ggml-tiny-q5_1.bin",
                         "bytes": {bytes},
                         "sha256": "{sha}",
-                        "default": false
+                        "default": false,
+                        "name": "Tiny",
+                        "description": "Test model",
+                        "speed": 3,
+                        "accuracy": 1
                     }}
                 ]
             }}"#
@@ -455,7 +463,11 @@ mod tests {
                     "filename": "ggml-base-q5_1.bin",
                     "bytes": {bytes},
                     "sha256": "{sha}",
-                    "default": true
+                    "default": true,
+                    "name": "Base",
+                    "description": "Test model",
+                    "speed": 2,
+                    "accuracy": 2
                 }}]
             }}"#
         );

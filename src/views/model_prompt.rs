@@ -1,6 +1,7 @@
 //! Transcription-model dialog. Selection, download, cancel, and retry stay off `render`.
 
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogClose;
@@ -11,6 +12,7 @@ use gpui_kit::{
 
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::format_size;
+use crate::infrastructure::ai::models::ModelManifest;
 use crate::services::models::ModelPhase;
 use crate::ui::components::dialog_style::{dialog_footer, dialog_subtitle, DIALOG_WIDTH};
 use crate::ui::components::model_card::{
@@ -21,7 +23,7 @@ use super::state::{ModelInstallState, ModelStatus};
 
 const SUBTITLE: &str = "Runs on this PC. Your audio never leaves it.";
 
-/// Friendly text for one manifest entry. Kept here because the manifest is an integrity file.
+/// Friendly text for one manifest entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ModelCopy<'a> {
     pub(crate) name: &'a str,
@@ -31,28 +33,26 @@ pub(crate) struct ModelCopy<'a> {
 }
 
 pub(crate) fn model_copy(id: &str) -> ModelCopy<'_> {
-    match id {
-        "tiny-q5_1" => ModelCopy {
-            name: "Tiny",
-            description: "Quick drafts and short notes",
-            ratings: Some((3, 1)),
+    match bundled_manifest().and_then(|manifest| manifest.by_id(id)) {
+        Some(entry) => ModelCopy {
+            name: entry.name(),
+            description: entry.description(),
+            ratings: Some(entry.ratings()),
         },
-        "base-q5_1" => ModelCopy {
-            name: "Base",
-            description: "Good balance for most meetings",
-            ratings: Some((2, 2)),
-        },
-        "small-q5_1" => ModelCopy {
-            name: "Small",
-            description: "Best accuracy, takes longer to run",
-            ratings: Some((1, 3)),
-        },
-        unknown => ModelCopy {
-            name: unknown,
+        None => ModelCopy {
+            name: id,
             description: "",
             ratings: None,
         },
     }
+}
+
+/// Parsed once, because the status bar asks for model copy on every render.
+fn bundled_manifest() -> Option<&'static ModelManifest> {
+    static MANIFEST: OnceLock<Option<ModelManifest>> = OnceLock::new();
+    MANIFEST
+        .get_or_init(|| ModelManifest::load_bundled().ok())
+        .as_ref()
 }
 
 /// What the footer offers. `Retry` only appears for the model that failed, because
@@ -389,10 +389,48 @@ mod tests {
         let missing = model_status_text(&ModelStatus::Missing);
 
         // Assert
-        assert_eq!(in_use_text.as_deref(), Some("Model: Base"));
-        assert_eq!(downloading_text.as_deref(), Some("Downloading Small 42%"));
+        assert_eq!(in_use_text.as_deref(), Some("Model: Base (Multilingual)"));
+        assert_eq!(
+            downloading_text.as_deref(),
+            Some("Downloading Small (Multilingual) 42%")
+        );
         assert_eq!(checking, None);
         assert_eq!(missing.as_deref(), Some("No model installed · Choose…"));
+    }
+
+    #[test]
+    fn copy_comes_from_the_manifest() {
+        // Arrange
+        let id = "kb-whisper-medium-q5_0";
+
+        // Act
+        let copy = model_copy(id);
+
+        // Assert
+        assert_eq!(copy.name, "KB-Whisper Medium (Swedish)");
+        assert_eq!(
+            copy.description,
+            "Tuned for Swedish, high accuracy, slowest to run"
+        );
+        assert_eq!(copy.ratings, Some((1, 3)));
+    }
+
+    #[test]
+    fn every_manifest_entry_name_marks_its_language() {
+        // Arrange
+        let manifest = ModelManifest::load_bundled().expect("manifest");
+        let marks = ["(Multilingual)", "(English)", "(Swedish)"];
+
+        // Act
+        let missing: Vec<&str> = manifest
+            .entries()
+            .iter()
+            .map(|entry| entry.id())
+            .filter(|id| !marks.iter().any(|mark| model_copy(id).name.ends_with(mark)))
+            .collect();
+
+        // Assert
+        assert!(missing.is_empty(), "no language in {missing:?}");
     }
 
     #[test]
@@ -565,10 +603,13 @@ mod tests {
         let missing = row_accessibility_label(&copy, ModelInstallState::NotInstalled);
 
         // Assert
-        assert_eq!(in_use, "Base, in use, speed 2 of 3, accuracy 2 of 3");
+        assert_eq!(
+            in_use,
+            "Base (Multilingual), in use, speed 3 of 3, accuracy 2 of 3"
+        );
         assert_eq!(
             missing,
-            "Base, not installed, speed 2 of 3, accuracy 2 of 3"
+            "Base (Multilingual), not installed, speed 3 of 3, accuracy 2 of 3"
         );
     }
 

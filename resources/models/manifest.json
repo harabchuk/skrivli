@@ -1,28 +1,99 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_base": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/",
   "license": "MIT",
   "models": [
-    {
-      "id": "tiny-q5_1",
-      "filename": "ggml-tiny-q5_1.bin",
-      "bytes": 32152673,
-      "sha256": "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7",
-      "default": false
-    },
     {
       "id": "base-q5_1",
       "filename": "ggml-base-q5_1.bin",
       "bytes": 59707625,
       "sha256": "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
-      "default": true
+      "default": true,
+      "name": "Base (Multilingual)",
+      "description": "Good balance for most meetings",
+      "speed": 3,
+      "accuracy": 2
     },
     {
       "id": "small-q5_1",
       "filename": "ggml-small-q5_1.bin",
       "bytes": 190085487,
       "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
-      "default": false
+      "default": false,
+      "name": "Small (Multilingual)",
+      "description": "Better accuracy, takes longer to run",
+      "speed": 2,
+      "accuracy": 2
+    },
+    {
+      "id": "large-v3-turbo-q5_0",
+      "filename": "ggml-large-v3-turbo-q5_0.bin",
+      "bytes": 574041195,
+      "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "default": false,
+      "name": "Large Turbo (Multilingual)",
+      "description": "Highest accuracy for most languages, slowest to run",
+      "speed": 1,
+      "accuracy": 3
+    },
+    {
+      "id": "base-en-q5_1",
+      "filename": "ggml-base.en-q5_1.bin",
+      "bytes": 59721011,
+      "sha256": "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f",
+      "default": false,
+      "name": "Base (English)",
+      "description": "Good balance for meetings in English",
+      "speed": 3,
+      "accuracy": 2
+    },
+    {
+      "id": "small-en-q5_1",
+      "filename": "ggml-small.en-q5_1.bin",
+      "bytes": 190098681,
+      "sha256": "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30",
+      "default": false,
+      "name": "Small (English)",
+      "description": "Better accuracy in English, takes longer to run",
+      "speed": 2,
+      "accuracy": 2
+    },
+    {
+      "id": "medium-en-q5_0",
+      "filename": "ggml-medium.en-q5_0.bin",
+      "bytes": 539225533,
+      "sha256": "76733e26ad8fe1c7a5bf7531a9d41917b2adc0f20f2e4f5531688a8c6cd88eb0",
+      "default": false,
+      "name": "Medium (English)",
+      "description": "High accuracy in English, slowest to run",
+      "speed": 1,
+      "accuracy": 3
+    },
+    {
+      "id": "kb-whisper-small-q5_0",
+      "filename": "ggml-kb-whisper-small-q5_0.bin",
+      "url": "https://huggingface.co/KBLab/kb-whisper-small/resolve/3564d61a42fc210ceaa55a22a96dd64478959c78/ggml-model-q5_0.bin",
+      "license": "Apache-2.0",
+      "bytes": 175209680,
+      "sha256": "6768836a51abc902e420c613153e6d418c90ea2774e913274d02ab23170225b7",
+      "default": false,
+      "name": "KB-Whisper Small (Swedish)",
+      "description": "Tuned for Swedish, better accuracy, takes longer to run",
+      "speed": 2,
+      "accuracy": 2
+    },
+    {
+      "id": "kb-whisper-medium-q5_0",
+      "filename": "ggml-kb-whisper-medium-q5_0.bin",
+      "url": "https://huggingface.co/KBLab/kb-whisper-medium/resolve/0abe10b9d7f75d0902656e5c06c5c4d549604dc5/ggml-model-q5_0.bin",
+      "license": "Apache-2.0",
+      "bytes": 539212484,
+      "sha256": "7f8762e0ade9e0073674c0d5acae942a0b1ea98add9baa008ee89c94eaba43d0",
+      "default": false,
+      "name": "KB-Whisper Medium (Swedish)",
+      "description": "Tuned for Swedish, high accuracy, slowest to run",
+      "speed": 1,
+      "accuracy": 3
     }
   ]
 }

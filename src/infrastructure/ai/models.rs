@@ -5,6 +5,7 @@
 
 #![allow(dead_code)] // Consumed by M6.1 UI / M6.3 worker once wired end-to-end.
 
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -40,6 +41,17 @@ pub(crate) struct ManifestEntry {
     sha256: String,
     #[serde(default)]
     default: bool,
+    /// Full download address, for a model hosted outside `source_base`.
+    #[serde(default)]
+    url: Option<String>,
+    /// Overrides the manifest-wide license.
+    #[serde(default)]
+    license: Option<String>,
+    name: String,
+    description: String,
+    /// General comparisons from 1 to 3, not measured on this PC.
+    speed: u8,
+    accuracy: u8,
 }
 
 impl ManifestEntry {
@@ -63,7 +75,27 @@ impl ManifestEntry {
         self.default
     }
 
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// (speed, accuracy), each out of 3.
+    pub(crate) fn ratings(&self) -> (u8, u8) {
+        (self.speed, self.accuracy)
+    }
+
+    pub(crate) fn license_override(&self) -> Option<&str> {
+        self.license.as_deref()
+    }
+
     pub(crate) fn download_url(&self, source_base: &str) -> String {
+        if let Some(url) = &self.url {
+            return url.clone();
+        }
         let base = source_base.trim_end_matches('/');
         format!("{base}/{}", self.filename)
     }
@@ -75,8 +107,30 @@ impl ModelManifest {
     }
 
     pub(crate) fn parse(json: &str) -> Result<Self, AppError> {
-        serde_json::from_str(json)
-            .map_err(|error| AppError::message("model manifest", error.to_string()))
+        let manifest: Self = serde_json::from_str(json)
+            .map_err(|error| AppError::message("model manifest", error.to_string()))?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    fn validate(&self) -> Result<(), AppError> {
+        let mut ids = HashSet::new();
+        let mut filenames = HashSet::new();
+        for entry in &self.models {
+            if !ids.insert(entry.id.as_str()) || !filenames.insert(entry.filename.as_str()) {
+                return Err(AppError::message(
+                    "model manifest",
+                    format!("duplicate id or filename at {}", entry.id),
+                ));
+            }
+            if !(1..=3).contains(&entry.speed) || !(1..=3).contains(&entry.accuracy) {
+                return Err(AppError::message(
+                    "model manifest",
+                    format!("rating out of range at {}", entry.id),
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn license(&self) -> &str {
@@ -420,9 +474,82 @@ mod tests {
             default.sha256(),
             "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"
         );
-        assert_eq!(manifest.entries().len(), 3);
+        assert_eq!(manifest.entries().len(), 11);
         assert!(manifest.by_id("tiny-q5_1").is_some());
         assert!(manifest.by_id("small-q5_1").is_some());
+        assert!(manifest.by_id("large-v3-turbo-q5_0").is_some());
+        assert!(manifest.by_id("medium-en-q5_0").is_some());
+    }
+
+    #[test]
+    fn entry_with_its_own_url_ignores_the_source_base() {
+        // Arrange
+        let manifest = bundled();
+        let swedish = manifest.by_id("kb-whisper-small-q5_0").expect("swedish");
+        let english = manifest.by_id("medium-en-q5_0").expect("english");
+
+        // Act
+        let swedish_url = swedish.download_url(manifest.source_base());
+        let english_url = english.download_url(manifest.source_base());
+
+        // Assert
+        assert_eq!(
+            swedish_url,
+            "https://huggingface.co/KBLab/kb-whisper-small/resolve/\
+             3564d61a42fc210ceaa55a22a96dd64478959c78/ggml-model-q5_0.bin"
+        );
+        assert_eq!(
+            english_url,
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en-q5_0.bin"
+        );
+    }
+
+    fn manifest_json(second_filename: &str, speed: u8) -> String {
+        format!(
+            r#"{{"schema_version":2,"source_base":"https://example.invalid/","license":"MIT",
+            "models":[
+              {{"id":"a","filename":"ggml-a.bin","bytes":1,"sha256":"00",
+                "name":"A","description":"a","speed":1,"accuracy":1}},
+              {{"id":"b","filename":"{second_filename}","bytes":1,"sha256":"00",
+                "name":"B","description":"b","speed":{speed},"accuracy":1}}
+            ]}}"#
+        )
+    }
+
+    #[test]
+    fn manifest_accepts_valid_entries() {
+        // Arrange
+        let json = manifest_json("ggml-b.bin", 3);
+
+        // Act
+        let parsed = ModelManifest::parse(&json);
+
+        // Assert
+        assert!(parsed.is_ok());
+    }
+
+    #[test]
+    fn manifest_rejects_two_models_sharing_a_local_file() {
+        // Arrange
+        let json = manifest_json("ggml-a.bin", 1);
+
+        // Act
+        let parsed = ModelManifest::parse(&json);
+
+        // Assert
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn manifest_rejects_a_rating_outside_one_to_three() {
+        // Arrange
+        let json = manifest_json("ggml-b.bin", 4);
+
+        // Act
+        let parsed = ModelManifest::parse(&json);
+
+        // Assert
+        assert!(parsed.is_err());
     }
 
     #[test]

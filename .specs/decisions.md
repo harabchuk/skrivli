@@ -133,6 +133,18 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 | `tiny-q5_1` | `ggml-tiny-q5_1.bin` | 32152673 | `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7` |
 | `base-q5_1` (DEFAULT) | `ggml-base-q5_1.bin` | 59707625 | `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898` |
 | `small-q5_1` | `ggml-small-q5_1.bin` | 190085487 | `ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb` |
+| `large-v3-turbo-q5_0` | `ggml-large-v3-turbo-q5_0.bin` | 574041195 | `394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2` |
+| `tiny-en-q5_1` | `ggml-tiny.en-q5_1.bin` | 32166155 | `c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b` |
+| `base-en-q5_1` | `ggml-base.en-q5_1.bin` | 59721011 | `4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f` |
+| `small-en-q5_1` | `ggml-small.en-q5_1.bin` | 190098681 | `bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30` |
+| `medium-en-q5_0` | `ggml-medium.en-q5_0.bin` | 539225533 | `76733e26ad8fe1c7a5bf7531a9d41917b2adc0f20f2e4f5531688a8c6cd88eb0` |
+| `kb-whisper-base-q5_0` | `ggml-kb-whisper-base-q5_0.bin` | 55295450 | `aead29b356bca8840e72a8dc2286e2d69e6702639751a1e60cb3c8eacefec546` |
+| `kb-whisper-small-q5_0` | `ggml-kb-whisper-small-q5_0.bin` | 175209680 | `6768836a51abc902e420c613153e6d418c90ea2774e913274d02ab23170225b7` |
+| `kb-whisper-medium-q5_0` | `ggml-kb-whisper-medium-q5_0.bin` | 539212484 | `7f8762e0ade9e0073674c0d5acae942a0b1ea98add9baa008ee89c94eaba43d0` |
+
+Added models read from the Hugging Face file API on 2026-11-07. KB-Whisper is **Apache-2.0** from `KBLab/kb-whisper-*`. Upstream, every size is named `ggml-model-q5_0.bin`, so each entry has a unique local `filename` and a `url` pinned to the commit read (base `1499d2d`, small `3564d61`, medium `0abe10b`).
+
+Display copy also lives in the manifest. Ratings were rescaled to fit the larger list: Tiny 3/1, Base 3/2, Small 2/2, Medium and Large Turbo 1/3 (speed/accuracy). They are general comparisons, not measurements. Swedish models depend on a language setting that does not exist yet: no code calls `set_language`.
 
 **Download policy:** explicit user action only (`infrastructure/ai/models.rs`). Write a temp sibling, report progress, honor cancel, verify size + SHA-256, promote with `platform::replace_file` only on match. Failed or cancelled downloads leave no accepted model. Bootstrap, recording stop, and background retry must not start a download. Discovery also accepts a user-picked `ggml-*.bin` path; missing / unreadable / unsupported are distinct `AppError` contexts.
 
