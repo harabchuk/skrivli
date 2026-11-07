@@ -31,7 +31,7 @@ People who take meetings or calls on Windows and want a private, local recording
 ## 2. Core user journey (v1)
 
 1. Install by unzipping a portable package and launching Skrivli.
-2. On first useful transcription, choose a transcription model from the list and download it. That dialog stays open until the chosen model is installed.
+2. On first useful transcription, choose a transcription model from the list and download it. The dialog can be closed at any time except while a download is running; closing it abandons that transcription. When the download finishes, the model becomes the one in use, the dialog closes, and the transcription starts without a second click.
 3. On the **Record** tab, pick microphone and system audio source if needed.
 4. Start recording (window, tray, or keyboard shortcut). Speak and/or play audio as usual.
 5. Stop recording. A finished audio file appears in the chosen folder and in the **Recordings** tab.
@@ -150,7 +150,7 @@ Transcription runs **after** a recording is finished. It does not produce live c
 ### Models
 
 - Transcription models are **not** bundled with the app.
-- On first transcription without a model, the user picks a model from the always-visible list. The chosen model is shown apart from the list, with its size and a notice that the download needs a network. Download starts only from the Download button. The dialog cannot be closed until that model is installed. Cancel and Retry apply to the download itself.
+- On first transcription without a model, the user picks a model from the always-visible list. The chosen model is shown apart from the list, with its size and a notice that the download needs a network. Clicking a model only highlights it; the model in use changes only when the user presses Use on an installed model or a download of it finishes. Download starts only from the Download button. The dialog can be closed at any time except during a download (Close, the X, Escape, or the backdrop), so a user with no network is never trapped. Cancel and Retry apply to the download itself, and Retry is offered only for the model that failed. If Transcribe opened the dialog, a finished download or Use closes it and starts that transcription; if the user opened it themselves it stays open.
 - Downloads happen only when the user starts them, with progress, cancel, and verification feedback. Corrupt or unsupported models are reported distinctly.
 - After installation, transcription works fully offline.
 - Users can choose among offered model sizes/variants and language settings when available.

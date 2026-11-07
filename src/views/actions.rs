@@ -33,6 +33,8 @@ pub(crate) enum AppCommand {
     DownloadModel,
     CancelModelDownload,
     RetryModelDownload,
+    /// Make the model highlighted in the dialog the one in use.
+    UseModel,
     Show,
     Hide,
     ToggleVisibility,
@@ -75,6 +77,7 @@ pub(crate) enum Effect {
     DownloadModel,
     CancelModelDownload,
     RetryModelDownload,
+    UseModel,
     /// Show the window. `recording_id` is set only when that row is still in the library.
     ShowSelect {
         recording_id: Option<RecordingId>,
@@ -123,6 +126,7 @@ pub(crate) fn apply_command(state: &mut Presentation, command: AppCommand) -> Ef
         AppCommand::DownloadModel => Effect::DownloadModel,
         AppCommand::CancelModelDownload => Effect::CancelModelDownload,
         AppCommand::RetryModelDownload => Effect::RetryModelDownload,
+        AppCommand::UseModel => Effect::UseModel,
         AppCommand::Show => {
             state.set_visible(true);
             state.set_pending_show(false);
@@ -421,6 +425,18 @@ mod tests {
         assert_eq!(download, Effect::DownloadModel);
         assert_eq!(cancel, Effect::CancelModelDownload);
         assert_eq!(retry, Effect::RetryModelDownload);
+    }
+
+    #[test]
+    fn use_model_command_returns_its_effect() {
+        // Arrange
+        let mut state = presentation();
+
+        // Act
+        let effect = apply_command(&mut state, AppCommand::UseModel);
+
+        // Assert
+        assert_eq!(effect, Effect::UseModel);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Resizable shell: Record and Recordings tabs, settings gear, and the status strip.
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -43,11 +44,11 @@ use crate::services::transcription::{JobPhase, TranscriptionHost, TranscriptionS
 use crate::ui::theme::{apply_theme, theme_icon};
 use crate::views::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
 use crate::views::hooks::ShellHooks;
-use crate::views::state::{AppTab, Presentation};
+use crate::views::state::{model_install_state, AppTab, ModelInstallState, Presentation};
 
 use super::model_prompt::{
-    catalog_row_label, open_model_alert, open_model_prompt, prompt_can_dismiss,
-    selected_model_line, CatalogRow, ModelPromptView,
+    after_model_ready, catalog_row_label, open_model_alert, open_model_prompt, selected_model_line,
+    AfterModelReady, CatalogRow, ModelPromptHandlers, ModelPromptView,
 };
 use super::recording::record_tab;
 use super::recordings::{
@@ -83,6 +84,8 @@ pub(crate) struct MainWindow {
     transcript_load: Option<Task<()>>,
     prompt_model_id: String,
     model_prompt_open: bool,
+    /// Set only when Transcribe found no model. Starts once a model is ready.
+    pending_transcription: Option<RecordingId>,
     recordings_table: Entity<TableState<RecordingsDelegate>>,
     _table_sub: Subscription,
     levels: Arc<LevelSnapshot>,
@@ -234,6 +237,8 @@ impl MainWindow {
         });
         let transcript_editor = cx.new(|cx| EditorState::new(window, cx).line_number(false));
         let prompt_model_id = settings.selected_model().to_string();
+        // Status surfaces need the installed list before the dialog ever opens.
+        model_host.refresh();
         let appearance_entity = cx.weak_entity();
         let appearance = window.observe_window_appearance(move |window, cx| {
             let Some(entity) = appearance_entity.upgrade() else {
@@ -273,6 +278,7 @@ impl MainWindow {
             transcript_load: None,
             prompt_model_id,
             model_prompt_open: false,
+            pending_transcription: None,
             recordings_table,
             _table_sub: table_sub,
             levels,
@@ -482,9 +488,24 @@ impl MainWindow {
                 });
             }
             Effect::Quit => self.quit_now(window),
-            Effect::DownloadModel => self.model_host.download(self.prompt_model_id.clone()),
+            Effect::DownloadModel => {
+                self.presentation
+                    .begin_download(self.prompt_model_id.clone());
+                self.model_host.download(self.prompt_model_id.clone());
+            }
             Effect::CancelModelDownload => self.model_host.cancel(),
-            Effect::RetryModelDownload => self.model_host.retry(),
+            Effect::RetryModelDownload => {
+                // The footer only offers Retry for the model the worker last tried.
+                self.presentation
+                    .begin_download(self.prompt_model_id.clone());
+                self.model_host.retry();
+            }
+            Effect::UseModel => {
+                self.settings
+                    .set_selected_model(self.prompt_model_id.clone());
+                self.hooks.save_settings(self.settings.clone());
+                self.finish_model_choice(window, cx);
+            }
         }
         cx.notify();
     }
@@ -660,18 +681,39 @@ impl MainWindow {
     ) {
         let previous = self.presentation.model_failure();
         self.presentation.apply_model(snapshot);
-        if self.model_prompt_open
-            && prompt_can_dismiss(self.presentation.model_phase())
-            && window.has_active_dialog(cx)
-        {
-            self.model_prompt_open = false;
-            window.close_dialog(cx);
+        if let Some(id) = self.presentation.take_installed_target() {
+            self.settings.set_selected_model(id.clone());
+            self.hooks.save_settings(self.settings.clone());
+            self.prompt_model_id = id;
+            self.finish_model_choice(window, cx);
         }
         if let Some(message) = self.presentation.model_failure() {
             if previous != Some(message) && is_distinct_model_message(message) {
                 open_model_alert(window, cx, message);
             }
         }
+    }
+
+    fn finish_model_choice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match after_model_ready(self.pending_transcription.take()) {
+            AfterModelReady::CloseAndTranscribe(recording_id) => {
+                if self.model_prompt_open {
+                    self.model_prompt_open = false;
+                    if window.has_active_dialog(cx) {
+                        window.close_dialog(cx);
+                    }
+                }
+                self.begin_transcription(recording_id, window, cx);
+            }
+            AfterModelReady::StayOpen => {}
+        }
+    }
+
+    /// Runs when the user dismisses the dialog. Abandons any Transcribe that was waiting.
+    fn model_prompt_closed(&mut self) {
+        self.model_prompt_open = false;
+        self.pending_transcription = None;
+        self.presentation.clear_download_target();
     }
 
     fn begin_transcription(
@@ -702,6 +744,9 @@ impl MainWindow {
             }
             Err(error) => {
                 tracing::error!(error = %error, "transcription model was not resolved");
+                if error.user_message() == MODEL_MISSING_MESSAGE {
+                    self.pending_transcription = Some(recording_id);
+                }
                 self.report_model_error(error.user_message(), window, cx);
             }
         }
@@ -713,7 +758,7 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if message == "The transcription model file is missing." {
+        if message == MODEL_MISSING_MESSAGE {
             self.open_model_prompt(window, cx);
             return;
         }
@@ -798,62 +843,77 @@ impl MainWindow {
     }
 
     fn open_model_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Never stack a second model dialog (the tray can open Settings over this one).
+        if self.model_prompt_open {
+            return;
+        }
         self.model_host.refresh();
         self.model_prompt_open = true;
-        self.ensure_prompt_selection();
+        self.reset_prompt_selection();
         let read_entity = cx.entity();
         let select_entity = read_entity.clone();
         let download_entity = read_entity.clone();
+        let use_entity = read_entity.clone();
         let cancel_entity = read_entity.clone();
         let retry_entity = read_entity.clone();
+        let closed_entity = read_entity.clone();
         open_model_prompt(
             window,
             cx,
             move |cx| read_entity.read(cx).model_prompt_view(),
-            move |id, _window, cx| {
-                select_entity.update(cx, |view, cx| {
-                    view.select_prompt_model(id);
-                    cx.notify();
-                });
-            },
-            move |_event, window, cx| {
-                download_entity.update(cx, |view, cx| {
-                    view.handle(AppCommand::DownloadModel, window, cx);
-                });
-            },
-            move |_event, window, cx| {
-                cancel_entity.update(cx, |view, cx| {
-                    view.handle(AppCommand::CancelModelDownload, window, cx);
-                });
-            },
-            move |_event, window, cx| {
-                retry_entity.update(cx, |view, cx| {
-                    view.handle(AppCommand::RetryModelDownload, window, cx);
-                });
+            ModelPromptHandlers {
+                on_select: Rc::new(move |id, _window, cx| {
+                    select_entity.update(cx, |view, cx| {
+                        view.select_prompt_model(id);
+                        cx.notify();
+                    });
+                }),
+                on_download: Rc::new(move |_event, window, cx| {
+                    download_entity.update(cx, |view, cx| {
+                        view.handle(AppCommand::DownloadModel, window, cx);
+                    });
+                }),
+                on_use: Rc::new(move |_event, window, cx| {
+                    use_entity.update(cx, |view, cx| {
+                        view.handle(AppCommand::UseModel, window, cx);
+                    });
+                }),
+                on_cancel: Rc::new(move |_event, window, cx| {
+                    cancel_entity.update(cx, |view, cx| {
+                        view.handle(AppCommand::CancelModelDownload, window, cx);
+                    });
+                }),
+                on_retry: Rc::new(move |_event, window, cx| {
+                    retry_entity.update(cx, |view, cx| {
+                        view.handle(AppCommand::RetryModelDownload, window, cx);
+                    });
+                }),
+                on_closed: Rc::new(move |_event, _window, cx| {
+                    closed_entity.update(cx, |view, cx| {
+                        view.model_prompt_closed();
+                        cx.notify();
+                    });
+                }),
             },
         );
     }
 
-    fn ensure_prompt_selection(&mut self) {
+    /// Each opening starts on the saved model, never on the last highlight.
+    fn reset_prompt_selection(&mut self) {
         let Ok(manifest) = ModelManifest::load_bundled() else {
             return;
         };
-        if manifest.by_id(&self.prompt_model_id).is_some() {
-            return;
-        }
-        if manifest.by_id(self.settings.selected_model()).is_some() {
-            self.prompt_model_id = self.settings.selected_model().to_string();
-            return;
-        }
-        if let Some(entry) = manifest.default_entry() {
+        let entry = manifest
+            .by_id(self.settings.selected_model())
+            .or_else(|| manifest.default_entry());
+        if let Some(entry) = entry {
             self.prompt_model_id = entry.id().to_string();
         }
     }
 
+    /// Highlights only. The saved model changes on Use or after a finished download.
     fn select_prompt_model(&mut self, id: &str) {
         self.prompt_model_id = id.to_string();
-        self.settings.set_selected_model(id);
-        self.hooks.save_settings(self.settings.clone());
     }
 
     fn model_prompt_view(&self) -> ModelPromptView {
@@ -868,6 +928,8 @@ impl MainWindow {
                 progress,
                 failure,
                 phase,
+                can_use: false,
+                selected_is_target: false,
             };
         };
         let selected = manifest.by_id(&self.prompt_model_id);
@@ -888,6 +950,15 @@ impl MainWindow {
             progress,
             failure,
             phase,
+            selected_is_target: selected
+                .is_some_and(|entry| self.presentation.download_target() == Some(entry.id())),
+            can_use: selected.is_some_and(|entry| {
+                model_install_state(
+                    entry.id(),
+                    self.settings.selected_model(),
+                    self.presentation.model_files(),
+                ) == ModelInstallState::Installed
+            }),
         }
     }
 
@@ -1185,6 +1256,8 @@ fn read_transcript_file(
         Err(error) => Err(AppError::io("read transcript", error).user_message()),
     }
 }
+
+const MODEL_MISSING_MESSAGE: &str = "The transcription model file is missing.";
 
 fn is_distinct_model_message(message: &str) -> bool {
     matches!(

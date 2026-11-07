@@ -195,6 +195,10 @@ Join steps at the change were 0.00348, 0.00012, 0.00488, and 0.00205. The larges
 
 **Scroll:** `InputBaseState::set_value` resets selection and scroll. A transcription progress snapshot must not call it and must not recreate the `EditorState` entity. Load `<basename>.txt` with `background_spawn` inside `spawn_in`, then `set_value` only when the selected recording's text actually changes.
 
+## D-16 — Model dialog can be closed (decision 1 of the model/settings UI plan)
+
+**Outcome:** Approved. The transcription-model dialog can be closed at any time except during a download. This reverses the earlier rule that it stayed open until a model was installed. Closing abandons the pending Transcribe and leaves the saved model unchanged. Phase 1 of `skrivli-model-settings-ui-plan.md` implements it; the hardware/manual checks in that plan's section 6 have not been run.
+
 ## D-15 — M7.2 manual pass not run
 
 **Outcome:** Automated tests cover the completion-notification gate, balloon-click selection, and rename/delete identity safety with a fake inference port, a temp directory, and no toast. The hardware journey was **not run**. Do not treat any of the following as observed:

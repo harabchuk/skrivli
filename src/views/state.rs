@@ -34,6 +34,8 @@ pub(crate) struct Presentation {
     model_progress: Option<u8>,
     model_failure: Option<&'static str>,
     model_files: Vec<ModelFile>,
+    model_files_known: bool,
+    download_target: Option<String>,
 }
 
 impl Presentation {
@@ -58,6 +60,8 @@ impl Presentation {
             model_progress: None,
             model_failure: None,
             model_files: Vec::new(),
+            model_files_known: false,
+            download_target: None,
         }
     }
 
@@ -126,9 +130,42 @@ impl Presentation {
         self.model_phase
     }
 
-    #[allow(dead_code)] // The prompt lists the catalog; accepted files stay on the snapshot.
     pub(crate) fn model_files(&self) -> &[ModelFile] {
         &self.model_files
+    }
+
+    /// False until the worker has reported the installed list once.
+    #[cfg_attr(not(test), allow(dead_code))] // Read by the status bar in a later phase.
+    pub(crate) fn model_files_known(&self) -> bool {
+        self.model_files_known
+    }
+
+    pub(crate) fn download_target(&self) -> Option<&str> {
+        self.download_target.as_deref()
+    }
+
+    /// Marks the download busy right away, so a double click cannot queue a second one.
+    pub(crate) fn begin_download(&mut self, id: impl Into<String>) {
+        self.download_target = Some(id.into());
+        self.model_phase = ModelPhase::Downloading;
+        self.model_failure = None;
+        self.model_progress = Some(0);
+    }
+
+    pub(crate) fn clear_download_target(&mut self) {
+        self.download_target = None;
+    }
+
+    /// The finished model, once. A later Idle snapshot from a refresh finds nothing here.
+    pub(crate) fn take_installed_target(&mut self) -> Option<String> {
+        if self.model_phase != ModelPhase::Ready {
+            return None;
+        }
+        let target = self.download_target.take()?;
+        self.model_files
+            .iter()
+            .any(|file| file.variant_id.as_deref() == Some(target.as_str()))
+            .then_some(target)
     }
 
     /// Reduce a transcription snapshot into the status strip and the selected row.
@@ -158,6 +195,7 @@ impl Presentation {
     }
 
     pub(crate) fn apply_model(&mut self, snapshot: ModelSnapshot) {
+        self.model_files_known = true;
         self.model_phase = snapshot.phase;
         self.model_failure = snapshot.failure;
         if snapshot.phase == ModelPhase::Downloading || snapshot.phase == ModelPhase::Ready {
@@ -273,12 +311,35 @@ impl Presentation {
     }
 }
 
+/// Whether one model is usable. Selected but not installed counts as `NotInstalled`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModelInstallState {
+    InUse,
+    Installed,
+    NotInstalled,
+}
+
+pub(crate) fn model_install_state(
+    id: &str,
+    selected_id: &str,
+    files: &[ModelFile],
+) -> ModelInstallState {
+    let installed = files
+        .iter()
+        .any(|file| file.variant_id.as_deref() == Some(id));
+    match (installed, id == selected_id) {
+        (true, true) => ModelInstallState::InUse,
+        (true, false) => ModelInstallState::Installed,
+        (false, _) => ModelInstallState::NotInstalled,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Presentation;
+    use super::{model_install_state, ModelInstallState, Presentation};
     use crate::domain::ids::{JobId, RecordingId};
     use crate::domain::recording::{RecordPhase, TranscriptStatus};
-    use crate::services::models::{ModelPhase, ModelSnapshot};
+    use crate::services::models::{ModelFile, ModelPhase, ModelSnapshot};
     use crate::services::transcription::{JobPhase, TranscriptionSnapshot};
     use crate::views::state::AppTab;
 
@@ -402,5 +463,116 @@ mod tests {
         // Assert
         assert_eq!(state.model_progress(), Some(80));
         assert!(state.status_line().starts_with("Recording "));
+    }
+
+    fn model_snapshot(phase: ModelPhase, installed: &[&str]) -> ModelSnapshot {
+        ModelSnapshot {
+            phase,
+            progress_percent: 0,
+            failure: None,
+            notice: None,
+            total_bytes: 0,
+            models: installed
+                .iter()
+                .map(|id| ModelFile {
+                    filename: format!("ggml-{id}.bin"),
+                    variant_id: Some((*id).to_string()),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn install_state_needs_the_file_and_the_selection() {
+        // Arrange
+        let files = model_snapshot(ModelPhase::Idle, &["a"]).models;
+        let unmapped = [ModelFile {
+            filename: "ggml-x.bin".to_string(),
+            variant_id: None,
+        }];
+
+        // Act
+        let in_use = model_install_state("a", "a", &files);
+        let installed = model_install_state("a", "b", &files);
+        let missing = model_install_state("b", "b", &files);
+        let no_variant = model_install_state("x", "x", &unmapped);
+
+        // Assert
+        assert_eq!(in_use, ModelInstallState::InUse);
+        assert_eq!(installed, ModelInstallState::Installed);
+        assert_eq!(missing, ModelInstallState::NotInstalled);
+        assert_eq!(no_variant, ModelInstallState::NotInstalled);
+    }
+
+    #[test]
+    fn model_list_is_unknown_until_the_first_snapshot() {
+        // Arrange
+        let mut state = presentation();
+
+        // Act
+        let before = state.model_files_known();
+        state.apply_model(model_snapshot(ModelPhase::Idle, &[]));
+        let after = state.model_files_known();
+
+        // Assert
+        assert!(!before);
+        assert!(after);
+    }
+
+    #[test]
+    fn begin_download_is_busy_before_the_first_snapshot() {
+        // Arrange
+        let mut state = presentation();
+
+        // Act
+        state.begin_download("a");
+
+        // Assert
+        assert_eq!(state.model_phase(), ModelPhase::Downloading);
+        assert_eq!(state.download_target(), Some("a"));
+    }
+
+    #[test]
+    fn ready_hands_over_the_target_once() {
+        // Arrange
+        let mut state = presentation();
+        state.begin_download("a");
+        state.apply_model(model_snapshot(ModelPhase::Ready, &["a"]));
+
+        // Act
+        let first = state.take_installed_target();
+        let second = state.take_installed_target();
+
+        // Assert
+        assert_eq!(first.as_deref(), Some("a"));
+        assert_eq!(second, None);
+    }
+
+    #[test]
+    fn failure_keeps_the_target_and_hands_nothing_over() {
+        // Arrange
+        let mut state = presentation();
+        state.begin_download("a");
+        state.apply_model(model_snapshot(ModelPhase::Failed, &[]));
+
+        // Act
+        let taken = state.take_installed_target();
+
+        // Assert
+        assert_eq!(taken, None);
+        assert_eq!(state.download_target(), Some("a"));
+    }
+
+    #[test]
+    fn clearing_the_target_forgets_the_download() {
+        // Arrange
+        let mut state = presentation();
+        state.begin_download("a");
+
+        // Act
+        state.clear_download_target();
+
+        // Assert
+        assert_eq!(state.download_target(), None);
     }
 }

@@ -1,11 +1,15 @@
 //! Speech-model dialog. Selection, download, cancel, and retry stay off `render`.
 
 use gpui_kit::component::button::Button;
-use gpui_kit::component::dialog::DialogFooter;
+use std::rc::Rc;
+
+use gpui_kit::component::dialog::{DialogClose, DialogFooter};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::{v_flex, Disableable as _, WindowExt as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{px, App, ClickEvent, ParentElement, SharedString, Styled, Window};
 
+use crate::domain::ids::RecordingId;
 use crate::domain::recording::format_size;
 use crate::services::models::ModelPhase;
 
@@ -23,6 +27,10 @@ pub(crate) struct ModelPromptView {
     pub(crate) progress: Option<u8>,
     pub(crate) failure: Option<&'static str>,
     pub(crate) phase: ModelPhase,
+    /// The highlighted model is installed but not yet the one in use.
+    pub(crate) can_use: bool,
+    /// The highlighted model is the one the last download attempt was for.
+    pub(crate) selected_is_target: bool,
 }
 
 pub(crate) fn download_button_label() -> &'static str {
@@ -40,31 +48,60 @@ pub(crate) fn selected_model_line(id: Option<&str>, bytes: Option<u64>) -> Strin
     }
 }
 
-pub(crate) fn prompt_can_dismiss(phase: ModelPhase) -> bool {
-    phase == ModelPhase::Ready
+/// What happens once a model is chosen and ready.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AfterModelReady {
+    /// Transcribe opened the dialog: close it and start that job.
+    CloseAndTranscribe(RecordingId),
+    /// The user opened the dialog themselves: leave it open.
+    StayOpen,
+}
+
+pub(crate) fn after_model_ready(pending: Option<RecordingId>) -> AfterModelReady {
+    match pending {
+        Some(id) => AfterModelReady::CloseAndTranscribe(id),
+        None => AfterModelReady::StayOpen,
+    }
+}
+
+type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+type SelectHandler = Rc<dyn Fn(&str, &mut Window, &mut App)>;
+
+/// Callbacks for the dialog. Shared because the builder runs again on every render.
+#[derive(Clone)]
+pub(crate) struct ModelPromptHandlers {
+    pub(crate) on_select: SelectHandler,
+    pub(crate) on_download: ClickHandler,
+    pub(crate) on_use: ClickHandler,
+    pub(crate) on_cancel: ClickHandler,
+    pub(crate) on_retry: ClickHandler,
+    /// Runs when the user dismisses the dialog by any route.
+    pub(crate) on_closed: ClickHandler,
 }
 
 pub(crate) fn open_model_prompt(
     window: &mut Window,
     cx: &mut App,
     read: impl Fn(&App) -> ModelPromptView + 'static,
-    on_select: impl Fn(&str, &mut Window, &mut App) + Clone + 'static,
-    on_download: impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
-    on_cancel: impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
-    on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
+    handlers: ModelPromptHandlers,
 ) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let view = read(cx);
         let busy = view.phase == ModelPhase::Downloading;
-        let can_retry = matches!(view.phase, ModelPhase::Failed | ModelPhase::Cancelled);
+        // The user can always leave, except while a download is running.
+        let can_close = !busy;
+        // The worker retries its last request, so Retry only fits the model that failed.
+        let can_retry = view.selected_is_target
+            && matches!(view.phase, ModelPhase::Failed | ModelPhase::Cancelled);
         let can_download = !busy && view.selected_id.is_some();
+        let can_use = !busy && view.can_use;
         let selected = view.selected_id.clone();
         let mut body = v_flex()
             .w_full()
             .gap_2()
             .child("The download needs a network.");
         for row in view.catalog.clone() {
-            let on_select = on_select.clone();
+            let on_select = handlers.on_select.clone();
             let id = row.id.clone();
             let is_selected = selected.as_ref() == Some(&row.id);
             body = body.child(
@@ -86,15 +123,20 @@ pub(crate) fn open_model_prompt(
         if let Some(failure) = view.failure {
             body = body.child(failure);
         }
-        let download = on_download.clone();
-        let cancel = on_cancel.clone();
-        let retry = on_retry.clone();
+        let download = handlers.on_download.clone();
+        let use_model = handlers.on_use.clone();
+        let cancel = handlers.on_cancel.clone();
+        let retry = handlers.on_retry.clone();
+        let closed = handlers.on_closed.clone();
         dialog
             .title("Transcription model")
             .w(px(560.))
-            .close_button(false)
-            .overlay_closable(false)
-            .keyboard(false)
+            .close_button(can_close)
+            .overlay_closable(can_close)
+            .keyboard(can_close)
+            // Enabling the keyboard also enables Enter, which must not confirm and close.
+            .on_ok(|_, _, _| false)
+            .on_close(move |event, window, cx| closed(event, window, cx))
             .child(body)
             .footer(
                 DialogFooter::new()
@@ -103,20 +145,32 @@ pub(crate) fn open_model_prompt(
                         Button::new("model-download")
                             .label(download_button_label())
                             .disabled(!can_download)
-                            .on_click(download),
+                            .on_click(move |event, window, cx| download(event, window, cx)),
+                    )
+                    .child(
+                        Button::new("model-use")
+                            .label("Use")
+                            .disabled(!can_use)
+                            .on_click(move |event, window, cx| use_model(event, window, cx)),
                     )
                     .child(
                         Button::new("model-cancel")
                             .label("Cancel")
                             .disabled(!busy)
-                            .on_click(cancel),
+                            .on_click(move |event, window, cx| cancel(event, window, cx)),
                     )
                     .child(
                         Button::new("model-retry")
                             .label("Retry")
                             .disabled(!can_retry)
-                            .on_click(retry),
-                    ),
+                            .on_click(move |event, window, cx| retry(event, window, cx)),
+                    )
+                    .when(can_close, |footer| {
+                        footer.child(
+                            DialogClose::new()
+                                .child(Button::new("model-close").label("Close").outline()),
+                        )
+                    }),
             )
     });
 }
@@ -130,10 +184,11 @@ pub(crate) fn open_model_alert(window: &mut Window, cx: &mut App, message: &'sta
 #[cfg(test)]
 mod tests {
     use super::{
-        catalog_row_label, download_button_label, prompt_can_dismiss, selected_model_line,
+        after_model_ready, catalog_row_label, download_button_label, selected_model_line,
+        AfterModelReady,
     };
+    use crate::domain::ids::RecordingId;
     use crate::infrastructure::ai::models::ModelManifest;
-    use crate::services::models::ModelPhase;
 
     #[test]
     fn download_button_is_the_word_download() {
@@ -190,21 +245,19 @@ mod tests {
     }
 
     #[test]
-    fn prompt_stays_open_until_the_model_is_ready() {
+    fn a_pending_transcription_starts_once_a_model_is_ready() {
         // Arrange
-        let closed = [
-            ModelPhase::Idle,
-            ModelPhase::Downloading,
-            ModelPhase::Failed,
-            ModelPhase::Cancelled,
-        ];
+        let pending = Some(RecordingId::from_raw(7));
 
         // Act
-        let ready = prompt_can_dismiss(ModelPhase::Ready);
-        let blocked = closed.map(prompt_can_dismiss);
+        let with_job = after_model_ready(pending);
+        let without_job = after_model_ready(None);
 
         // Assert
-        assert!(ready);
-        assert_eq!(blocked, [false, false, false, false]);
+        assert_eq!(
+            with_job,
+            AfterModelReady::CloseAndTranscribe(RecordingId::from_raw(7))
+        );
+        assert_eq!(without_job, AfterModelReady::StayOpen);
     }
 }
