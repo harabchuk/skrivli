@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Editor, EditorState};
-use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -53,7 +52,7 @@ use super::model_prompt::{
     open_model_alert, open_model_prompt, row_accessibility_label, row_meta, row_tag,
     AfterModelReady, ErrorDisplay, ModelPromptHandlers, ModelPromptView,
 };
-use super::recording::record_tab;
+use super::recording::{record_tab, DeviceChoice, RecordView};
 use super::recordings::{
     open_delete_dialog, open_rename_dialog, play_button_label, recordings_tab, rows_from_catalog,
     transcript_controls, RecordingsDelegate,
@@ -96,14 +95,10 @@ pub(crate) struct MainWindow {
     gain_control: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
     catalog: DeviceCatalog,
-    microphone: Entity<SelectState<SearchableVec<SharedString>>>,
     mic_labels: Vec<SharedString>,
     mic_choices: Vec<StoredEndpoint>,
-    _mic_sub: Subscription,
-    system: Entity<SelectState<SearchableVec<SharedString>>>,
     system_labels: Vec<SharedString>,
     system_choices: Vec<StoredEndpoint>,
-    _system_sub: Subscription,
     gain_slider: Entity<SliderState>,
     _gain_sub: Subscription,
     mic_meter: PeakHold,
@@ -156,42 +151,8 @@ impl MainWindow {
         );
         let labels = vec![SharedString::from("Default communications")];
         let choices = vec![StoredEndpoint::Default];
-        let microphone = cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(labels.clone()),
-                Some(gpui_kit::component::IndexPath::new(0)),
-                window,
-                cx,
-            )
-        });
-        let mic_sub = cx.subscribe_in(
-            &microphone,
-            window,
-            |this, _select, event: &SelectEvent<SearchableVec<SharedString>>, window, cx| {
-                if let SelectEvent::Confirm(Some(label)) = event {
-                    this.choose_microphone(label.clone(), window, cx);
-                }
-            },
-        );
         let system_labels = vec![SharedString::from("Default output device")];
         let system_choices = vec![StoredEndpoint::Default];
-        let system = cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(system_labels.clone()),
-                Some(gpui_kit::component::IndexPath::new(0)),
-                window,
-                cx,
-            )
-        });
-        let system_sub = cx.subscribe_in(
-            &system,
-            window,
-            |this, _select, event: &SelectEvent<SearchableVec<SharedString>>, window, cx| {
-                if let SelectEvent::Confirm(Some(label)) = event {
-                    this.choose_system(label.clone(), window, cx);
-                }
-            },
-        );
         let gain_slider = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
@@ -289,14 +250,10 @@ impl MainWindow {
             gain_control,
             targets,
             catalog: DeviceCatalog::empty(),
-            microphone,
             mic_labels: labels,
             mic_choices: choices,
-            _mic_sub: mic_sub,
-            system,
             system_labels,
             system_choices,
-            _system_sub: system_sub,
             gain_slider,
             _gain_sub: gain_sub,
             mic_meter: PeakHold::new(),
@@ -386,7 +343,7 @@ impl MainWindow {
             changed = true;
         }
         if let Some(catalog) = batch.devices {
-            self.apply_devices(catalog, window, cx);
+            self.apply_devices(catalog);
             changed = true;
         }
         if let Some(snapshot) = batch.library {
@@ -572,31 +529,14 @@ impl MainWindow {
         self.pending_bounds = None;
     }
 
-    fn choose_microphone(
-        &mut self,
-        label: SharedString,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.presentation.inputs_locked() {
-            return;
-        }
-        let Some(index) = self.mic_labels.iter().position(|item| item == &label) else {
-            return;
-        };
+    fn choose_microphone(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(choice) = self.mic_choices.get(index).cloned() else {
             return;
         };
-        self.handle(AppCommand::SelectMicrophone(choice), _window, cx);
+        self.handle(AppCommand::SelectMicrophone(choice), window, cx);
     }
 
-    fn choose_system(&mut self, label: SharedString, window: &mut Window, cx: &mut Context<Self>) {
-        if self.presentation.inputs_locked() {
-            return;
-        }
-        let Some(index) = self.system_labels.iter().position(|item| item == &label) else {
-            return;
-        };
+    fn choose_system(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(choice) = self.system_choices.get(index).cloned() else {
             return;
         };
@@ -1126,12 +1066,7 @@ impl MainWindow {
         });
     }
 
-    fn apply_devices(
-        &mut self,
-        catalog: DeviceCatalog,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn apply_devices(&mut self, catalog: DeviceCatalog) {
         if self.presentation.inputs_locked() {
             self.recording.devices_changed();
         }
@@ -1149,16 +1084,13 @@ impl MainWindow {
             labels.push(SharedString::from(label));
             choices.push(StoredEndpoint::explicit(device.id().as_str()));
         }
-        let selected = choices
-            .iter()
-            .position(|choice| choice == self.settings.microphone())
-            .unwrap_or(0);
-        if selected == 0 && !matches!(self.settings.microphone(), StoredEndpoint::Default) {
+        if !choices.contains(self.settings.microphone()) {
             self.presentation.set_notice(Some(NOTICE_FALLBACK));
             self.settings.set_microphone(StoredEndpoint::Default);
             self.hooks.save_settings(self.settings.clone());
         }
-        self.install_mics(labels, choices, selected, window, cx);
+        self.mic_labels = labels;
+        self.mic_choices = choices;
         let mut system_labels = vec![SharedString::from("Default output device")];
         let mut system_choices = vec![StoredEndpoint::Default];
         for device in &self.catalog.render {
@@ -1175,78 +1107,14 @@ impl MainWindow {
             system_labels.push(SharedString::from(label));
             system_choices.push(StoredEndpoint::explicit(device.id().as_str()));
         }
-        let system_selected = system_choices
-            .iter()
-            .position(|choice| choice == self.settings.system_audio())
-            .unwrap_or(0);
-        if system_selected == 0 && !matches!(self.settings.system_audio(), StoredEndpoint::Default)
-        {
+        if !system_choices.contains(self.settings.system_audio()) {
             self.presentation.set_notice(Some(NOTICE_SYSTEM_FALLBACK));
             self.settings.set_system_audio(StoredEndpoint::Default);
             self.hooks.save_settings(self.settings.clone());
         }
-        self.install_system(system_labels, system_choices, system_selected, window, cx);
+        self.system_labels = system_labels;
+        self.system_choices = system_choices;
         self.publish_targets();
-    }
-
-    fn install_mics(
-        &mut self,
-        labels: Vec<SharedString>,
-        choices: Vec<StoredEndpoint>,
-        selected: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let microphone = cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(labels.clone()),
-                Some(gpui_kit::component::IndexPath::new(selected)),
-                window,
-                cx,
-            )
-        });
-        self._mic_sub = cx.subscribe_in(
-            &microphone,
-            window,
-            |this, _select, event: &SelectEvent<SearchableVec<SharedString>>, window, cx| {
-                if let SelectEvent::Confirm(Some(label)) = event {
-                    this.choose_microphone(label.clone(), window, cx);
-                }
-            },
-        );
-        self.microphone = microphone;
-        self.mic_labels = labels;
-        self.mic_choices = choices;
-    }
-
-    fn install_system(
-        &mut self,
-        labels: Vec<SharedString>,
-        choices: Vec<StoredEndpoint>,
-        selected: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let system = cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(labels.clone()),
-                Some(gpui_kit::component::IndexPath::new(selected)),
-                window,
-                cx,
-            )
-        });
-        self._system_sub = cx.subscribe_in(
-            &system,
-            window,
-            |this, _select, event: &SelectEvent<SearchableVec<SharedString>>, window, cx| {
-                if let SelectEvent::Confirm(Some(label)) = event {
-                    this.choose_system(label.clone(), window, cx);
-                }
-            },
-        );
-        self.system = system;
-        self.system_labels = labels;
-        self.system_choices = choices;
     }
 
     fn begin_recording(&mut self) {
@@ -1389,42 +1257,48 @@ impl Render for MainWindow {
         };
         let locked = self.presentation.inputs_locked();
         let phase = self.presentation.record_phase();
-        let show_stop = matches!(
-            phase,
-            RecordPhase::Starting | RecordPhase::Recording | RecordPhase::Stopping
-        );
         let elapsed = format_elapsed(
             self.started
                 .map(|started| started.elapsed())
                 .unwrap_or(Duration::ZERO),
         );
         let status_elapsed = elapsed.clone();
-        let phase_label = match phase {
-            RecordPhase::Idle => "Ready",
-            RecordPhase::Starting => "Starting",
-            RecordPhase::Recording => "Recording",
-            RecordPhase::Stopping => "Saving",
-            RecordPhase::Error => "Not recording",
-        };
-        let notice = SharedString::from(self.presentation.notice().unwrap_or(""));
         let entity = cx.entity();
         let toggle_entity = entity.clone();
+        let mic_entity = entity.clone();
+        let system_entity = entity.clone();
         let body = match self.presentation.tab() {
             AppTab::Record => record_tab(
-                &self.microphone,
-                &self.system,
-                &self.gain_slider,
-                locked,
-                show_stop,
-                phase == RecordPhase::Stopping,
-                SharedString::from(format_gain(self.settings.mic_gain())),
-                SharedString::from(elapsed),
-                SharedString::from(phase_label),
-                notice,
-                self.mic_meter.level,
-                self.mic_meter.hold,
-                self.system_meter.level,
-                self.system_meter.hold,
+                RecordView {
+                    microphone: DeviceChoice::new(
+                        &self.mic_labels,
+                        &self.mic_choices,
+                        self.settings.microphone(),
+                        Rc::new(move |index, window, cx| {
+                            mic_entity
+                                .update(cx, |view, cx| view.choose_microphone(index, window, cx));
+                        }),
+                    ),
+                    system: DeviceChoice::new(
+                        &self.system_labels,
+                        &self.system_choices,
+                        self.settings.system_audio(),
+                        Rc::new(move |index, window, cx| {
+                            system_entity
+                                .update(cx, |view, cx| view.choose_system(index, window, cx));
+                        }),
+                    ),
+                    gain: &self.gain_slider,
+                    gain_label: SharedString::from(format_gain(self.settings.mic_gain())),
+                    locked,
+                    phase,
+                    elapsed: SharedString::from(elapsed),
+                    notice: self.presentation.notice(),
+                    mic_db: self.mic_meter.level,
+                    mic_hold: self.mic_meter.hold,
+                    system_db: self.system_meter.level,
+                    system_hold: self.system_meter.hold,
+                },
                 move |_event, window, cx| {
                     toggle_entity.update(cx, |view, cx| {
                         let command = if view.presentation.inputs_locked() {

@@ -478,26 +478,29 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 ### 8.2 Record tab
 
 ```text
-┌──────────────────────────────────────────────────┐
-│ INPUT                                            │
-│ Microphone      [ Default communications      ▾ ]│
-│ System audio    [ Default output device       ▾ ]│
-│                                                  │
-│               [ ● Start recording ]              │
-│                     00:12:34                     │
-│                      ● REC                       │
-│ Mic  ███████████░░░  −12 dB   Gain ──●── 1.0×       │
-│ System █████░░░░░░░░░░░░░       −24 dB           │
-│                                                  │
-│ [inline device/permission/disk warning]          │
-└──────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                        ● Ready                         │
+│                        00:00:00                        │
+│                  [ ● Start recording ]                 │
+│ ┌────────────────────────────────────────────────────┐ │
+│ │ [mic] Microphone                                   │ │
+│ │       Default communications  Gain ─●─ 1.0× [Change]│ │
+│ │       ██████████░░░░░│░░░░░░░░░░░░░░░░      −42 dB │ │
+│ ├────────────────────────────────────────────────────┤ │
+│ │ [spk] System audio                                 │ │
+│ │       Default output device                 [Change]│ │
+│ │       █████░░░░░░░░░░░│░░░░░░░░░░░░░░░      −60 dB │ │
+│ └────────────────────────────────────────────────────┘ │
+│ [inline device/permission/disk notice]                 │
+└────────────────────────────────────────────────────────┘
 ```
 
-- Compose **GPUI Kit** select/combo, button, input, slider, checkbox, status, and dialog components for the recording form. Implement custom `level_meter` (and specialized recording indicator only if needed) using GPUI primitives and GPUI Kit theme tokens: band fills from `success` / `warning` / `danger`, track from the same color at low opacity (Kit Progress pattern), labels from `foreground` / `muted_foreground`. Do **not** create a parallel theme system; use GPUI Kit tokens and component styling.
+- Compose **GPUI Kit** dropdown menu, button, input, slider, checkbox, status, and dialog components for the recording form. Implement custom `level_meter` (and specialized recording indicator only if needed) using GPUI primitives and GPUI Kit theme tokens: band fills from `success` / `warning` / `danger`, track from the same color at low opacity (Kit Progress pattern), labels from `foreground` / `muted_foreground`. Do **not** create a parallel theme system; use GPUI Kit tokens and component styling.
 - The Record tab does not show the save path or a Browse control. Folder selection lives in Settings (read-only path plus Browse via the Windows folder-picker adapter). Default `%USERPROFILE%\Documents\Skrivli\` where writable.
+- Each source shows its device name with a small Change button that opens a Kit dropdown menu; a lock icon replaces it while recording. The content is a centered column capped at 520 px that scrolls if it does not fit, with space always reserved for one notice so the content does not move when a notice appears or clears. While on this tab the status bar shows only transcription, because the view already shows phase, timer, and notices.
 - Disable source selection while recording. The gain slider stays enabled during capture and is disabled only while saving.
 - A red recording state, elapsed timer and status text; ensure information is accessible without relying on red color or a blinking indicator alone.
-- Meter data: during a recording, microphone peak after echo removal and gain, and system peak after the fixed system gain, on −60..0 dBFS, with a green→amber→red range and a ~1 s peak hold. Draw from throttled snapshots. Idle monitoring stays outside the pipeline, uses peak times the slider, and hands the devices to the recording session when capture starts.
+- Meter data: during a recording, microphone peak after echo removal and gain, and system peak after the fixed system gain, on −60..0 dBFS, with a green→amber→red range and a ~1 s peak hold drawn as a tick (value in a tooltip). Draw from throttled snapshots. Idle monitoring stays outside the pipeline, uses peak times the slider, and hands the devices to the recording session when capture starts.
 - Missing devices/unwritable destination show inline GPUI Kit feedback; material failures use GPUI Kit dialogs or a Windows TaskDialog through a platform adapter when specifically required.
 - Global toggle shortcut default `Ctrl+Alt+R` using Windows `RegisterHotKey`; allow disable/rebinding and handle conflicts explicitly.
 

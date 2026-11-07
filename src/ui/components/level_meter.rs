@@ -2,50 +2,76 @@
 //!
 //! The numeric readout is the accessible indication. Color repeats the same
 //! loudness and is not the only cue. The track uses the band color at low
-//! opacity so empty meters stay visible in both light and dark themes.
+//! opacity so empty meters stay visible in both light and dark themes. Peak
+//! hold is a tick on the track, with its value in the readout's tooltip.
 
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, ActiveTheme as _};
-use gpui_kit::{div, px, App, IntoElement, ParentElement, Styled};
+use gpui_kit::prelude::*;
+use gpui_kit::{div, px, relative, App, IntoElement, ParentElement, SharedString, Styled};
 
 use crate::domain::gain::{format_db, meter_band, meter_fraction, MeterBand};
 
-const LABEL_WIDTH: f32 = 56.;
-const TRACK_WIDTH: f32 = 160.;
-const TRACK_HEIGHT: f32 = 8.;
+const READOUT_WIDTH: f32 = 44.;
+const TRACK_HEIGHT: f32 = 6.;
 const TRACK_OPACITY: f32 = 0.2;
+const TICK_WIDTH: f32 = 2.;
+const TICK_OVERHANG: f32 = 2.;
 
-pub(crate) fn level_meter(label: &str, db: f32, hold_db: f32, cx: &App) -> impl IntoElement {
+pub(crate) fn level_meter(id: &'static str, db: f32, hold_db: f32, cx: &App) -> impl IntoElement {
     let fraction = meter_fraction(db);
+    let hold_fraction = meter_fraction(hold_db);
     let fill = match meter_band(db) {
         MeterBand::Normal => cx.theme().success,
         MeterBand::Warm => cx.theme().warning,
         MeterBand::Hot => cx.theme().danger,
     };
-    let readout = format!("{}  hold {}", format_db(db), format_db(hold_db));
+    let hold_text = SharedString::from(format!("Peak hold {}", format_db(hold_db)));
     h_flex()
-        .gap_2()
+        .w_full()
+        .gap(px(10.))
         .items_center()
-        .text_color(cx.theme().foreground)
         .child(
             div()
-                .w(px(LABEL_WIDTH))
-                .flex_shrink_0()
-                .child(label.to_string()),
-        )
-        .child(
-            div()
-                .w(px(TRACK_WIDTH))
+                .relative()
+                .flex_1()
+                .min_w_0()
                 .h(px(TRACK_HEIGHT))
-                .flex_shrink_0()
-                .rounded(px(4.))
+                .rounded(px(3.))
                 .bg(fill.opacity(TRACK_OPACITY))
                 .child(
                     div()
-                        .h(px(TRACK_HEIGHT))
-                        .w(px(TRACK_WIDTH * fraction))
-                        .rounded(px(4.))
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .h_full()
+                        .w(relative(fraction))
+                        .rounded(px(3.))
                         .bg(fill),
-                ),
+                )
+                .when(hold_fraction > 0., |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left(relative(hold_fraction))
+                            .top(px(-TICK_OVERHANG))
+                            .w(px(TICK_WIDTH))
+                            .h(px(TRACK_HEIGHT + 2. * TICK_OVERHANG))
+                            .rounded(px(1.))
+                            .bg(cx.theme().foreground),
+                    )
+                }),
         )
-        .child(div().text_color(cx.theme().muted_foreground).child(readout))
+        .child(
+            div()
+                .id(SharedString::from(format!("{id}-level")))
+                .w(px(READOUT_WIDTH))
+                .flex_shrink_0()
+                .flex()
+                .justify_end()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .tooltip(move |window, cx| Tooltip::new(hold_text.clone()).build(window, cx))
+                .child(format_db(db)),
+        )
 }
