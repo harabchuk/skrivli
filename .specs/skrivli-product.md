@@ -127,9 +127,11 @@ Skrivli does not silently delete usable partial recordings.
 
 ### Detail and playback
 
-- Selecting a recording shows details and playback controls (play / stop).
+- Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · WAV`), then playback controls (play / stop).
+- A pencil icon next to the name (shown when the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
+- A warning note appears under the title when a recording was recovered after an interruption ("The end of this recording may be missing"), when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
 - Changing selection stops playback.
-- Users can open the containing folder in Explorer (header icon button), refresh the list (header icon button), rename, or delete.
+- Users can also open the recordings folder (list header icon button) and refresh the list (list header icon button).
 - Rename keeps related files together (audio, transcript, and metadata) when possible; partial failures are reported.
 - Delete asks for confirmation and sends files to the Recycle Bin rather than permanent erasure by default.
 

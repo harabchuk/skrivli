@@ -57,7 +57,7 @@ use super::recording::{record_tab, DeviceChoice, RecordView};
 use super::recordings::{
     library_header, library_items, open_delete_dialog, open_rename_dialog, play_button_label,
     recording_list_row, recordings_tab, rows_from_catalog, set_row_status, transcript_controls,
-    LibraryItem, RecordingRow,
+    LibraryItem, RecordingRow, RecordingsActions, RecordingsView,
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
@@ -1374,69 +1374,70 @@ impl Render for MainWindow {
                 let transcribe_entity = entity.clone();
                 let cancel_entity = entity.clone();
                 let retry_entity = entity.clone();
-                let model_entity = entity.clone();
-                recordings_tab(
-                    library_list,
-                    self.library_rows.len(),
-                    selected_row.as_ref(),
-                    playing,
-                    play_button_label(self.player_snapshot.phase),
-                    error,
-                    move |_event, window, cx| {
+                let actions = RecordingsActions {
+                    refresh: Rc::new(move |_event, window, cx| {
                         refresh_entity.update(cx, |view, cx| {
                             view.handle(AppCommand::RefreshLibrary, window, cx);
                         });
-                    },
-                    move |_event, window, cx| {
+                    }),
+                    open_folder: Rc::new(move |_event, window, cx| {
                         folder_entity.update(cx, |view, cx| {
                             view.handle(AppCommand::OpenRecordingsFolder, window, cx);
                         });
-                    },
-                    move |_event, _window, cx| {
+                    }),
+                    play: Rc::new(move |_event, _window, cx| {
                         play_entity.update(cx, |view, cx| {
                             view.play_selected();
                             cx.notify();
                         });
-                    },
-                    move |_event, _window, cx| {
+                    }),
+                    stop: Rc::new(move |_event, _window, cx| {
                         stop_entity.update(cx, |view, cx| {
                             view.player.stop();
                             cx.notify();
                         });
-                    },
-                    move |_event, window, cx| {
+                    }),
+                    rename: Rc::new(move |_event, window, cx| {
                         rename_entity.update(cx, |view, cx| view.rename_selected(window, cx));
-                    },
-                    move |_event, window, cx| {
+                    }),
+                    delete: Rc::new(move |_event, window, cx| {
                         delete_entity.update(cx, |view, cx| view.delete_selected(window, cx));
-                    },
-                    transcript_view,
-                    controls,
-                    failure,
-                    move |_event, window, cx| {
+                    }),
+                    transcribe: Rc::new(move |_event, window, cx| {
                         let Some(id) = selected_id else {
                             return;
                         };
                         transcribe_entity.update(cx, |view, cx| {
                             view.handle(AppCommand::Transcribe { recording_id: id }, window, cx);
                         });
-                    },
-                    move |_event, window, cx| {
+                    }),
+                    cancel_job: Rc::new(move |_event, window, cx| {
                         cancel_entity.update(cx, |view, cx| {
                             view.handle(AppCommand::CancelTranscription { job_id }, window, cx);
                         });
-                    },
-                    move |_event, window, cx| {
+                    }),
+                    retry: Rc::new(move |_event, window, cx| {
                         let Some(id) = selected_id else {
                             return;
                         };
                         retry_entity.update(cx, |view, cx| {
                             view.handle(AppCommand::Transcribe { recording_id: id }, window, cx);
                         });
+                    }),
+                };
+                recordings_tab(
+                    RecordingsView {
+                        list: library_list,
+                        count: self.library_rows.len(),
+                        selected: selected_row.as_ref(),
+                        playing,
+                        play_label: play_button_label(self.player_snapshot.phase),
+                        error,
+                        transcript_view,
+                        controls,
+                        failure,
                     },
-                    move |_event, window, cx| {
-                        model_entity.update(cx, |view, cx| view.open_model_prompt(window, cx));
-                    },
+                    actions,
                     cx,
                 )
                 .into_any_element()

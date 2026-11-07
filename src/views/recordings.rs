@@ -5,15 +5,25 @@ use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose};
 use gpui_kit::component::empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitle};
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{
-    h_flex, v_flex, ActiveTheme as _, Disableable as _, IconName, StyledExt as _, WindowExt as _,
+    h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
+    StyledExt as _, WindowExt as _,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, AnyElement, App, AppContext as _, ClickEvent, Div, InteractiveElement as _,
+    div, px, Anchor, AnyElement, App, AppContext as _, ClickEvent, Div, InteractiveElement as _,
     IntoElement, ParentElement, SharedString, Stateful, StatefulInteractiveElement as _, Styled,
     Window,
 };
+
+// Lucide icons (ISC). Pencil and Trash are in the full catalog but not in Kit's
+// default `Assets`, so they are embedded here. Ellipsis, FolderOpen and
+// TriangleAlert are in the default set.
+const PENCIL_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>"#;
+const TRASH_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>"#;
+
+use std::rc::Rc;
 
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
@@ -31,14 +41,9 @@ use crate::services::playback::PlayerPhase;
 pub(crate) struct RecordingRow {
     pub(crate) id: RecordingId,
     pub(crate) name: SharedString,
-    pub(crate) date: SharedString,
-    pub(crate) duration: SharedString,
-    pub(crate) transcript: SharedString,
-    pub(crate) detail: SharedString,
+    pub(crate) notes: Vec<SharedString>,
     pub(crate) day: RecordingDay,
     pub(crate) meta: SharedString,
-    // The detail header reads this from phase 2 on.
-    #[allow(dead_code)]
     pub(crate) detail_line: SharedString,
     pub(crate) badge: RowBadge,
     recovered: bool,
@@ -51,40 +56,25 @@ impl RecordingRow {
             .started_at_unix_ms()
             .and_then(|ms| civil_from_unix_ms(ms, zone).ok());
         let day = started.map_or(RecordingDay::Earlier, |time| recording_day(time, today));
-        let date = started
-            .map(|t| {
-                format!(
-                    "{:04}-{:02}-{:02} {:02}:{:02}",
-                    t.year, t.month, t.day, t.hour, t.minute
-                )
-            })
-            .unwrap_or_else(|| "—".to_string());
         let duration = info
             .duration_ms()
             .map(format_duration_ms)
             .unwrap_or_else(|| "—".to_string());
         let size = format_size(info.size_bytes());
-        let mut detail = format!("Size {size}");
-        if info.recovered() {
-            detail.push_str(" · Recovered");
-        }
-        match info.sidecar() {
-            SidecarState::Present => {}
-            SidecarState::Missing => detail.push_str(" · Metadata missing"),
-            SidecarState::Malformed => detail.push_str(" · Metadata unreadable"),
-        }
-        if !info.problems().is_empty() {
-            detail.push_str(" · Had recording issues");
-        }
+        let notes = recording_notes(
+            info.recovered(),
+            info.sidecar(),
+            !info.problems().is_empty(),
+        )
+        .into_iter()
+        .map(SharedString::from)
+        .collect();
         let meta = row_meta(day, started, &duration, &size);
         let detail_line = detail_line(day, started, &duration, &size, info.container());
         Self {
             id: info.id(),
             name: SharedString::from(info.name().to_string()),
-            date: SharedString::from(date),
-            duration: SharedString::from(duration),
-            transcript: SharedString::from(info.transcript().display()),
-            detail: SharedString::from(detail),
+            notes,
             day,
             meta: SharedString::from(meta),
             detail_line: SharedString::from(detail_line),
@@ -178,6 +168,35 @@ fn detail_line(
     format!("{when} · {duration} · {size} · {format}")
 }
 
+const NOTE_RECOVERED: &str =
+    "Recovered after an interruption. The end of this recording may be missing.";
+const NOTE_SIDECAR_MISSING: &str =
+    "Recording details are missing. The name and times come from the audio file.";
+const NOTE_SIDECAR_MALFORMED: &str =
+    "Recording details could not be read. The name and times come from the audio file.";
+const NOTE_PROBLEMS: &str = "Problems occurred while recording. Parts of the audio may be missing.";
+
+/// Notes shown under the title of the detail pane. Empty for a clean recording.
+fn recording_notes(
+    recovered: bool,
+    sidecar: SidecarState,
+    has_problems: bool,
+) -> Vec<&'static str> {
+    let mut notes = Vec::new();
+    if recovered {
+        notes.push(NOTE_RECOVERED);
+    }
+    match sidecar {
+        SidecarState::Present => {}
+        SidecarState::Missing => notes.push(NOTE_SIDECAR_MISSING),
+        SidecarState::Malformed => notes.push(NOTE_SIDECAR_MALFORMED),
+    }
+    if has_problems {
+        notes.push(NOTE_PROBLEMS);
+    }
+    notes
+}
+
 /// What the right edge of a list row shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RowBadge {
@@ -249,7 +268,6 @@ pub(crate) fn set_row_status(
     let Some(row) = rows.iter_mut().find(|row| row.id == id) else {
         return false;
     };
-    row.transcript = SharedString::from(status.display());
     row.badge = RowBadge::from_status(status, row.recovered);
     true
 }
@@ -343,29 +361,133 @@ fn row_badge(badge: RowBadge, cx: &App) -> Div {
     div().flex_none().text_xs().text_color(color).child(text)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// A click handler shared between buttons and menu items.
+pub(crate) type ClickAction = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// Everything the Recordings tab can ask the app to do.
+pub(crate) struct RecordingsActions {
+    pub(crate) refresh: ClickAction,
+    pub(crate) open_folder: ClickAction,
+    pub(crate) play: ClickAction,
+    pub(crate) stop: ClickAction,
+    pub(crate) rename: ClickAction,
+    pub(crate) delete: ClickAction,
+    pub(crate) transcribe: ClickAction,
+    pub(crate) cancel_job: ClickAction,
+    pub(crate) retry: ClickAction,
+}
+
+/// What the Recordings tab shows.
+pub(crate) struct RecordingsView<'a> {
+    pub(crate) list: Option<AnyElement>,
+    pub(crate) count: usize,
+    pub(crate) selected: Option<&'a RecordingRow>,
+    pub(crate) playing: bool,
+    pub(crate) play_label: SharedString,
+    pub(crate) error: Option<SharedString>,
+    pub(crate) transcript_view: AnyElement,
+    pub(crate) controls: TranscriptControls,
+    pub(crate) failure: Option<SharedString>,
+}
+
+fn click(action: &ClickAction) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let action = action.clone();
+    move |event, window, cx| action(event, window, cx)
+}
+
+fn note_line(text: SharedString, cx: &App) -> Div {
+    h_flex()
+        .gap_2()
+        .items_start()
+        .text_sm()
+        .text_color(cx.theme().warning)
+        .child(Icon::new(IconName::TriangleAlert).small().flex_shrink_0())
+        .child(div().flex_1().min_w_0().child(text))
+}
+
+/// Name, detail line, notes, and the icon actions for the selected recording.
+fn title_row(row: &RecordingRow, actions: &RecordingsActions, cx: &App) -> Div {
+    let show_in_folder = actions.open_folder.clone();
+    v_flex()
+        .gap_1()
+        .child(
+            h_flex()
+                .group("recording-title")
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_xl()
+                        .font_semibold()
+                        .child(row.name.clone()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .opacity(0.)
+                        .group_hover("recording-title", |style| style.opacity(1.))
+                        .child(
+                            Button::new("rename-recording")
+                                .ghost()
+                                .small()
+                                .icon(Icon::default().data(PENCIL_SVG))
+                                .tooltip("Rename recording")
+                                .accessibility_label("Rename recording")
+                                .on_click(click(&actions.rename)),
+                        ),
+                )
+                .child(div().flex_1())
+                .child(
+                    Button::new("delete-recording")
+                        .ghost()
+                        .icon(Icon::default().data(TRASH_SVG))
+                        .tooltip("Delete recording")
+                        .accessibility_label("Delete recording")
+                        .on_click(click(&actions.delete)),
+                )
+                .child(
+                    Button::new("recording-more")
+                        .ghost()
+                        .icon(IconName::Ellipsis)
+                        .tooltip("More")
+                        .accessibility_label("More actions")
+                        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
+                            let open = show_in_folder.clone();
+                            menu.item(
+                                PopupMenuItem::new("Show in folder")
+                                    .icon(IconName::FolderOpen)
+                                    .on_click(move |event, window, cx| open(event, window, cx)),
+                            )
+                        }),
+                ),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(row.detail_line.clone()),
+        )
+        .children(row.notes.iter().map(|note| note_line(note.clone(), cx)))
+}
+
 pub(crate) fn recordings_tab(
-    list: Option<AnyElement>,
-    count: usize,
-    selected: Option<&RecordingRow>,
-    playing: bool,
-    play_label: SharedString,
-    error: Option<SharedString>,
-    refresh: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    open_folder: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    play: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    stop: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    rename: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    delete: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    transcript_view: AnyElement,
-    controls: TranscriptControls,
-    failure: Option<SharedString>,
-    transcribe: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cancel_job: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    open_model: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    view: RecordingsView<'_>,
+    actions: RecordingsActions,
     cx: &App,
 ) -> impl IntoElement {
+    let RecordingsView {
+        list,
+        count,
+        selected,
+        playing,
+        play_label,
+        error,
+        transcript_view,
+        controls,
+        failure,
+    } = view;
     let list =
         if let Some(message) = error {
             Empty::new()
@@ -391,18 +513,9 @@ pub(crate) fn recordings_tab(
 
     let detail = match selected {
         Some(row) => v_flex()
-            .gap_2()
-            .child(div().text_lg().child(row.name.clone()))
-            .child(row.detail.clone())
-            .child(format!("Date {}", row.date))
-            .child(format!("Duration {}", row.duration))
-            .child(format!("Transcript {}", row.transcript))
+            .gap_3()
+            .child(title_row(row, &actions, cx))
             .child(failure.unwrap_or_else(|| SharedString::from("")))
-            .child(if playing {
-                SharedString::from("Playing")
-            } else {
-                SharedString::from("")
-            })
             .child(
                 h_flex()
                     .gap_2()
@@ -410,13 +523,13 @@ pub(crate) fn recordings_tab(
                         Button::new("play-recording")
                             .primary()
                             .label(play_label)
-                            .on_click(play),
+                            .on_click(click(&actions.play)),
                     )
                     .child(
                         Button::new("stop-recording-playback")
                             .label("Stop")
                             .disabled(!playing)
-                            .on_click(stop),
+                            .on_click(click(&actions.stop)),
                     ),
             )
             .child(
@@ -426,41 +539,21 @@ pub(crate) fn recordings_tab(
                         Button::new("transcribe-recording")
                             .label("Transcribe")
                             .disabled(!controls.transcribe_enabled)
-                            .on_click(transcribe),
+                            .on_click(click(&actions.transcribe)),
                     )
                     .child(
                         Button::new("cancel-transcription")
                             .label("Cancel")
                             .disabled(!controls.cancel_enabled)
-                            .on_click(cancel_job),
+                            .on_click(click(&actions.cancel_job)),
                     )
                     .when(controls.retry_enabled, |row| {
                         row.child(
                             Button::new("retry-transcription")
                                 .label("Retry")
-                                .on_click(retry),
+                                .on_click(click(&actions.retry)),
                         )
-                    })
-                    .child(
-                        Button::new("speech-model")
-                            .label("Model")
-                            .on_click(open_model),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("rename-recording")
-                            .label("Rename")
-                            .on_click(rename),
-                    )
-                    .child(
-                        Button::new("delete-recording")
-                            .danger()
-                            .label("Delete")
-                            .on_click(delete),
-                    ),
+                    }),
             )
             .child(transcript_view)
             .into_any_element(),
@@ -511,7 +604,7 @@ pub(crate) fn recordings_tab(
                                     .icon(IconName::RefreshCw)
                                     .tooltip("Refresh")
                                     .accessibility_label("Refresh recordings")
-                                    .on_click(refresh),
+                                    .on_click(click(&actions.refresh)),
                             )
                             .child(
                                 Button::new("open-recordings-folder-tab")
@@ -519,7 +612,7 @@ pub(crate) fn recordings_tab(
                                     .icon(IconName::FolderOpen)
                                     .tooltip("Open recordings folder")
                                     .accessibility_label("Open recordings folder")
-                                    .on_click(open_folder),
+                                    .on_click(click(&actions.open_folder)),
                             ),
                     )
                     .child(div().flex_1().min_h_0().child(list)),
@@ -653,6 +746,7 @@ mod tests {
     use crate::domain::recording::{
         RecordingContainer, RecordingDay, RecordingInfo, SidecarState, TranscriptStatus,
     };
+    use gpui_kit::SharedString;
 
     #[test]
     fn row_maps_metadata_for_display() {
@@ -676,10 +770,12 @@ mod tests {
 
         // Assert
         assert_eq!(row.name.as_ref(), "clip");
-        assert_eq!(row.duration.as_ref(), "01:05");
-        assert_eq!(row.transcript.as_ref(), "Ready");
-        assert!(row.detail.as_ref().contains("Recovered"));
-        assert_eq!(row.date.as_ref(), "1970-01-01 00:00");
+        assert_eq!(row.badge, RowBadge::Recovered);
+        assert_eq!(row.notes.len(), 2);
+        assert_eq!(
+            row.detail_line.as_ref(),
+            "Jan 1, 00:00 · 01:05 · 2.0 KB · WAV"
+        );
     }
 
     fn ms(utc: &str) -> u64 {
@@ -844,9 +940,51 @@ mod tests {
 
         // Assert
         assert_eq!(row.day, RecordingDay::Earlier);
-        assert_eq!(row.date.as_ref(), "—");
         assert_eq!(row.meta.as_ref(), "— · 12:41 · 38.0 MB");
         assert_eq!(row.detail_line.as_ref(), "— · 12:41 · 38.0 MB · WAV");
+    }
+
+    #[test]
+    fn notes_cover_recovered_sidecar_and_problems() {
+        use super::{recording_notes, NOTE_PROBLEMS, NOTE_RECOVERED};
+
+        // Arrange
+        let clean = (false, SidecarState::Present, false);
+
+        // Act
+        let none = recording_notes(clean.0, clean.1, clean.2);
+        let recovered = recording_notes(true, SidecarState::Present, false);
+        let missing = recording_notes(false, SidecarState::Missing, false);
+        let malformed = recording_notes(false, SidecarState::Malformed, false);
+        let problems = recording_notes(false, SidecarState::Present, true);
+        let all = recording_notes(true, SidecarState::Missing, true);
+
+        // Assert
+        assert!(none.is_empty());
+        assert_eq!(recovered, [NOTE_RECOVERED]);
+        assert_eq!(missing.len(), 1);
+        assert_eq!(malformed.len(), 1);
+        assert_ne!(missing, malformed);
+        assert_eq!(problems, [NOTE_PROBLEMS]);
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn row_carries_notes_from_the_recording() {
+        use super::NOTE_RECOVERED;
+        use jiff::tz::TimeZone;
+
+        // Arrange
+        let recovered = info_at(None, TranscriptStatus::None, true);
+        let clean = info_at(None, TranscriptStatus::None, false);
+
+        // Act
+        let recovered_row = RecordingRow::from_info_in(&recovered, &TimeZone::UTC, today_utc());
+        let clean_row = RecordingRow::from_info_in(&clean, &TimeZone::UTC, today_utc());
+
+        // Assert
+        assert_eq!(recovered_row.notes, [SharedString::from(NOTE_RECOVERED)]);
+        assert!(clean_row.notes.is_empty());
     }
 
     #[test]
@@ -1012,7 +1150,6 @@ mod tests {
         assert_eq!(names, ["alpha", "beta"]);
         assert_eq!(rows[0].badge, RowBadge::None);
         assert_eq!(rows[1].badge, RowBadge::Progress(42));
-        assert_eq!(rows[1].transcript.as_ref(), "42%");
     }
 
     #[test]

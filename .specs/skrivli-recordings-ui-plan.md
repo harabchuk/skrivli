@@ -1,6 +1,6 @@
 # Skrivli Recordings page redesign plan
 
-**Status:** Phases 0 and 1 done. Phases 2 to 7 are not started. The code snippets have not been compiled.
+**Status:** Phases 0 to 2 done. Phases 3 to 7 are not started. The code snippets have not been compiled.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
 
@@ -189,7 +189,7 @@ fn recording_list_row(row: &RecordingRow, selected: bool, cx: &App) -> Stateful<
 
 ---
 
-**Evidence (Phase 1):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass. New unit tests cover headers only for days with recordings, catalog order, empty input, item heights, and a progress tick that changes one row and keeps the order. `RecordingsDelegate`, the table, the Size and Transcript columns, sorting and the `allow(dead_code)` on `day`, `meta` and `badge` are gone (`detail_line` keeps its allow until Phase 2). The list uses `gpui_kit::base::v_virtual_list` with a `VirtualListScrollHandle` and an explicit `Rc<Vec<Size>>` of item heights, cached on `MainWindow` and rebuilt only when the catalog changes. **Refresh decision:** a watcher exists and is wired (`platform/windows/watcher.rs`, with a 30 s fallback rescan), but add, rename and delete in Explorer were not checked in the running app, so the icon button stays (see D-20). **Not verified:** the look of the list (selected bar, hover, badge colors, truncation), scrolling with 200+ files, and clicking a row, since the app was not run. The old Date text line in the detail pane still reads from `RecordingRow::date`; Phase 2 removes it.
+**Evidence (Phase 1):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass. New unit tests cover headers only for days with recordings, catalog order, empty input, item heights, and a progress tick that changes one row and keeps the order. `RecordingsDelegate`, the table, the Size and Transcript columns, sorting and the `allow(dead_code)` on `day`, `meta` and `badge` are gone (`detail_line` kept its allow until Phase 2). The list uses `gpui_kit::base::v_virtual_list` with a `VirtualListScrollHandle` and an explicit `Rc<Vec<Size>>` of item heights, cached on `MainWindow` and rebuilt only when the catalog changes. **Refresh decision:** a watcher exists and is wired (`platform/windows/watcher.rs`, with a 30 s fallback rescan), but add, rename and delete in Explorer were not checked in the running app, so the icon button stays (see D-20). **Not verified:** the look of the list (selected bar, hover, badge colors, truncation), scrolling with 200+ files, and clicking a row, since the app was not run. The old Date text line in the detail pane still reads from `RecordingRow::date`; Phase 2 removes it.
 
 ---
 
@@ -198,17 +198,17 @@ fn recording_list_row(row: &RecordingRow, selected: bool, cx: &App) -> Stateful<
 **Goal:** remove the wall of same-weight buttons.
 
 **Add**
-- [ ] Add a title row with the name in large text, plus the detail line below it.
-- [ ] Add a pencil icon button that opens the existing rename dialog. It appears when the title row is hovered or focused.
-- [ ] Add a Delete ghost icon button with the tooltip "Delete recording". It opens the existing confirmation dialog.
-- [ ] Add a `⋯` ghost icon button with a dropdown menu. For now it holds one item, **Show in folder**, which sends `AppCommand::OpenRecordingsFolder`.
-- [ ] Add a warning note below the title for recovered recordings: "Recovered after an interruption. The end of this recording may be missing."
-- [ ] Show sidecar and recording problems the same way, instead of in the `detail` string.
+- [x] Add a title row with the name in large text, plus the detail line below it.
+- [x] Add a pencil icon button that opens the existing rename dialog. It appears when the title row is hovered or focused.
+- [x] Add a Delete ghost icon button with the tooltip "Delete recording". It opens the existing confirmation dialog.
+- [x] Add a `⋯` ghost icon button with a dropdown menu. For now it holds one item, **Show in folder**, which sends `AppCommand::OpenRecordingsFolder`.
+- [x] Add a warning note below the title for recovered recordings: "Recovered after an interruption. The end of this recording may be missing."
+- [x] Show sidecar and recording problems the same way, instead of in the `detail` string.
 
 **Remove**
-- [ ] Remove the `Date …`, `Duration …` and `Transcript …` text lines.
-- [ ] Remove the Rename, Delete and Model buttons. The status bar and Settings still open the model dialog.
-- [ ] Remove the `refresh`, `rename` and similar loose parameters from `recordings_tab`. Replace them with a single `RecordingsActions` struct, which also lets the `#[allow(clippy::too_many_arguments)]` go.
+- [x] Remove the `Date …`, `Duration …` and `Transcript …` text lines.
+- [x] Remove the Rename, Delete and Model buttons. The status bar and Settings still open the model dialog.
+- [x] Remove the `refresh`, `rename` and similar loose parameters from `recordings_tab`. Replace them with a single `RecordingsActions` struct, which also lets the `#[allow(clippy::too_many_arguments)]` go.
 
 **Sketch (not compiled)**
 
@@ -233,11 +233,13 @@ Button::new("recording-more")
 **Check:** `views/recording.rs:37` says Kit's default assets lack some Lucide icons. Confirm that each icon in this plan actually draws, and embed any that do not, the same way that file does. The full catalog is `gpui_kit_assets::IconName`.
 
 **Tests to write first**
-- [ ] A recovered recording, a missing sidecar and a recording with problems each produce the right note, and a clean recording produces none.
+- [x] A recovered recording, a missing sidecar and a recording with problems each produce the right note, and a clean recording produces none.
 
 **Spec:** update "Detail and playback" in section 5.
 
 **Done when:** the title row looks like the design, every icon has a tooltip and an accessibility label, and Rename and Delete work as before.
+
+**Evidence (Phase 2):** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` and `cargo build` pass. New tests cover `recording_notes` (recovered, missing and malformed details file, recording problems, clean recording, all together) and the notes carried on `RecordingRow`. `recordings_tab` now takes a `RecordingsView` (data) and a `RecordingsActions` (nine `Rc` click handlers), so the `too_many_arguments` allow is gone, as is the `allow(dead_code)` on `detail_line`. `RecordingRow` lost `date`, `duration`, `transcript` and `detail` (nothing read them); sidecar and problem text moved to `notes`. **Icons:** Ellipsis, FolderOpen and TriangleAlert are in Kit's default 101 icon set. **Pencil and Trash are not**, so they are embedded as Lucide SVG constants in `views/recordings.rs`, the way `views/recording.rs` embeds Volume and Lock. **Deviations:** the pencil is hidden with opacity 0 until the title row is hovered, so a keyboard user can focus it but not see it (Phase 7 should add a focus-visible style). The Refresh icon button stays in the list header. The Transcribe, Cancel and Retry buttons, the `failure` line and the play controls are unchanged until Phases 3 and 6. Rename still does not stop playback (Phase 5). **Not verified:** the look of the title row (text size, pencil hover reveal, icon drawing, the `⋯` menu opening, Show in folder, note styling), since the app was not run.
 
 ---
 
