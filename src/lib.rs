@@ -166,7 +166,7 @@ pub mod testing {
             &mut self,
             samples_f32_16k_mono: &[f32],
             cancel: &Arc<AtomicBool>,
-            on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+            on_progress: &mut dyn FnMut(u8),
         ) -> Result<Vec<InferenceSegment>, AppError> {
             self.calls
                 .lock()
@@ -574,7 +574,7 @@ pub mod testing {
             &mut self,
             _samples_f32_16k_mono: &[f32],
             cancel: &Arc<AtomicBool>,
-            on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+            on_progress: &mut dyn FnMut(u8),
         ) -> Result<Vec<InferenceSegment>, AppError> {
             if !self.hold_before_open {
                 self.block();

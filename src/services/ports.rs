@@ -251,7 +251,7 @@ pub(crate) trait InferencePort: Send {
         &mut self,
         samples_f32_16k_mono: &[f32],
         cancel: &Arc<AtomicBool>,
-        on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+        on_progress: &mut dyn FnMut(u8),
     ) -> Result<Vec<InferenceSegment>, AppError>;
 }
 
@@ -267,7 +267,7 @@ mod inference_port_tests {
     use crate::common::error::AppError;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     struct FakeInference {
         loaded: bool,
@@ -292,7 +292,7 @@ mod inference_port_tests {
             &mut self,
             samples_f32_16k_mono: &[f32],
             cancel: &Arc<AtomicBool>,
-            on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+            on_progress: &mut dyn FnMut(u8),
         ) -> Result<Vec<InferenceSegment>, AppError> {
             if !self.loaded {
                 return Err(AppError::message("inference", "model not loaded"));
@@ -323,21 +323,16 @@ mod inference_port_tests {
             }],
         };
         let cancel = Arc::new(AtomicBool::new(false));
-        let percents = Arc::new(Mutex::new(Vec::new()));
-        let sink = Arc::clone(&percents);
+        let mut percents = Vec::new();
 
         // Act
         fake.load(Path::new("ggml-base-q5_1.bin")).expect("load");
         let segments = fake
-            .transcribe_chunk(
-                &[0.0; 160],
-                &cancel,
-                Arc::new(move |p| sink.lock().expect("lock").push(p)),
-            )
+            .transcribe_chunk(&[0.0; 160], &cancel, &mut |p| percents.push(p))
             .expect("transcribe");
 
         // Assert
-        assert_eq!(*percents.lock().expect("lock"), vec![50, 100]);
+        assert_eq!(percents, vec![50, 100]);
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, "hello");
         fake.unload();
@@ -353,22 +348,17 @@ mod inference_port_tests {
             segments: Vec::new(),
         };
         let cancel = Arc::new(AtomicBool::new(true));
-        let progress = Arc::new(AtomicBool::new(false));
-        let saw_progress = Arc::clone(&progress);
+        let mut saw_progress = false;
 
         // Act
         let error = fake
-            .transcribe_chunk(
-                &[0.0],
-                &cancel,
-                Arc::new(move |_| {
-                    saw_progress.store(true, Ordering::Release);
-                }),
-            )
+            .transcribe_chunk(&[0.0], &cancel, &mut |_| {
+                saw_progress = true;
+            })
             .expect_err("cancelled");
 
         // Assert
         assert_eq!(error.user_message(), "Transcription was cancelled.");
-        assert!(!progress.load(Ordering::Acquire));
+        assert!(!saw_progress);
     }
 }

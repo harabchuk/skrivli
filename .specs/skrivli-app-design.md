@@ -417,7 +417,7 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 
 - Decode WAV/MP3 using a validated library; decode FLAC with `flac-codec` when needed. Do not assume any one decoder supports all target formats.
 - Convert decoded input to **16 kHz mono `f32`** with explicit downmix and anti-alias resampling. Verify sample counts and timestamps.
-- Do not decode a two-hour file into a single in-memory buffer. Stream/cut long recordings into approximately **30-minute chunks** with overlap, offset segment timestamps and deduplicate content in overlap regions.
+- Do not decode a two-hour file into a single in-memory buffer. Stream/cut long recordings into approximately **10-minute chunks** with a 30-second overlap, offset segment timestamps and deduplicate content in overlap regions.
 - Keep audio source immutable during transcription. A failed job must never alter the recorded file.
 
 ### 7.3 Local model management

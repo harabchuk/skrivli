@@ -1,12 +1,13 @@
 //! whisper.cpp adapter. This is the only module that holds engine pointers.
 
-use std::ffi::c_void;
+use std::ffi::{c_int, c_void};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use whisper_rs::{
     FullParams, SamplingStrategy, SegmentCallbackData, WhisperContext, WhisperContextParameters,
+    WhisperSysContext, WhisperSysState,
 };
 
 use crate::common::error::AppError;
@@ -16,6 +17,19 @@ use crate::services::ports::{InferencePort, InferenceSegment};
 unsafe extern "C" fn abort_requested(user_data: *mut c_void) -> bool {
     // SAFETY: the caller installs a pointer to an `AtomicBool` that outlives the decode.
     unsafe { &*(user_data as *const AtomicBool) }.load(Ordering::Acquire)
+}
+
+/// Engine progress report. `user_data` must point to a live `&mut dyn FnMut(u8)`.
+unsafe extern "C" fn report_progress(
+    _context: *mut WhisperSysContext,
+    _state: *mut WhisperSysState,
+    percent: c_int,
+    user_data: *mut c_void,
+) {
+    // SAFETY: the caller installs a pointer to a `&mut dyn FnMut(u8)` that outlives the
+    // decode, and whisper.cpp calls this only on the thread running the decode.
+    let sink = unsafe { &mut *(user_data as *mut &mut dyn FnMut(u8)) };
+    sink(percent.clamp(0, 100) as u8);
 }
 
 /// whisper.cpp reports segment times in 10 ms units.
@@ -61,7 +75,7 @@ impl InferencePort for WhisperInference {
         &mut self,
         samples_f32_16k_mono: &[f32],
         cancel: &Arc<AtomicBool>,
-        on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+        on_progress: &mut dyn FnMut(u8),
     ) -> Result<Vec<InferenceSegment>, AppError> {
         let context = self
             .context
@@ -93,11 +107,17 @@ impl InferencePort for WhisperInference {
             params.set_abort_callback_user_data(Arc::as_ptr(cancel) as *mut c_void);
         }
 
-        let progress = Arc::clone(&on_progress);
-        params.set_progress_callback_safe(move |percent: i32| {
-            let clamped = percent.clamp(0, 100) as u8;
-            progress(clamped);
-        });
+        // `set_progress_callback_safe` requires a `'static` closure and leaks it per call.
+        // whisper.cpp reports progress from the thread that calls `state.full`.
+        let mut progress_sink: &mut dyn FnMut(u8) = on_progress;
+        // SAFETY: `progress_sink` outlives `state.full` below, the only call that uses this
+        // pointer, and `report_progress` reads it as the same `&mut dyn FnMut(u8)` type.
+        unsafe {
+            params.set_progress_callback(Some(report_progress));
+            params.set_progress_callback_user_data(
+                &mut progress_sink as *mut &mut dyn FnMut(u8) as *mut c_void,
+            );
+        }
 
         let segments = Arc::new(Mutex::new(Vec::<InferenceSegment>::new()));
         let segments_cb = Arc::clone(&segments);
@@ -132,7 +152,7 @@ impl InferencePort for WhisperInference {
 
 #[cfg(test)]
 mod tests {
-    use super::{abort_requested, engine_time_to_ms, WhisperInference};
+    use super::{abort_requested, engine_time_to_ms, report_progress, WhisperInference};
     use crate::services::ports::InferencePort;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -156,6 +176,26 @@ mod tests {
     }
 
     #[test]
+    fn progress_report_reaches_the_sink_clamped() {
+        // Arrange
+        let mut seen = Vec::new();
+        let mut record = |percent: u8| seen.push(percent);
+        let mut sink: &mut dyn FnMut(u8) = &mut record;
+        let user_data = &mut sink as *mut &mut dyn FnMut(u8) as *mut c_void;
+
+        // Act
+        // SAFETY: `sink` is alive for all calls, and the engine pointers go unused.
+        unsafe {
+            report_progress(std::ptr::null_mut(), std::ptr::null_mut(), 42, user_data);
+            report_progress(std::ptr::null_mut(), std::ptr::null_mut(), -1, user_data);
+            report_progress(std::ptr::null_mut(), std::ptr::null_mut(), 101, user_data);
+        }
+
+        // Assert
+        assert_eq!(seen, vec![42, 0, 100]);
+    }
+
+    #[test]
     fn engine_time_converts_to_milliseconds() {
         // Arrange
         let engine_time = 150;
@@ -176,7 +216,7 @@ mod tests {
 
         // Act
         let error = engine
-            .transcribe_chunk(&[0.0; 16], &cancel, Arc::new(|_| {}))
+            .transcribe_chunk(&[0.0; 16], &cancel, &mut |_| {})
             .expect_err("unloaded");
 
         // Assert
@@ -198,7 +238,7 @@ mod tests {
             .collect();
 
         // Act
-        let result = engine.transcribe_chunk(&samples, &cancel, Arc::new(|_| {}));
+        let result = engine.transcribe_chunk(&samples, &cancel, &mut |_| {});
 
         // Assert
         assert!(result.is_ok(), "{:?}", result.err());

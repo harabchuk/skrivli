@@ -5,8 +5,8 @@
 
 use std::time::Duration;
 
-/// Nominal transcription window length (~30 minutes).
-pub(crate) const WINDOW_DURATION: Duration = Duration::from_secs(30 * 60);
+/// Nominal transcription window length (~10 minutes).
+pub(crate) const WINDOW_DURATION: Duration = Duration::from_secs(10 * 60);
 /// Fixed overlap between consecutive windows (for de-duplication).
 pub(crate) const WINDOW_OVERLAP: Duration = Duration::from_secs(30);
 /// Pause between segments that starts a new paragraph (~1.5 s).
@@ -93,7 +93,7 @@ impl TranscriptSegment {
     }
 }
 
-/// Plan ~30-minute windows for a known streaming length.
+/// Plan ~10-minute windows for a known streaming length.
 ///
 /// Only durations are retained — callers never need to buffer the full PCM.
 pub(crate) fn plan_windows(total: Duration) -> Vec<TranscriptWindow> {
@@ -285,6 +285,19 @@ mod tests {
     }
 
     #[test]
+    fn plans_ten_minute_windows() {
+        // Arrange
+        let total = Duration::from_secs(25 * 60);
+
+        // Act
+        let windows = plan_windows(total);
+
+        // Assert
+        let ends: Vec<_> = windows.iter().map(|w| w.end().as_secs()).collect();
+        assert_eq!(ends, vec![600, 1_170, 1_500]);
+    }
+
+    #[test]
     fn plans_streaming_windows_with_fixed_overlap() {
         // Arrange — just over one window so a second window appears.
         let total = WINDOW_DURATION + Duration::from_secs(60);
@@ -314,7 +327,7 @@ mod tests {
         // Act
         let windows = plan_windows(two_hours);
 
-        // Assert — hop is 29.5 minutes → several windows, no audio allocation.
+        // Assert — hop is 9.5 minutes → several windows, no audio allocation.
         assert!(windows.len() >= 4);
         assert_eq!(windows.first().map(|w| w.offset()), Some(Duration::ZERO));
         assert_eq!(windows.last().map(|w| w.end()), Some(two_hours));

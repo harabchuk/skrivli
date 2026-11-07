@@ -236,3 +236,9 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 ## D-17 — Settings layout uses own row helpers, not Kit `setting` (Phase 5 of the model/settings UI plan)
 
 **Outcome:** Settings uses `settings_section` and `settings_row` in `ui/components/settings_rows.rs` (uppercase label, bordered group, text left and control right). Kit's `setting` module is not used: its `Settings` component is built around a sidebar with pages, which is too much for the current two rows. Revisit it during M8.1 once the list is longer; if it is adopted, record that here. Settings' **Change model…** dispatches `AppCommand::OpenModelDialog`. The manual checks in the plan (dialog stacking, light/dark rendering) have not been run.
+
+## D-18 — Transcription window is 10 minutes
+
+**Outcome:** `WINDOW_DURATION` went from 30 to 10 minutes, with the overlap still 30 seconds, and the worker passes each window to the engine as a borrowed slice instead of copying it. By calculation, peak audio and spectrogram memory falls from about 290 MB to about 58 MB, excluding the model. About 5% of the audio is now decoded twice, up from about 2%.
+
+**Not verified:** transcript quality at the extra seams was not compared on a long real recording, and memory was not measured.

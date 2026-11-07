@@ -1229,21 +1229,11 @@ fn transcribe_file(
             if cancel.load(Ordering::Acquire) {
                 return Err(AppError::message("transcription cancelled", "cancel"));
             }
-            let chunk = pending[..window_samples].to_vec();
-            let base_progress =
-                ((completed_windows as u32 * 100) / total_windows as u32).min(99) as u8;
-            on_progress(base_progress);
-            let latest = Arc::new(std::sync::atomic::AtomicU8::new(base_progress));
-            let progress_slot = Arc::clone(&latest);
-            let completed = completed_windows;
-            let total = total_windows;
-            let progress_cb = Arc::new(move |local: u8| {
-                let spanned = completed as u32 * 100 + u32::from(local);
-                let overall = (spanned / total as u32).min(99) as u8;
-                progress_slot.store(overall, Ordering::Release);
-            }) as Arc<dyn Fn(u8) + Send + Sync>;
-            let segments = inference.transcribe_chunk(&chunk, cancel, progress_cb)?;
-            on_progress(latest.load(Ordering::Acquire));
+            let mut report = |local: u8| {
+                on_progress(overall_percent(completed_windows, total_windows, local));
+            };
+            let segments =
+                inference.transcribe_chunk(&pending[..window_samples], cancel, &mut report)?;
             window_results.push((next_offset_ms, to_domain_segments(segments)));
             pending.drain(..hop_samples.min(pending.len()));
             next_offset_ms = next_offset_ms.saturating_add(samples_to_ms(hop_samples));
@@ -1255,19 +1245,23 @@ fn transcribe_file(
         if cancel.load(Ordering::Acquire) {
             return Err(AppError::message("transcription cancelled", "cancel"));
         }
-        let latest = Arc::new(std::sync::atomic::AtomicU8::new(90));
-        let progress_slot = Arc::clone(&latest);
-        let progress_cb = Arc::new(move |local: u8| {
-            let overall = (90 + (u32::from(local) / 10)).min(99) as u8;
-            progress_slot.store(overall, Ordering::Release);
-        }) as Arc<dyn Fn(u8) + Send + Sync>;
-        let segments = inference.transcribe_chunk(&pending, cancel, progress_cb)?;
-        on_progress(latest.load(Ordering::Acquire));
+        let mut report = |local: u8| {
+            on_progress(overall_percent(completed_windows, total_windows, local));
+        };
+        let segments = inference.transcribe_chunk(&pending, cancel, &mut report)?;
         window_results.push((next_offset_ms, to_domain_segments(segments)));
     }
 
     let stitched = stitch_segments(&window_results, overlap_ms);
     Ok(format_transcript(&stitched))
+}
+
+/// Overall percent from finished chunks and whisper's percent in the current one.
+/// Stays below 100 until the transcript is saved, even if the loop runs one chunk more
+/// than planned.
+fn overall_percent(completed: usize, planned: usize, local: u8) -> u8 {
+    let spanned = completed as u32 * 100 + u32::from(local);
+    (spanned / planned as u32).min(99) as u8
 }
 
 fn plan_windows_with(
@@ -1363,8 +1357,8 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use super::{
-        JobPhase, TranscriptionConfig, TranscriptionHost, TranscriptionSnapshot, NOTICE_CANCELLED,
-        NOTICE_DONE, NOTICE_FAILED, NOTICE_MODEL,
+        overall_percent, transcribe_file, JobPhase, TranscriptionConfig, TranscriptionHost,
+        TranscriptionSnapshot, NOTICE_CANCELLED, NOTICE_DONE, NOTICE_FAILED, NOTICE_MODEL,
     };
     use crate::common::error::AppError;
     use crate::domain::ids::RecordingId;
@@ -1375,7 +1369,7 @@ mod tests {
     use crate::services::ports::{InferencePort, InferenceSegment, TranscriptNotifier};
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -1403,7 +1397,7 @@ mod tests {
             &mut self,
             samples_f32_16k_mono: &[f32],
             cancel: &Arc<AtomicBool>,
-            on_progress: Arc<dyn Fn(u8) + Send + Sync>,
+            on_progress: &mut dyn FnMut(u8),
         ) -> Result<Vec<InferenceSegment>, AppError> {
             self.calls
                 .lock()
@@ -1510,6 +1504,147 @@ mod tests {
             overlap: Duration::from_millis(40),
             read_frames: 1_000,
         }
+    }
+
+    /// Records the highest percent the host had published when the first chunk ended.
+    struct LiveProgressInference {
+        published: Arc<AtomicU8>,
+        seen_during_first_chunk: Arc<Mutex<Option<u8>>>,
+    }
+
+    impl InferencePort for LiveProgressInference {
+        fn load(&mut self, _path: &Path) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        fn unload(&mut self) {}
+
+        fn transcribe_chunk(
+            &mut self,
+            _samples_f32_16k_mono: &[f32],
+            _cancel: &Arc<AtomicBool>,
+            on_progress: &mut dyn FnMut(u8),
+        ) -> Result<Vec<InferenceSegment>, AppError> {
+            on_progress(50);
+            self.seen_during_first_chunk
+                .lock()
+                .expect("lock")
+                .get_or_insert(self.published.load(Ordering::Acquire));
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn progress_is_published_while_a_chunk_is_decoding() {
+        // Arrange
+        let dir = temp_dir("live-progress");
+        let wav = dir.join("meeting.wav");
+        write_pcm_wav(&wav, 48_000);
+        seed_sidecar(&wav, 31);
+        let model = dir.join("ggml-base.bin");
+        fs::write(&model, b"ggml").expect("model");
+        let published = Arc::new(AtomicU8::new(0));
+        let seen = Arc::new(Mutex::new(None));
+        let fake = LiveProgressInference {
+            published: Arc::clone(&published),
+            seen_during_first_chunk: Arc::clone(&seen),
+        };
+        let sink = Arc::clone(&published);
+        let (host, handle) = TranscriptionHost::spawn_with_config(
+            Box::new(fake),
+            short_config(),
+            Box::new(move |snap| {
+                sink.fetch_max(snap.progress_percent, Ordering::AcqRel);
+            }),
+        );
+
+        // Act
+        host.enqueue(RecordingId::from_raw(31), wav, model, "base-q5_1");
+        wait_until(&host, |snap| snap.phase == JobPhase::Done);
+        host.shutdown();
+        let _ = handle.join();
+
+        // Assert
+        let seen = *seen.lock().expect("lock");
+        assert!(seen.is_some_and(|percent| percent > 0), "{seen:?}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Reports a fixed list of percents for every chunk.
+    struct ScriptedInference {
+        script: Vec<u8>,
+    }
+
+    impl InferencePort for ScriptedInference {
+        fn load(&mut self, _path: &Path) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        fn unload(&mut self) {}
+
+        fn transcribe_chunk(
+            &mut self,
+            _samples_f32_16k_mono: &[f32],
+            _cancel: &Arc<AtomicBool>,
+            on_progress: &mut dyn FnMut(u8),
+        ) -> Result<Vec<InferenceSegment>, AppError> {
+            self.script.iter().for_each(|percent| on_progress(*percent));
+            Ok(Vec::new())
+        }
+    }
+
+    fn scripted_percents(label: &str, frames: usize, script: Vec<u8>) -> Vec<u8> {
+        let dir = temp_dir(label);
+        let wav = dir.join("clip.wav");
+        write_pcm_wav(&wav, frames);
+        let mut percents = Vec::new();
+        transcribe_file(
+            &mut ScriptedInference { script },
+            &wav,
+            &Arc::new(AtomicBool::new(false)),
+            short_config(),
+            &mut |percent| percents.push(percent),
+        )
+        .expect("transcribe");
+        let _ = fs::remove_dir_all(dir);
+        percents
+    }
+
+    #[test]
+    fn single_chunk_shows_the_engine_percent() {
+        // Arrange
+        let frames = 4_800;
+
+        // Act
+        let percents = scripted_percents("single-chunk", frames, vec![50]);
+
+        // Assert
+        assert_eq!(percents, vec![50]);
+    }
+
+    #[test]
+    fn final_chunk_continues_from_its_share_of_the_job() {
+        // Arrange
+        let frames = 14_400;
+
+        // Act
+        let percents = scripted_percents("two-chunks", frames, vec![50]);
+
+        // Assert
+        assert_eq!(percents.last(), Some(&75));
+    }
+
+    #[test]
+    fn overall_percent_holds_at_99_for_a_chunk_beyond_the_plan() {
+        // Arrange
+        let (completed, planned) = (1, 1);
+
+        // Act
+        let percent = overall_percent(completed, planned, 0);
+
+        // Assert
+        assert_eq!(percent, 99);
+        assert_eq!(overall_percent(0, 1, 100), 99);
     }
 
     #[test]
