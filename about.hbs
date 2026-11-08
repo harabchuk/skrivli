@@ -1,0 +1,27 @@
+Third-party software used by Skrivli
+====================================
+
+Skrivli itself is licensed under MIT OR Apache-2.0 (see LICENSE-MIT.txt and
+LICENSE-APACHE.txt). It includes the Rust crates listed below. whisper.cpp and
+sonora notices are in the other files in this folder.
+
+Licences in use
+---------------
+{{#each overview}}
+- {{{name}}} ({{count}} crates)
+{{/each}}
+
+Licence texts
+-------------
+{{#each licenses}}
+
+================================================================================
+{{{name}}}
+
+Used by:
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

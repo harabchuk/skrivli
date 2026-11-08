@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check tag matches Cargo.toml version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $inPackage = $false
+          $version = $null
+          foreach ($line in Get-Content Cargo.toml) {
+            if ($line -match '^\s*\[(.+)\]\s*$') { $inPackage = ($Matches[1] -eq 'package'); continue }
+            if ($inPackage -and $line -match '^\s*version\s*=\s*"([^"]+)"') { $version = $Matches[1]; break }
+          }
+          if (-not $version) { throw 'Could not read [package] version from Cargo.toml' }
+          if ($tag -ne "v$version") { throw "Tag $tag does not match Cargo.toml version v$version" }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build release
+        shell: pwsh
+        run: cargo build --release --locked
+
+      - name: Check exe version
+        shell: pwsh
+        run: |
+          $info = (Get-Item target\release\skrivli.exe).VersionInfo
+          if ($info.ProductVersion -ne $env:VERSION) { throw "ProductVersion '$($info.ProductVersion)' != '$env:VERSION'" }
+          if ($info.FileVersionRaw.ToString() -ne "$env:VERSION.0") { throw "FileVersionRaw '$($info.FileVersionRaw)' != '$env:VERSION.0'" }
+
+      - name: Generate THIRD-PARTY.txt
+        shell: pwsh
+        run: |
+          cargo install cargo-about --locked --version 0.9.3 --features cli
+          if ($LASTEXITCODE -ne 0) { throw 'cargo install cargo-about failed' }
+          cargo about generate --locked about.hbs -o licenses/THIRD-PARTY.txt
+          if ($LASTEXITCODE -ne 0) { throw 'cargo about generate failed' }
+
+      - name: Package
+        shell: pwsh
+        run: ./scripts/package.ps1 -Version $env:VERSION
+
+      - name: Build release notes
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $zip = "target\dist\skrivli-$env:VERSION-windows-x64.zip"
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          $header = (Get-Content .github/release-notes-header.md -Raw).Replace('{{SHA256}}', $sha).Replace('{{VERSION}}', $env:VERSION)
+          $prev = git describe --tags --abbrev=0 "$tag^" 2>$null
+          if ($LASTEXITCODE -eq 0 -and $prev) {
+            $commits = (git log --no-merges --pretty='- %s' "$prev..$tag") -join "`n"
+            if (-not $commits) { $commits = 'No changes since the previous release.' }
+          } else {
+            $commits = 'First public release.'
+          }
+          $global:LASTEXITCODE = 0
+          Set-Content -Path target\release-notes.md -Value ($header + $commits + "`n") -Encoding utf8
+
+      - name: Publish GitHub release
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $zip = "target\dist\skrivli-$env:VERSION-windows-x64.zip"
+          $sum = "$zip.sha256"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $sum --clobber
+          } else {
+            gh release create $tag $zip $sum --title "Skrivli $env:VERSION" --notes-file target\release-notes.md --latest --verify-tag
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'gh release step failed' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skrivli-${{ env.VERSION }}-windows-x64
+          path: |
+            target/dist/skrivli-${{ env.VERSION }}-windows-x64.zip
+            target/dist/skrivli-${{ env.VERSION }}-windows-x64.zip.sha256
+          retention-days: 7
+          if-no-files-found: error
