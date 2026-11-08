@@ -460,7 +460,7 @@ mod tests {
         let dir = temp_dir("tx");
         let audio_file = dir.join("meeting.flac");
         fs::write(&audio_file, b"fLaC").expect("audio_file");
-        let wav_before = fs::read(&audio_file).expect("before");
+        let flac_before = fs::read(&audio_file).expect("before");
         write_sidecar(
             &audio_file,
             &Sidecar {
@@ -485,7 +485,7 @@ mod tests {
         let loaded = load_sidecar(&audio_file);
 
         // Assert
-        assert_eq!(fs::read(&audio_file).expect("after"), wav_before);
+        assert_eq!(fs::read(&audio_file).expect("after"), flac_before);
         match loaded {
             SidecarLoad::Loaded(doc) => {
                 assert_eq!(doc.transcript, TranscriptStatus::Progress(42));

@@ -10,10 +10,8 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::slider::{Slider, SliderState};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
-    h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
-    StyledExt as _, WindowExt as _,
+    h_flex, v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -405,14 +403,10 @@ pub(crate) struct RecordingsView<'a> {
 pub(crate) struct PlayerCard<'a> {
     /// Shows Pause instead of Play.
     pub(crate) playing: bool,
-    /// False for formats the player cannot open. The card is then disabled.
-    pub(crate) playable: bool,
     pub(crate) position_ms: u64,
     pub(crate) duration_ms: Option<u64>,
     pub(crate) seek: &'a Entity<SliderState>,
 }
-
-const NOT_PLAYABLE_TOOLTIP: &str = "Only FLAC playback is available";
 
 fn time_label(text: String, cx: &App) -> Div {
     div()
@@ -427,17 +421,11 @@ fn time_label(text: String, cx: &App) -> Div {
 fn player_card(card: PlayerCard<'_>, play_pause: &ClickAction, cx: &App) -> Div {
     let PlayerCard {
         playing,
-        playable,
         position_ms,
         duration_ms,
         seek,
     } = card;
     let label = if playing { "Pause" } else { "Play" };
-    let tooltip = if playable {
-        label
-    } else {
-        NOT_PLAYABLE_TOOLTIP
-    };
     let total = duration_ms.map_or_else(|| "—".to_string(), format_duration_ms);
     h_flex()
         .flex_shrink_0()
@@ -449,29 +437,19 @@ fn player_card(card: PlayerCard<'_>, play_pause: &ClickAction, cx: &App) -> Div 
         .border_color(cx.theme().border)
         .rounded(px(10.))
         .child(
-            // Kit may not show a tooltip on a disabled button, so the reason also sits on
-            // a wrapper that stays enabled.
-            div()
-                .id("play-pause-wrap")
-                .when(!playable, |wrap| {
-                    wrap.tooltip(|window, cx| Tooltip::new(NOT_PLAYABLE_TOOLTIP).build(window, cx))
-                })
-                .child(
-                    Button::new("play-pause")
-                        .primary()
-                        .rounded(px(20.))
-                        .icon(Icon::default().data(if playing { PAUSE_SVG } else { PLAY_SVG }))
-                        .tooltip(tooltip)
-                        .accessibility_label(label)
-                        .disabled(!playable)
-                        .on_click(click(play_pause)),
-                ),
+            Button::new("play-pause")
+                .primary()
+                .rounded(px(20.))
+                .icon(Icon::default().data(if playing { PAUSE_SVG } else { PLAY_SVG }))
+                .tooltip(label)
+                .accessibility_label(label)
+                .on_click(click(play_pause)),
         )
         .child(time_label(format_duration_ms(position_ms), cx))
         .child(
             Slider::new(seek)
                 .flex_1()
-                .disabled(!playable || duration_ms.is_none())
+                .disabled(duration_ms.is_none())
                 .accessibility_label("Seek"),
         )
         .child(time_label(total, cx))

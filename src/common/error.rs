@@ -103,7 +103,7 @@ mod tests {
             "save settings",
             std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                r"C:\Users\me\Documents\Skrivli\take.wav",
+                r"C:\Users\me\Documents\Skrivli\take.flac",
             ),
         );
 
@@ -113,9 +113,9 @@ mod tests {
 
         // Assert
         assert_eq!(shown, "Could not save settings.");
-        assert!(!shown.contains("take.wav"));
+        assert!(!shown.contains("take.flac"));
         assert!(diagnostic.contains("save settings"));
-        assert!(diagnostic.contains("take.wav"));
+        assert!(diagnostic.contains("take.flac"));
         assert!(error.source().is_some());
     }
 

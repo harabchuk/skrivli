@@ -1322,7 +1322,7 @@ impl MainWindow {
         let entity = cx.entity();
         open_rename_dialog(window, cx, current, move |name, _window, cx| {
             entity.update(cx, |view, _cx| {
-                // The open WAV would make the rename fail on Windows.
+                // The open FLAC file would make the rename fail on Windows.
                 view.player.stop();
                 view.library.rename(id, name);
             });
@@ -1666,10 +1666,6 @@ impl Render for MainWindow {
                 });
                 let playing = self.snapshot_is_selected()
                     && self.player_snapshot.phase == PlayerPhase::Playing;
-                let playable = self
-                    .library_selected
-                    .and_then(|id| self.library_catalog.find(id))
-                    .is_some_and(|entry| entry.info.container() == RecordingContainer::Flac);
                 let error = self.library_catalog.error.map(SharedString::from);
                 let selected_id = self.library_selected;
                 let status = selected_id
@@ -1778,7 +1774,6 @@ impl Render for MainWindow {
                         selected: selected_row.as_ref(),
                         player: PlayerCard {
                             playing,
-                            playable,
                             position_ms: self.shown_position_ms(),
                             duration_ms: self.selected_duration_ms(),
                             seek: &self.seek_slider,
