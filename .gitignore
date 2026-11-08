@@ -1,5 +1,6 @@
 /target/
 /.tools/
+/dist/
 **/*.rs.bk
 *.pdb
 *.exe
