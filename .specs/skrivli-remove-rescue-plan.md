@@ -183,40 +183,40 @@ Each phase leaves the tree building with `cargo fmt`, `cargo clippy --all-target
 
 `.specs/skrivli-product.md`
 
-- [ ] "Durability and recovery (user-visible)": rename it to "Durability (user-visible)". Delete the bullet "Interrupted recordings are recovered on next launch…". Add: "If a recording fails part way, Skrivli saves what it can as a normal recording and says what went wrong. A recording interrupted by a crash or power loss is not recovered."
-- [ ] Keep "Skrivli does not silently delete usable partial recordings." and add: "Leftover unfinished files are not shown in the app."
-- [ ] Library: change "In-progress captures are not treated as finished library entries until saved (except when presenting recovered files)." to drop the parenthesis.
-- [ ] Detail: remove "when a recording was recovered after an interruption (…)" from the warning-note sentence.
-- [ ] Status table: delete the **Recovered** row.
-- [ ] v1 scope: change "Durable capture with recovery for common failures" to "Durable capture that keeps usable audio after common failures (device loss, low disk, write errors)".
+- [x] "Durability and recovery (user-visible)": rename it to "Durability (user-visible)". Delete the bullet "Interrupted recordings are recovered on next launch…". Add: "If a recording fails part way, Skrivli saves what it can as a normal recording and says what went wrong. A recording interrupted by a crash or power loss is not recovered."
+- [x] Keep "Skrivli does not silently delete usable partial recordings." and add: "Leftover unfinished files are not shown in the app."
+- [x] Library: change "In-progress captures are not treated as finished library entries until saved (except when presenting recovered files)." to drop the parenthesis.
+- [x] Detail: remove "when a recording was recovered after an interruption (…)" from the warning-note sentence.
+- [x] Status table: delete the **Recovered** row.
+- [x] v1 scope: change "Durable capture with recovery for common failures" to "Durable capture that keeps usable audio after common failures (device loss, low disk, write errors)".
 
 `.specs/skrivli-app-design.md`
 
-- [ ] Line 58 table row: "`.wav.partial` while writing; finalize and recover on startup" becomes "`.wav.partial` while writing; renamed to `.wav` on finalize".
-- [ ] Line 183 (single instance): keep it. It is still true.
-- [ ] Line 206: delete the `%LOCALAPPDATA%\Skrivli\rescue\` path and the `AppPaths::rescue_dir()` sentence.
-- [ ] §6.5: delete the "On launch, detect unfinished `.partial`…" and "…attempt recovery to `%LOCALAPPDATA%\Skrivli\rescue\`…" bullets. Replace them with the §2 flow of this plan: always try finalize; on failure leave the partial and report; no startup scan.
-- [ ] §9 failures table: "Destination deleted/unmounted/full" becomes "Stop and finalize as safely as possible; if finalize fails, leave the partial and report". "Worker panic/shutdown": drop "preserve recovery artifact".
-- [ ] Test list (about lines 591–605): drop "crash-interrupted recovery" and "partial file recovery". Change "recovery behavior" in the long-recording check to "finalize behavior".
-- [ ] Line 626 (M4 row) and line 650 (risk row): remove "partial-file recovery", "metadata recovery" and "rescue path".
+- [x] Line 58 table row: "`.wav.partial` while writing; finalize and recover on startup" becomes "`.wav.partial` while writing; renamed to `.wav` on finalize".
+- [x] Line 183 (single instance): keep it. It is still true.
+- [x] Line 206: delete the `%LOCALAPPDATA%\Skrivli\rescue\` path and the `AppPaths::rescue_dir()` sentence.
+- [x] §6.5: delete the "On launch, detect unfinished `.partial`…" and "…attempt recovery to `%LOCALAPPDATA%\Skrivli\rescue\`…" bullets. Replace them with the §2 flow of this plan: always try finalize; on failure leave the partial and report; no startup scan.
+- [x] §9 failures table: "Destination deleted/unmounted/full" becomes "Stop and finalize as safely as possible; if finalize fails, leave the partial and report". "Worker panic/shutdown": drop "preserve recovery artifact".
+- [x] Test list (about lines 591–605): drop "crash-interrupted recovery" and "partial file recovery". Change "recovery behavior" in the long-recording check to "finalize behavior".
+- [x] Line 626 (M4 row) and line 650 (risk row): remove "partial-file recovery", "metadata recovery" and "rescue path".
 
 `.specs/skrivli-implementation-plan.md`
 
-- [ ] Line 24: "Never delete usable partials without explicit recovery/cleanup logic." becomes "Never delete partials except `abandon` after a failed start."
-- [ ] Line 87: drop "/rescue" from the paths item.
-- [ ] M4.2 lines 236–237: change them to `- [~]` (or strike through) with a note "Removed by the remove-rescue plan, see D-23". Do not delete the history.
-- [ ] Lines 244, 246 and 250: drop "crash-interrupted header", "restart recovery" and "recover partial on next boot". Reword the acceptance to "yields a playable recording or an explicit actionable error".
-- [ ] Line 262: drop "except recovery presentation".
+- [x] Line 24: "Never delete usable partials without explicit recovery/cleanup logic." becomes "Never delete partials except `abandon` after a failed start."
+- [x] Line 87: drop "/rescue" from the paths item.
+- [x] M4.2 lines 236–237: change them to `- [~]` (or strike through) with a note "Removed by the remove-rescue plan, see D-23". Do not delete the history.
+- [x] Lines 244, 246 and 250: drop "crash-interrupted header", "restart recovery" and "recover partial on next boot". Reword the acceptance to "yields a playable recording or an explicit actionable error".
+- [x] Line 262: drop "except recovery presentation".
 
 `.specs/skrivli-recordings-ui-plan.md`
 
-- [ ] Lines 116, 126, 205 and 236: add a short "Superseded: Recovered removed (D-23)" note after each item. Keep the checkboxes as history.
+- [x] Lines 116, 126, 205 and 236: add a short "Superseded: Recovered removed (D-23)" note after each item. Keep the checkboxes as history.
 
 `.specs/decisions.md`
 
-- [ ] D-10: add one line at the end: "Rescue copy and startup recovery were removed later, see D-23."
-- [ ] D-11 "Catalog": "`*.recovered.wav` listed" becomes "`*.recovered.wav` (from older builds) is listed as a plain WAV".
-- [ ] Add **D-23 — Rescue and crash recovery removed**:
+- [x] D-10: add one line at the end: "Rescue copy and startup recovery were removed later, see D-23."
+- [x] D-11 "Catalog": "`*.recovered.wav` listed" becomes "`*.recovered.wav` (from older builds) is listed as a plain WAV".
+- [x] Add **D-23 — Rescue and crash recovery removed**:
   - What was removed: the rescue copy to `%LOCALAPPDATA%\Skrivli\rescue\`, startup `*.wav.partial` → `*.recovered.wav` repair, and the Recovered flag, badge and note.
   - New failure rule: always attempt finalize, otherwise leave the partial and report the original failure.
   - No backward compatibility: old `.wav.partial` files are ignored, old `.recovered.wav` files are plain WAVs, and the old rescue folder is ignored and never deleted.

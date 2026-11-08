@@ -21,7 +21,7 @@
 3. **Commands/events:** a single command path drives toolbar, tray and hotkey. Use discrete structured events, coalesce high-rate progress and meter snapshots and marshal all UI state changes to the GPUI executor.
 4. **Persistence:** settings and JSON sidecars are schema-versioned and written using a temporary sibling file, flush/sync as appropriate, then replace/rename; handle Windows replacement semantics and recovery errors explicitly.
 5. **Recording clock:** all audio events map to a monotonic QPC-based session timeline; absence of packets means source silence/gap, **not** elapsed-time suspension.
-6. **Safety:** do not log audio or transcript contents. Preserve the primary WAV on any transcription or FLAC failure. Never delete usable partials without explicit recovery/cleanup logic.
+6. **Safety:** do not log audio or transcript contents. Preserve the primary WAV on any transcription or FLAC failure. Never delete partials except `abandon` after a failed start.
 
 ### Proposed application-facing types (design sketches)
 
@@ -84,7 +84,7 @@ Define `RecordingId`, `JobId`, timestamp units and error types in their owning m
 
 ### M0.3 — Common runtime, settings and Windows resources
 
-- [x] `common/error.rs`: typed application errors with contextual diagnostics and user-safe messages; `common/paths.rs`: Roaming AppData settings, Local AppData logs/models/rescue and Documents recording defaults.
+- [x] `common/error.rs`: typed application errors with contextual diagnostics and user-safe messages; `common/paths.rs`: Roaming AppData settings, Local AppData logs/models and Documents recording defaults.
 - [x] `common/logging.rs`: `tracing` initialization, bounded rotating logs (initially ~1 MB × 3), no captured content in logs, panic diagnostic hook.
 - [x] `infrastructure/storage/settings.rs`: default `Settings` struct, schema version, `serde_json` load/validate/migrate-or-fallback, atomic save and temp-directory unit tests.
 - [x] Add `resources/` icon, manifest, version metadata and `build.rs` only if needed; document DPI awareness configuration.
@@ -233,21 +233,21 @@ Landed after M3.3. `Pipeline` and `Aligner` replace the all-in-one mixer. The M3
 ### M4.2 — Storage safeguards and recovery
 
 - [x] Check destination writable and free space before start and about every 30 s; gracefully finalize below initially 200 MB, with a visible warning.
-- [x] Periodically repair partial-WAV headers and implement startup recovery: inspect `.wav.partial`, validate sizes/PCM boundaries, repair if safe, rename to `.recovered.wav` without overwriting existing files.
-- [x] On write or folder failure, preserve usable partial files and attempt bounded rescue in `%LOCALAPPDATA%\Skrivli\rescue\` only when original bytes can still be read; report unrecoverable failures accurately.
+- [~] Periodically repair partial-WAV headers and implement startup recovery (startup recovery removed by the remove-rescue plan, see D-23; periodic repair stays): inspect `.wav.partial`, validate sizes/PCM boundaries, repair if safe, rename to `.recovered.wav` without overwriting existing files.
+- [~] (Removed by the remove-rescue plan, see D-23.) On write or folder failure, preserve usable partial files and attempt bounded rescue in `%LOCALAPPDATA%\Skrivli\rescue\` only when original bytes can still be read; report unrecoverable failures accurately.
 - [x] Strengthen atomic sidecar state writes, corrupt metadata handling and safe partial preservation; define cleanup policy, no automatic deletion of unknown partial files.
 
 ### M4.3 — Shutdown and fault injection
 
 - [x] Explicit Exit while recording asks to stop/save; close-to-tray never stops capture. Windows session-ending notifications trigger bounded best-effort finalization.
 - [x] Supervise workers and join on normal shutdown; surface worker panic, capture stall, disk error and session rollback failures through typed events.
-- [x] Add tests for disk full/write error, forced worker termination, crash-interrupted header, output-folder removal, restart recovery, duplicate Stop and stale events.
+- [x] Add tests for disk full/write error, forced worker termination, output-folder removal, duplicate Stop and stale events.
 
-**Validate:** kill process mid-recording and recover partial on next boot; unplug capture device and retain timeline; stop with low disk or unwritable folder without silently corrupting prior files.
+**Validate:** kill process mid-recording (the partial stays on disk, unlisted); unplug capture device and retain timeline; stop with low disk or unwritable folder without silently corrupting prior files.
 
 ### M4 acceptance
 
-- [x] Every induced failure either yields a playable recording/recoverable partial or produces an explicit actionable error with preserved artifacts where possible.
+- [x] Every induced failure either yields a playable recording or an explicit actionable error.
 
 ---
 
@@ -259,7 +259,7 @@ Landed after M3.3. `Pipeline` and `Aligner` replace the all-in-one mixer. The M3
 ### M5.1 — Catalog and sidecars
 
 - [x] `domain/recording.rs`: stable recording identity, format and metadata. `infrastructure/storage/sidecar.rs`: versioned `<basename>.json` containing start/end, duration, devices, gap/errors, transcription status and links.
-- [x] `infrastructure/storage/library.rs`: scan configured directory for supported WAV/FLAC, join `.json`/`.txt`, sort newest first, preserve entries with malformed/missing sidecars, skip in-progress partials except recovery presentation.
+- [x] `infrastructure/storage/library.rs`: scan configured directory for supported WAV/FLAC, join `.json`/`.txt`, sort newest first, preserve entries with malformed/missing sidecars, skip in-progress partials.
 - [x] `infrastructure/storage/watcher.rs`: Windows directory events, debounce and full refresh fallback. Preserve selection by stable ID across rescans and renames.
 - [x] Test collisions, malformed metadata, external move/delete and accidental unpaired files.
 
@@ -381,7 +381,7 @@ Landed after M3.3. `Pipeline` and `Aligner` replace the all-in-one mixer. The M3
 ### M9.1 — Automated and hardware validation
 
 - [ ] On the pinned `x86_64-pc-windows-msvc` toolchain, run `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and `cargo build --release`. `cargo test` stays on fakes (`recording_harness`, fake capture, clock, disk, trash, watch, and the transcription port) and does not open a microphone or whisper.cpp. Attach the command output to the release notes.
-- [ ] Where a Windows 10 machine and a Windows 11 machine are available, record the matrix in `.specs/decisions.md`: default communications mic, USB mic, headset, no mic, no render device, microphone privacy denial, unplug or default-device change mid-take, loopback that stays silent, a 10-minute two-source take with a shared audible cue, a session past two hours, and a process kill with `.wav.partial` recovery on the next launch (`*.recovered.wav` when the header is safe). Single-source takes stay on the timeline and say so in the status strip.
+- [ ] Where a Windows 10 machine and a Windows 11 machine are available, record the matrix in `.specs/decisions.md`: default communications mic, USB mic, headset, no mic, no render device, microphone privacy denial, unplug or default-device change mid-take, loopback that stays silent, a 10-minute two-source take with a shared audible cue, a session past two hours, and a process kill (the `.wav.partial` stays on disk and is not listed). Single-source takes stay on the timeline and say so in the status strip.
 - [ ] With a recording active, hide to tray, show again, and Exit through the save confirmation. Exercise `HostCommand::SessionEnding` as far as a logoff or shutdown test allows, then a second launch (`Local\Skrivli.SingleInstance`), an Explorer restart (`TaskbarCreated`), 100/150/200% DPI, a second monitor, keyboard-only use of Record and Recordings, transcription cancel and retry, and scrolling plus Copy in a long transcript.
 - [ ] Measure WAV duration against the session clock, sidecar overrun and drift counters, CPU and memory for capture and for one inference, time from process start to the first frame, inference real-time factor on the installed model, and the longest GPUI stall during progress updates. Write the machine, OS build, and numbers into `.specs/decisions.md`. Thresholds are the numbers this pass measured. The design doc does not supply pass limits to invent.
 

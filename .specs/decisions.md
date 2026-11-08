@@ -80,7 +80,7 @@ The second source did not change the policy. Microphone and loopback each have o
 
 ## D-05 — RIFF size limit
 
-**Outcome:** recordings are canonical PCM16 stereo 48 kHz RIFF, not RF64. Encoding uses the `hound` crate (`WavWriter` + periodic `flush` for header repair, `finalize` on close). The header is 44 bytes. The RIFF size field stores `36 + data_bytes` and must fit in `u32`, so the largest safe payload is `u32::MAX - 36` (`4_294_967_259` bytes, about 6 h 13 min). Before a write that would pass that limit, the writer emits only the frames that still fit, repairs the header, and stops. It does not publish a header whose length fields disagree with the bytes on disk. Lengths are rewritten about every 2 s of audio and again on finalize. A crash leaves `*.wav.partial`; launch repairs a canonical header and renames it to `*.recovered.wav`, or leaves the partial in place when the header is not safe to trust.
+**Outcome:** recordings are canonical PCM16 stereo 48 kHz RIFF, not RF64. Encoding uses the `hound` crate (`WavWriter` + periodic `flush` for header repair, `finalize` on close). The header is 44 bytes. The RIFF size field stores `36 + data_bytes` and must fit in `u32`, so the largest safe payload is `u32::MAX - 36` (`4_294_967_259` bytes, about 6 h 13 min). Before a write that would pass that limit, the writer emits only the frames that still fit, repairs the header, and stops. It does not publish a header whose length fields disagree with the bytes on disk. Lengths are rewritten about every 2 s of audio and again on finalize. A crash leaves `*.wav.partial` in place; nothing repairs it afterwards (see D-23).
 
 ## D-06 — Adaptive Rubato resampling for gradual drift
 
@@ -92,13 +92,15 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 
 **Outcome (M4):** Mid-session capture errors clear the failed source, keep the other side, fill silence via the aligner, annotate sidecar `gap` / `capture` / `loopback` / `source_change`, and attempt reopen of the Windows default endpoint (`""` device id) on the recording host thread—never inside `IMMNotificationClient`. Device-catalog updates while recording call `RecordingHost::devices_changed` so a missing source can reopen after hot-plug. Free space and writability are rechecked about every 30 s (`SPACE_CHECK_INTERVAL`); below 200 MB the session finalizes with `NOTICE_LOW_DISK`. Write/folder failures release the partial, attempt a bounded rescue copy into `%LOCALAPPDATA%\Skrivli\rescue\` only when bytes are readable, and otherwise report `NOTICE_PARTIAL_KEPT` / `NOTICE_SAVE` without claiming recovery. Cleanup policy: never auto-delete unknown `*.wav.partial` files; `abandon` only after a failed start; startup recovery may rename safe partials to `*.recovered.wav`. Corrupt sidecars are left in place. Explicit Exit while recording opens a confirm dialog (`ConfirmExit`); close-to-tray still only hides. The tray window is a hidden top-level (not `HWND_MESSAGE`) so `WM_QUERYENDSESSION` / `WM_ENDSESSION` emit `SessionEnding` → stop/finalize without confirmation. Worker panic and a simple stall watchdog surface `NOTICE_WORKER` / `NOTICE_STALL`. Hardware unplug and live logoff were not exercised in this session; `cargo test` covers injected faults without devices.
 
+Rescue copy and startup recovery were removed later, see D-23.
+
 ## D-11 — M5 library identity, sidecars, watch, and playback
 
 **Outcome (M5):**
 
 - **Sidecar home:** write+load live in `infrastructure/storage/sidecar.rs` (schema **v3**, still accepts v2). `infrastructure/files/sidecar.rs` re-exports write for the recording service. Transcription fields default empty until M6; a present `.txt` surfaces as Ready.
 - **Identity:** `RecordingId` from sidecar `id` when valid; unpaired/malformed entries use a synthetic FNV-1a of the display stem. Selection is preserved by id across rescans and in-app renames that keep the sidecar. External rename of unpaired files may drop selection (no durable id without sidecar).
-- **Catalog:** `LibraryHost` scans on a worker; `*.wav.partial` skipped; `*.recovered.wav` listed; `.m4a` listed if present (playback deferred — WAV only). Colliding sidecar ids keep both rows.
+- **Catalog:** `LibraryHost` scans on a worker; `*.wav.partial` skipped; `*.recovered.wav` (from older builds) is listed as a plain WAV; `.m4a` listed if present (playback deferred — WAV only). Colliding sidecar ids keep both rows.
 - **Watch:** `FindFirstChangeNotificationW` with ~350 ms debounce plus a 30 s poll fallback. Missing folders poll until they appear.
 - **Delete:** `SHFileOperationW` with `FOF_ALLOWUNDO` (Recycle Bin) for audio + `.json` + `.txt` after confirm.
 - **Playback:** superseded by D-22 (Rodio). Selection change, delete and rename stop playback.
@@ -268,3 +270,13 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 **Verified by reading the Rodio 0.21.1 source and by building:** the player type is `Sink` (`Sink::connect_new(stream.mixer())`, `append`, `pause`, `play`, `try_seek`, `get_pos`, `empty`). The stream comes from `OutputStreamBuilder::open_default_stream()` and holds a `cpal::Stream`, so it is kept with the sink inside one session object on the player worker (sink dropped before stream). `Decoder::new_wav` with the `hound` feature gives `total_duration` and frame-based seeking (`hound` `seek`, saturated at the end). `try_seek` blocks until the audio thread answers (a few ms, the sink polls every 5 ms), runs on the worker only, and silently does nothing if the sink is already empty. `get_pos` is refreshed every 5 ms by the sink. The mixer wraps every source in `UniformSourceIterator`, so a file rate or channel count different from the device is converted in Rodio. The hound seek converts the time to frames with `f32`, so on a 1 h 48 kHz file the target can be off by a few frames (under 1 ms); this is source reading, not a measurement. Unit tests use a fake `PlaybackOutput` and need no hardware.
 
 **NOT verified on hardware:** seek accuracy and latency on a WAV longer than one hour; playback when the device sample rate differs from the file (conversion quality, no click); creating the `OutputStream` on the worker thread on Windows; audible playback to the end and the return to `Idle`; pause and seek with no click or hang; behavior when the default output device is removed during playback. Run these before Phase 6 is called done.
+
+## D-23 — Rescue and crash recovery removed
+
+**Removed:** the rescue copy to `%LOCALAPPDATA%\Skrivli\rescue\`, the startup repair that turned `*.wav.partial` into `*.recovered.wav`, and the Recovered flag, badge and note.
+
+**New failure rule:** after a failure, always attempt finalize. If finalize fails, leave the `.wav.partial` where it is and report the original failure. A crash or kill leaves the partial untouched and the next launch says nothing.
+
+**No backward compatibility:** old `.wav.partial` files are ignored (not listed, repaired, renamed or deleted). Old `.recovered.wav` files are listed as plain WAVs with no badge or note. The old rescue folder is ignored and never deleted.
+
+**Why:** less surface for a path that is rarely hit, and no hidden copies of recordings outside the folder the user chose. The trade-off is accepted: a recording lost to a crash is not offered back.

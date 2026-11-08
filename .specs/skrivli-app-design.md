@@ -55,7 +55,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | Audio capture | flexaudio 0.8 (`Mic` + `SystemLoopback`) behind `CapturePort` | Dedicated worker threads; classic loopback keepalive on |
 | Device format conversion | flexaudio normalizer to 48 kHz stereo `f32`. The pipeline's Rubato nudge runs on the session thread | Internal 48 kHz stereo `f32`; device ids from `flexaudio::devices()` |
 | Audio pipeline | `Pipeline` on the session thread, bounded SPSC buffers | Align, mono microphone downmix, echo cancellation, sonora microphone gain, fixed system gain, sum, soft limit, peak taps |
-| Recording | PCM16 stereo 48 kHz WAV first | `.wav.partial` while writing; finalize and recover on startup |
+| Recording | PCM16 stereo 48 kHz WAV first | `.wav.partial` while writing; renamed to `.wav` on finalize |
 | Optional FLAC | `flac-codec` encode/decode | Post-processing worker; user opt-in |
 | Transcription | whisper.cpp via maintained Rust bindings or a pinned FFI adapter | Local CPU inference; explicitly controlled native build, optional acceleration later |
 | Default model | Quantized multilingual `base` model, subject to verified catalog/hash | Model isn't shipped; download only after user confirmation |
@@ -203,7 +203,7 @@ Do not sprinkle `cfg` through views, services, domain, or storage. If a call nee
 - Do not put a second recording state machine in the tray.
 - Do not claim `Send` or `Sync` for COM or other apartment-bound wrappers.
 - Do not log audio samples or transcript text.
-- Do not copy Win32 paths (`Local\Skrivli.SingleInstance`, `%LOCALAPPDATA%\Skrivli\rescue\`) into another OS. The rescue directory comes from `AppPaths::rescue_dir()`.
+- Do not copy Win32 paths (`Local\Skrivli.SingleInstance`) into another OS.
 
 ---
 
@@ -380,9 +380,8 @@ System loopback uses flexaudio’s classic silent-render keepalive so idle endpo
 - Name recordings `Skrivli_YYYY-MM-DD_HH-MM-SS.wav` in local time, with a collision suffix.
 - Write into `*.wav.partial` first, as **48 kHz, stereo, PCM16 WAV**, using the `hound` library for encoding and header updates. Ensure the writer can periodically repair its RIFF/data length fields (e.g. every two seconds) and finalize lengths on close. Standard RIFF size limitations must be handled explicitly: stop/rotate before overflow or adopt a compatible large-file format; do not silently create corrupt recordings.
 - When stopping: drain queued samples, flush and close the writer, persist metadata, and rename to final `.wav`. Use a unique temporary path within the destination directory to keep rename semantics reliable.
-- On launch, detect unfinished `.partial` WAV files, validate enough header/data to recover, repair lengths and rename as `*.recovered.wav`. Preserve originals or report an error if recovery isn't safe.
 - Check free space before start and periodically (~30 s). Below a safety threshold (initially 200 MB) stop gracefully, finalize what can be saved, and notify.
-- If the original output folder becomes inaccessible mid-recording, retain a usable partial if possible and attempt recovery to `%LOCALAPPDATA%\Skrivli\rescue\` using a documented bounded strategy; **do not promise that already-failed filesystem writes can be recovered**.
+- After a failure during a session (write error, folder not writable, low disk, worker panic), note the problem and always try to finalize (rename to `.wav` and write the sidecar). If finalize fails, leave the `.wav.partial` where it is and report the original failure. Nothing scans for or repairs partials on launch. **Do not promise that already-failed filesystem writes can be recovered.**
 - Optional post-recording lossless FLAC encoding with the `flac-codec` crate; only remove WAV after verifying the output (reopen/decode) and if user opted in.
 - Store a sidecar `<basename>.json` containing start/end, duration, chosen device IDs, format, recording problems, transcription state, model and transcript linkage. Use a versioned schema and atomic JSON writes.
 
@@ -548,10 +547,10 @@ Use an OS-level named mutex such as `Local\Skrivli.SingleInstance`. A second ins
 | Endpoint unplugged/default changed | Re-open appropriate endpoint, mark gap, synthesize silence and annotate sidecar |
 | Loopback silent | Preserve monotonic recording time; fill missing source with zeros |
 | Device clock drift | Compensate conservatively and expose diagnostic counters in logs |
-| Destination deleted/unmounted/full | Stop/finalize as safely as possible, rescue if possible, do not discard partial files |
+| Destination deleted/unmounted/full | Stop and finalize as safely as possible; if finalize fails, leave the partial and report |
 | Recording writer/encoder failure | Preserve usable WAV, report problem and never silently overwrite |
 | Corrupt/missing transcription model, OOM | Mark failed, keep audio intact, allow retry |
-| Worker panic/shutdown | Surface fatal service state; join/clean up workers, preserve recovery artifact |
+| Worker panic/shutdown | Surface fatal service state; join/clean up workers |
 | Closing window while recording | Close-to-tray does not stop recording; explicit Exit requests save confirmation |
 
 Privacy by default: no accounts, telemetry, network transcription or automatic model download. Model download is explicit; logs must not include captured audio or transcript text. Recording files and transcripts remain user-owned local files. Logs: rotating files under `%LOCALAPPDATA%\Skrivli\logs\` (initial policy ~1 MB × 3); redact sensitive file/endpoint details where they aren't required for troubleshooting.
@@ -588,9 +587,9 @@ Put small tests beside Rust implementations with `#[cfg(test)] mod tests`; extra
 - Ring buffer: capacity, SPSC order, wrap-around, overflow policy and concurrent stress tests.
 - Pipeline and aligner: QPC alignment, silent intervals, overlapping and late packets, bounded wait, 100 ppm simulated drift, microphone and system gain, the soft limiter, mono downmix, and echo-reference order.
 - Resampler: the capture nudge is 48 kHz to 48 kHz and reads the aligner error directly. Transcription uses a separate 48 kHz to 16 kHz path: a 1 kHz sine retains pitch and amplitude, content above 8 kHz is attenuated, and stereo downmix is checked.
-- WAV: correct RIFF sizes and PCM16 encoding, periodic repair, crash-interrupted recovery, large-file boundary handling.
+- WAV: correct RIFF sizes and PCM16 encoding, periodic repair, large-file boundary handling.
 - Transcript: time formatting beyond one hour, paragraph grouping, repeated-line suppression, overlap chunk stitching.
-- Library: audio/text/JSON pairing, sorting, stable selection keys, malformed metadata, partial file recovery.
+- Library: audio/text/JSON pairing, sorting, stable selection keys, malformed metadata, partials skipped.
 - Services: invalid transitions, idempotent stop, cancellation, retry, startup failure rollback, single-job queue behavior.
 - Settings: defaults, roundtrip JSON, invalid saved endpoint/path fallback.
 
@@ -602,7 +601,7 @@ Root `tests/recording_flow.rs` and `tests/transcription_flow.rs` should exercise
 
 - Record 10 minutes with intermittent system playback/speech, inspect WAV duration and sync using a shared audible cue.
 - Unplug/replug USB headset and change the Windows default audio device mid-take.
-- Record more than two hours; verify memory, file length limits, recovery behavior and long-transcript chunking.
+- Record more than two hours; verify memory, file length limits, finalize behavior and long-transcript chunking.
 - Test silence while capturing loopback and check timeline continuity.
 - Close to tray, restart Explorer, and verify tray icon/menu/actions recover.
 - Test hotkey conflicts, multiple displays and DPI changes, microphone privacy denial, a disconnected output folder, disk space exhaustion.
@@ -623,7 +622,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | **M1 — Shell UI** | Resizable tabbed window, placeholder Record/Recordings views, tray icon, close/minimize policy | UI/tray lifecycle works including Explorer restart |
 | **M2 — Microphone capture** | Device enumeration, single mic flexaudio capture, WAV `.partial`, folder picker, start/stop | Produces playable WAV and cleanly finalizes |
 | **M3 — Loopback + mixer** | Loopback capture, timestamp alignment, ring buffers, mixer, gains, level meters and idle monitoring | Synthetic tests pass; real two-source sync verified |
-| **M4 — Robustness** | Endpoint changes, disk checks, privacy flow, partial-file recovery, shutdown behavior | Device loss and interrupted recording preserve usable data |
+| **M4 — Robustness** | Endpoint changes, disk checks, privacy flow, shutdown behavior | Device loss and interrupted recording preserve usable data |
 | **M5 — Recording library** | Library scan/watch, sidecars, list, playback, rename/delete/open folder | Files remain correctly paired and selected (implemented; hardware browse/playback spot-check still recommended) |
 | **M6 — Transcription** | Pinned whisper.cpp binding, decoder/resampler, model manager, FIFO worker, text formatter | Offline transcription yields correct `.txt` and supports cancel |
 | **M7 — Transcript UI** | Paragraph list with Copy button, transcript statuses, progress and notification | Entire recording-to-transcript flow works from UI |
@@ -647,7 +646,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | Silence hallucination in Whisper | VAD when verified, conservative duplicate cleanup, progress/cancel |
 | whisper.cpp FFI/build mismatch | Pin tested native revision/binding; minimal isolated adapter; CI native-build test |
 | High CPU/memory on slow laptops | Quantized model choice, one inference job, bounded chunking, no blocking UI work |
-| Recording interrupted by crash/disk failure | Partial files, periodic WAV repair, metadata recovery, rescue path and actionable error |
+| Recording interrupted by crash/disk failure | Partial files, periodic WAV repair and actionable error |
 | Windows Shell/notification behavior changes | Native adapter with manual Windows/Explorer restart tests |
 
 ---
