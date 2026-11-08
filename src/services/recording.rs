@@ -189,9 +189,6 @@ pub(crate) struct RecordingEngine {
     pub(crate) gain: Arc<GainControl>,
     pub(crate) pipeline: Box<dyn PipelineFactory>,
     pub(crate) lease: Arc<EndpointLease>,
-    /// Destination for bounded rescue copies when the recordings folder fails.
-    #[allow(dead_code)] // removed in phase 2 of the remove-rescue plan
-    pub(crate) rescue_dir: PathBuf,
     /// How often to recheck free space and writability while recording.
     pub(crate) space_check_every: Duration,
     /// When set, the next sample write is treated as a disk error (tests).
@@ -1104,7 +1101,6 @@ mod tests {
             gain: std::sync::Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
             pipeline: Box::new(PassThroughPipelineFactory),
             lease: std::sync::Arc::new(crate::services::lease::EndpointLease::new()),
-            rescue_dir: dir.join("rescue"),
             space_check_every: Duration::from_secs(30),
             write_fault: std::sync::Arc::new(AtomicBool::new(false)),
             folder_fault: std::sync::Arc::new(AtomicBool::new(false)),
@@ -1198,7 +1194,6 @@ mod tests {
             gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
             pipeline: Box::new(PassThroughPipelineFactory),
             lease: Arc::new(crate::services::lease::EndpointLease::new()),
-            rescue_dir: dir.join("rescue"),
             space_check_every: Duration::from_secs(30),
             write_fault: Arc::new(AtomicBool::new(false)),
             folder_fault: Arc::new(AtomicBool::new(false)),
@@ -1417,7 +1412,6 @@ mod tests {
             gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
             pipeline,
             lease: Arc::new(crate::services::lease::EndpointLease::new()),
-            rescue_dir: dir.join("rescue"),
             space_check_every: Duration::from_secs(30),
             write_fault: Arc::new(AtomicBool::new(false)),
             folder_fault: Arc::new(AtomicBool::new(false)),

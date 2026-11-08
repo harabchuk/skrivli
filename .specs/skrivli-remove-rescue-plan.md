@@ -114,15 +114,15 @@ Each phase leaves the tree building with `cargo fmt`, `cargo clippy --all-target
 
 **Why:** with no callers left, the rescue copy, its directory and its plumbing are dead code.
 
-- [ ] Delete `src/infrastructure/files/rescue.rs`. Remove `pub(crate) mod rescue;` from `infrastructure/files/mod.rs`.
-- [ ] `services/recording.rs`: remove the `rescue_dir: PathBuf` field from `RecordingEngine` and its doc comment. Remove `rescue_dir: dir.join("rescue")` from the three test engines (about lines 1162, 1256 and 1475).
-- [ ] `services/recording_harness.rs`: remove the `rescue_dir` field, its `create_dir_all`, the engine field it fills, and the public `RecordingHarness::rescue_dir()` accessor. This is a public `lib` API, which is fine because only `tests/` uses it.
-- [ ] `tests/recording_flow.rs`: remove any remaining `harness.rescue_dir()` use. After Phase 1 there should be none.
-- [ ] `app/bootstrap.rs`:
+- [x] Delete `src/infrastructure/files/rescue.rs`. Remove `pub(crate) mod rescue;` from `infrastructure/files/mod.rs`.
+- [x] `services/recording.rs`: remove the `rescue_dir: PathBuf` field from `RecordingEngine` and its doc comment. Remove `rescue_dir: dir.join("rescue")` from the three test engines (about lines 1162, 1256 and 1475).
+- [x] `services/recording_harness.rs`: remove the `rescue_dir` field, its `create_dir_all`, the engine field it fills, and the public `RecordingHarness::rescue_dir()` accessor. This is a public `lib` API, which is fine because only `tests/` uses it.
+- [x] `tests/recording_flow.rs`: remove any remaining `harness.rescue_dir()` use. After Phase 1 there should be none.
+- [x] `app/bootstrap.rs`:
   - remove the `rescue_dir` argument from `spawn_workers` and the `paths.rescue_dir()` argument at its call site,
   - change `prepare_local_dirs` to create only `paths.models_dir()`.
-- [ ] `common/paths.rs`: delete `AppPaths::rescue_dir()`, and the `rescue` line and its assert in `layouts_folders_from_injected_bases`.
-- [ ] `common/error.rs`: change `"save recording" | "recover recording" | "rescue recording"` to `"save recording"`.
+- [x] `common/paths.rs`: delete `AppPaths::rescue_dir()`, and the `rescue` line and its assert in `layouts_folders_from_injected_bases`.
+- [x] `common/error.rs`: change `"save recording" | "recover recording" | "rescue recording"` to `"save recording"`.
 
 **Check:** `rg -i rescue src tests` returns nothing.
 

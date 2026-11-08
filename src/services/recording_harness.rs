@@ -203,13 +203,10 @@ pub struct RecordingHarness {
     folder_fault: Arc<AtomicBool>,
     events: Receiver<RecordSnapshot>,
     directory: PathBuf,
-    rescue_dir: PathBuf,
 }
 
 impl RecordingHarness {
     pub fn new(directory: &Path) -> Self {
-        let rescue_dir = directory.join("rescue");
-        let _ = std::fs::create_dir_all(&rescue_dir);
         let capture = SharedCapture {
             inner: Arc::new(Mutex::new(FakeState {
                 error: None,
@@ -262,7 +259,6 @@ impl RecordingHarness {
                 gain: Arc::new(GainControl::new(1.0)),
                 pipeline: Box::new(PassThroughPipelineFactory),
                 lease: Arc::new(EndpointLease::new()),
-                rescue_dir: rescue_dir.clone(),
                 space_check_every: Duration::ZERO,
                 write_fault: Arc::clone(&write_fault),
                 folder_fault: Arc::clone(&folder_fault),
@@ -284,7 +280,6 @@ impl RecordingHarness {
             folder_fault,
             events: rx,
             directory: directory.to_path_buf(),
-            rescue_dir,
         }
     }
 
@@ -391,10 +386,6 @@ impl RecordingHarness {
 
     pub fn directory(&self) -> &Path {
         &self.directory
-    }
-
-    pub fn rescue_dir(&self) -> &Path {
-        &self.rescue_dir
     }
 
     pub fn wait_phase(&self, phase: RecordingHarnessPhase) -> Result<HarnessNotice, &'static str> {

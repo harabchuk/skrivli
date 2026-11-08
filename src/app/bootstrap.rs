@@ -121,7 +121,6 @@ pub(crate) fn run() -> i32 {
         Arc::clone(&gain),
         Arc::clone(&lease),
         Arc::clone(&targets),
-        paths.rescue_dir(),
         paths.models_dir(),
         settings.recordings_directory().to_path_buf(),
         settings.notify_on_transcript(),
@@ -174,7 +173,6 @@ fn spawn_workers(
     gain: Arc<GainControl>,
     lease: Arc<EndpointLease>,
     targets: Arc<MonitorTargets>,
-    rescue_dir: std::path::PathBuf,
     models_dir: std::path::PathBuf,
     recordings_dir: std::path::PathBuf,
     notify_on_transcript: bool,
@@ -192,7 +190,6 @@ fn spawn_workers(
             gain: Arc::clone(&gain),
             pipeline: Box::new(SonoraPipelineFactory),
             lease: Arc::clone(&lease),
-            rescue_dir,
             space_check_every: crate::services::recording::SPACE_CHECK_INTERVAL,
             write_fault: Arc::new(AtomicBool::new(false)),
             folder_fault: Arc::new(AtomicBool::new(false)),
@@ -513,9 +510,7 @@ fn recovery_notice(directory: &std::path::Path) -> Option<&'static str> {
 }
 
 fn prepare_local_dirs(paths: &AppPaths) -> Result<(), AppError> {
-    for directory in [paths.models_dir(), paths.rescue_dir()] {
-        std::fs::create_dir_all(&directory)
-            .map_err(|source| AppError::io("prepare folders", source))?;
-    }
+    std::fs::create_dir_all(paths.models_dir())
+        .map_err(|source| AppError::io("prepare folders", source))?;
     Ok(())
 }

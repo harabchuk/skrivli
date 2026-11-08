@@ -39,9 +39,7 @@ fn assert_finalized_only(dir: &std::path::Path) {
         .collect();
     assert_eq!(wav_files(dir).len(), 1, "files: {names:?}");
     assert!(
-        names
-            .iter()
-            .all(|name| !name.contains("partial") && !name.contains("rescued")),
+        names.iter().all(|name| !name.contains("partial")),
         "files: {names:?}"
     );
 }
