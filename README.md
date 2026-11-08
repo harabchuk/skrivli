@@ -1,5 +1,15 @@
 # Skrivli
 
+[![CI](https://github.com/harabchuk/skrivli/actions/workflows/ci.yml/badge.svg)](https://github.com/harabchuk/skrivli/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/harabchuk/skrivli)](https://github.com/harabchuk/skrivli/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/harabchuk/skrivli/total)](https://github.com/harabchuk/skrivli/releases)
+[![License](https://img.shields.io/github/license/harabchuk/skrivli?color=green)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows)](https://github.com/harabchuk/skrivli/releases/latest)
+[![Rust](https://img.shields.io/badge/rust-stable-green?logo=rust)](rust-toolchain.toml)
+[![Last commit](https://img.shields.io/github/last-commit/harabchuk/skrivli)](https://github.com/harabchuk/skrivli/commits/main)
+[![Issues](https://img.shields.io/github/issues/harabchuk/skrivli)](https://github.com/harabchuk/skrivli/issues)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/harabchuk/skrivli/pulls)
+
 Skrivli is a Windows app that records and transcribes meetings entirely on your computer, keeping your audio and text private.
 
 ## Features
