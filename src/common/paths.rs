@@ -35,10 +35,6 @@ impl AppPaths {
         self.local_app_data.join(APP_DIR).join("models")
     }
 
-    pub(crate) fn rescue_dir(&self) -> PathBuf {
-        self.local_app_data.join(APP_DIR).join("rescue")
-    }
-
     pub(crate) fn recordings_dir(&self) -> PathBuf {
         self.home.join("Documents").join(APP_DIR)
     }
@@ -59,14 +55,12 @@ mod tests {
         let settings = paths.settings_file();
         let logs = paths.logs_dir();
         let models = paths.models_dir();
-        let rescue = paths.rescue_dir();
         let recordings = paths.recordings_dir();
 
         // Assert
         assert_eq!(settings, Path::new(r"C:\Roaming\Skrivli\settings.json"));
         assert_eq!(logs, Path::new(r"D:\Local\Skrivli\logs"));
         assert_eq!(models, Path::new(r"D:\Local\Skrivli\models"));
-        assert_eq!(rescue, Path::new(r"D:\Local\Skrivli\rescue"));
         assert_eq!(recordings, Path::new(r"E:\Home\Documents\Skrivli"));
     }
 }

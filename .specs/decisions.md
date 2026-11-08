@@ -80,7 +80,7 @@ The second source did not change the policy. Microphone and loopback each have o
 
 ## D-05 — RIFF size limit
 
-**Outcome:** recordings are canonical PCM16 stereo 48 kHz RIFF, not RF64. Encoding uses the `hound` crate (`WavWriter` + periodic `flush` for header repair, `finalize` on close). The header is 44 bytes. The RIFF size field stores `36 + data_bytes` and must fit in `u32`, so the largest safe payload is `u32::MAX - 36` (`4_294_967_259` bytes, about 6 h 13 min). Before a write that would pass that limit, the writer emits only the frames that still fit, repairs the header, and stops. It does not publish a header whose length fields disagree with the bytes on disk. Lengths are rewritten about every 2 s of audio and again on finalize. A crash leaves `*.wav.partial`; launch repairs a canonical header and renames it to `*.recovered.wav`, or leaves the partial in place when the header is not safe to trust.
+**Outcome:** recordings are canonical PCM16 stereo 48 kHz RIFF, not RF64. Encoding uses the `hound` crate (`WavWriter` + periodic `flush` for header repair, `finalize` on close). The header is 44 bytes. The RIFF size field stores `36 + data_bytes` and must fit in `u32`, so the largest safe payload is `u32::MAX - 36` (`4_294_967_259` bytes, about 6 h 13 min). Before a write that would pass that limit, the writer emits only the frames that still fit, repairs the header, and stops. It does not publish a header whose length fields disagree with the bytes on disk. Lengths are rewritten about every 2 s of audio and again on finalize. A crash leaves `*.wav.partial` in place; nothing repairs it afterwards (see D-23).
 
 ## D-06 — Adaptive Rubato resampling for gradual drift
 
@@ -92,13 +92,15 @@ Classic WASAPI silent-render keepalive is **enabled** via flexaudio’s default 
 
 **Outcome (M4):** Mid-session capture errors clear the failed source, keep the other side, fill silence via the aligner, annotate sidecar `gap` / `capture` / `loopback` / `source_change`, and attempt reopen of the Windows default endpoint (`""` device id) on the recording host thread—never inside `IMMNotificationClient`. Device-catalog updates while recording call `RecordingHost::devices_changed` so a missing source can reopen after hot-plug. Free space and writability are rechecked about every 30 s (`SPACE_CHECK_INTERVAL`); below 200 MB the session finalizes with `NOTICE_LOW_DISK`. Write/folder failures release the partial, attempt a bounded rescue copy into `%LOCALAPPDATA%\Skrivli\rescue\` only when bytes are readable, and otherwise report `NOTICE_PARTIAL_KEPT` / `NOTICE_SAVE` without claiming recovery. Cleanup policy: never auto-delete unknown `*.wav.partial` files; `abandon` only after a failed start; startup recovery may rename safe partials to `*.recovered.wav`. Corrupt sidecars are left in place. Explicit Exit while recording opens a confirm dialog (`ConfirmExit`); close-to-tray still only hides. The tray window is a hidden top-level (not `HWND_MESSAGE`) so `WM_QUERYENDSESSION` / `WM_ENDSESSION` emit `SessionEnding` → stop/finalize without confirmation. Worker panic and a simple stall watchdog surface `NOTICE_WORKER` / `NOTICE_STALL`. Hardware unplug and live logoff were not exercised in this session; `cargo test` covers injected faults without devices.
 
+Rescue copy and startup recovery were removed later, see D-23.
+
 ## D-11 — M5 library identity, sidecars, watch, and playback
 
 **Outcome (M5):**
 
 - **Sidecar home:** write+load live in `infrastructure/storage/sidecar.rs` (schema **v3**, still accepts v2). `infrastructure/files/sidecar.rs` re-exports write for the recording service. Transcription fields default empty until M6; a present `.txt` surfaces as Ready.
 - **Identity:** `RecordingId` from sidecar `id` when valid; unpaired/malformed entries use a synthetic FNV-1a of the display stem. Selection is preserved by id across rescans and in-app renames that keep the sidecar. External rename of unpaired files may drop selection (no durable id without sidecar).
-- **Catalog:** `LibraryHost` scans on a worker; `*.wav.partial` skipped; `*.recovered.wav` listed; `.m4a` listed if present (playback deferred — WAV only). Colliding sidecar ids keep both rows.
+- **Catalog:** `LibraryHost` scans on a worker; `*.wav.partial` skipped; `*.recovered.wav` (from older builds) is listed as a plain WAV; `.m4a` listed if present (playback deferred — WAV only). Colliding sidecar ids keep both rows.
 - **Watch:** `FindFirstChangeNotificationW` with ~350 ms debounce plus a 30 s poll fallback. Missing folders poll until they appear.
 - **Delete:** `SHFileOperationW` with `FOF_ALLOWUNDO` (Recycle Bin) for audio + `.json` + `.txt` after confirm.
 - **Playback:** superseded by D-22 (Rodio). Selection change, delete and rename stop playback.
@@ -269,29 +271,39 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 **NOT verified on hardware:** seek accuracy and latency on a WAV longer than one hour; playback when the device sample rate differs from the file (conversion quality, no click); creating the `OutputStream` on the worker thread on Windows; audible playback to the end and the return to `Idle`; pause and seek with no click or hang; behavior when the default output device is removed during playback. Run these before Phase 6 is called done.
 
+## D-23 — Rescue and crash recovery removed
 
-## D-23 — Static CRT (release plan R2)
+**Removed:** the rescue copy to `%LOCALAPPDATA%\Skrivli\rescue\`, the startup repair that turned `*.wav.partial` into `*.recovered.wav`, and the Recovered flag, badge and note.
+
+**New failure rule:** after a failure, always attempt finalize. If finalize fails, leave the `.wav.partial` where it is and report the original failure. A crash or kill leaves the partial untouched and the next launch says nothing.
+
+**No backward compatibility:** old `.wav.partial` files are ignored (not listed, repaired, renamed or deleted). Old `.recovered.wav` files are listed as plain WAVs with no badge or note. The old rescue folder is ignored and never deleted.
+
+**Why:** less surface for a path that is rarely hit, and no hidden copies of recordings outside the folder the user chose. The trade-off is accepted: a recording lost to a crash is not offered back.
+
+
+## D-24 — Static CRT (release plan R2)
 
 **Outcome:** `.cargo/config.toml` sets `crt-static` for `x86_64-pc-windows-msvc`. `dumpbin /dependents` on the release exe shows no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports. The remaining non-base DLLs are `icuuc.dll` (Windows 10 and later) and `mmdevapi.dll`. The whisper.cpp licence text in the ZIP is copied from the vendored source of `whisper-rs-sys` 0.15.0.
 
 **Not verified:** a clean VM without Visual Studio (M9.2 stays open).
 
-## D-24 — Release tools pinned (release plan R4, R6)
+## D-25 — Release tools pinned (release plan R4, R6)
 
 **Outcome:** `cargo-release` 1.1.7: installed, `release.toml` parsed, branch guard confirmed. `cargo-about` 0.9.3: install needs `--features cli`; generation tested locally (about 510 crates); `about.toml` accepts the extra licences `CDLA-Permissive-2.0` and `Unlicense`.
 
 **Not verified:** a full `cargo release patch` dry run on a clean `main`.
 
-## D-25 — Signing deferred
+## D-26 — Signing deferred
 
 **Outcome:** the exe is unsigned for now. The ZIP README tells users about the SmartScreen warning. Revisit when the distribution channel needs signing.
 
-## D-26 — Release built in GitHub Actions
+## D-27 — Release built in GitHub Actions
 
 **Outcome:** a `v*` tag push runs `release.yml`, which builds, packages and publishes the GitHub release immediately (no draft).
 
 **Not verified:** `release.yml` and `scripts/package.ps1` end to end on a fork (R6 check). R7, the first real release, is not done.
 
-## D-27 — Version comes only from `Cargo.toml` (release plan R1)
+## D-28 — Version comes only from `Cargo.toml` (release plan R1)
 
 **Outcome:** `build.rs` no longer sets a version. The release exe reports `ProductVersion` 0.1.0 and `FileVersionRaw` 0.1.0.0, matching `Cargo.toml`.

@@ -113,7 +113,7 @@ Each phase should be one reviewable commit or PR, and should leave the app worki
   - Today and Yesterday rows: `14:32 · 12:41 · 38 MB`
   - Earlier rows: `Nov 3 · 31:04 · 93 MB`
   - Detail line: `Today, 14:32 · 12:41 · 38 MB · WAV`
-- [x] Add `RowBadge { None, Queued, Progress(u8), Ready, Failed, Recovered }`, with a pure mapping from status and the recovered flag. An active or failed status wins over Recovered.
+- [x] Add `RowBadge { None, Queued, Progress(u8), Ready, Failed, Recovered }`, with a pure mapping from status and the recovered flag. An active or failed status wins over Recovered. Superseded: Recovered removed (D-23).
 
 **Remove**
 - [x] Remove `format_unix_ms` and `civil_from_days` once nothing uses them.
@@ -123,7 +123,7 @@ Each phase should be one reviewable commit or PR, and should leave the app worki
 - [x] A recording from 23:59 yesterday and one from 00:01 today land in the right groups.
 - [x] 1 January groups 31 December as Yesterday.
 - [x] A recording with no start time goes to Earlier and shows `—`.
-- [x] Each status maps to the right badge, including Recovered with Failed.
+- [x] Each status maps to the right badge, including Recovered with Failed. Superseded: Recovered removed (D-23).
 
 **Done when:** every row shows local time. A manual check near a time zone offset confirms it.
 
@@ -202,7 +202,7 @@ fn recording_list_row(row: &RecordingRow, selected: bool, cx: &App) -> Stateful<
 - [x] Add a pencil icon button that opens the existing rename dialog. It appears when the title row is hovered or focused.
 - [x] Add a Delete ghost icon button with the tooltip "Delete recording". It opens the existing confirmation dialog.
 - [x] Add a `⋯` ghost icon button with a dropdown menu. For now it holds one item, **Show in folder**, which sends `AppCommand::OpenRecordingsFolder`.
-- [x] Add a warning note below the title for recovered recordings: "Recovered after an interruption. The end of this recording may be missing."
+- [x] Add a warning note below the title for recovered recordings: "Recovered after an interruption. The end of this recording may be missing." Superseded: Recovered removed (D-23).
 - [x] Show sidecar and recording problems the same way, instead of in the `detail` string.
 
 **Remove**
@@ -233,7 +233,7 @@ Button::new("recording-more")
 **Check:** `views/recording.rs:37` says Kit's default assets lack some Lucide icons. Confirm that each icon in this plan actually draws, and embed any that do not, the same way that file does. The full catalog is `gpui_kit_assets::IconName`.
 
 **Tests to write first**
-- [x] A recovered recording, a missing sidecar and a recording with problems each produce the right note, and a clean recording produces none.
+- [x] A recovered recording, a missing sidecar and a recording with problems each produce the right note, and a clean recording produces none. Superseded: Recovered removed (D-23).
 
 **Spec:** update "Detail and playback" in section 5.
 

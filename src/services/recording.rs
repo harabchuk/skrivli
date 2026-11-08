@@ -16,7 +16,6 @@ use std::time::{Duration, Instant};
 use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_SAMPLE_RATE};
 use crate::domain::ids::RecordingId;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-use crate::infrastructure::files::rescue::rescue_partial;
 use crate::infrastructure::files::wav::{WavWrite, WavWriter};
 use crate::infrastructure::files::writable::ensure_writable;
 use crate::infrastructure::storage::sidecar::{write_sidecar, Sidecar};
@@ -55,12 +54,6 @@ pub(crate) const NOTICE_SYSTEM_MISSING: &str =
     "System audio is unavailable. Recording the microphone with silence on that side.";
 pub(crate) const NOTICE_MIC_MISSING: &str =
     "The microphone is unavailable. Recording system audio with silence on that side.";
-pub(crate) const NOTICE_RECOVERED: &str = "A previous recording was recovered.";
-pub(crate) const NOTICE_RECOVER_FAILED: &str = "A previous recording could not be recovered.";
-pub(crate) const NOTICE_RESCUED: &str =
-    "The recordings folder failed. A copy was saved to the rescue folder.";
-pub(crate) const NOTICE_PARTIAL_KEPT: &str =
-    "The recording could not be saved fully. A partial file was kept.";
 pub(crate) const NOTICE_WORKER: &str = "Recording stopped because a capture worker failed.";
 pub(crate) const NOTICE_STALL: &str = "Audio capture appears stalled.";
 
@@ -194,8 +187,6 @@ pub(crate) struct RecordingEngine {
     pub(crate) gain: Arc<GainControl>,
     pub(crate) pipeline: Box<dyn PipelineFactory>,
     pub(crate) lease: Arc<EndpointLease>,
-    /// Destination for bounded rescue copies when the recordings folder fails.
-    pub(crate) rescue_dir: PathBuf,
     /// How often to recheck free space and writability while recording.
     pub(crate) space_check_every: Duration,
     /// When set, the next sample write is treated as a disk error (tests).
@@ -864,12 +855,10 @@ fn finish_session(
 ) -> Result<RecordSnapshot, &'static str> {
     let folder_ok =
         !engine.folder_fault.load(Ordering::Acquire) && ensure_writable(directory).is_ok();
-    if let Some(notice) = failed {
-        return preserve_or_rescue(
+    if let Some(notice) = failed.or(if folder_ok { None } else { Some(NOTICE_FOLDER) }) {
+        return keep_after_failure(
             wav,
             engine,
-            directory,
-            folder_ok,
             id,
             started_ms,
             frames,
@@ -877,21 +866,6 @@ fn finish_session(
             system_audio_id,
             problems,
             notice,
-        );
-    }
-    if !folder_ok {
-        return preserve_or_rescue(
-            wav,
-            engine,
-            directory,
-            false,
-            id,
-            started_ms,
-            frames,
-            microphone_id,
-            system_audio_id,
-            problems,
-            NOTICE_FOLDER,
         );
     }
     let path = match wav.finalize() {
@@ -930,12 +904,12 @@ fn finish_session(
     })
 }
 
+/// Finalizes in place after a failure. If the rename fails the partial stays
+/// on disk untouched. The original failure is always the notice.
 #[allow(clippy::too_many_arguments)]
-fn preserve_or_rescue(
+fn keep_after_failure(
     wav: WavWriter,
     engine: &RecordingEngine,
-    _directory: &Path,
-    folder_ok: bool,
     id: RecordingId,
     started_ms: u64,
     frames: u64,
@@ -945,60 +919,26 @@ fn preserve_or_rescue(
     failure: &'static str,
 ) -> Result<RecordSnapshot, &'static str> {
     note(&mut problems, "save_error");
-    let partial_hint = wav.partial_path().to_path_buf();
-    if folder_ok {
-        match wav.finalize() {
-            Ok(path) => {
-                let ended_ms = engine.clock.unix_millis().max(started_ms);
-                let duration_ms = frames.saturating_mul(1_000) / u64::from(INTERNAL_SAMPLE_RATE);
-                let sidecar = Sidecar {
-                    id: id.raw(),
-                    started_at_unix_ms: started_ms,
-                    ended_at_unix_ms: ended_ms,
-                    duration_ms,
-                    microphone_id,
-                    system_audio_id,
-                    problems,
-                };
-                let _ = write_sidecar(&path, &sidecar);
-                return Err(failure);
-            }
-            Err(error) => {
-                tracing::error!(error = %error, "finalize after failure did not complete");
-                return rescue_existing_partial(&partial_hint, &engine.rescue_dir, failure);
-            }
+    match wav.finalize() {
+        Ok(path) => {
+            let ended_ms = engine.clock.unix_millis().max(started_ms);
+            let duration_ms = frames.saturating_mul(1_000) / u64::from(INTERNAL_SAMPLE_RATE);
+            let sidecar = Sidecar {
+                id: id.raw(),
+                started_at_unix_ms: started_ms,
+                ended_at_unix_ms: ended_ms,
+                duration_ms,
+                microphone_id,
+                system_audio_id,
+                problems,
+            };
+            let _ = write_sidecar(&path, &sidecar);
         }
-    }
-    let partial = match wav.release_partial() {
-        Ok(path) => path,
         Err(error) => {
-            tracing::error!(error = %error, "partial recording handle was not released");
-            return rescue_existing_partial(&partial_hint, &engine.rescue_dir, failure);
-        }
-    };
-    rescue_existing_partial(&partial, &engine.rescue_dir, failure)
-}
-
-fn rescue_existing_partial(
-    partial: &Path,
-    rescue_dir: &Path,
-    failure: &'static str,
-) -> Result<RecordSnapshot, &'static str> {
-    if !partial.exists() {
-        tracing::error!("partial recording bytes are not readable");
-        return Err(failure);
-    }
-    match rescue_partial(partial, rescue_dir) {
-        Ok(_) => Err(NOTICE_RESCUED),
-        Err(error) => {
-            tracing::error!(error = %error, "rescue copy was not possible");
-            Err(if partial.exists() {
-                NOTICE_PARTIAL_KEPT
-            } else {
-                failure
-            })
+            tracing::error!(error = %error, "finalize after failure did not complete");
         }
     }
+    Err(failure)
 }
 
 fn frame_now(origin: SessionOrigin, performance: &dyn PerformanceCounter) -> u64 {
@@ -1159,7 +1099,6 @@ mod tests {
             gain: std::sync::Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
             pipeline: Box::new(PassThroughPipelineFactory),
             lease: std::sync::Arc::new(crate::services::lease::EndpointLease::new()),
-            rescue_dir: dir.join("rescue"),
             space_check_every: Duration::from_secs(30),
             write_fault: std::sync::Arc::new(AtomicBool::new(false)),
             folder_fault: std::sync::Arc::new(AtomicBool::new(false)),
@@ -1253,7 +1192,6 @@ mod tests {
             gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
             pipeline: Box::new(PassThroughPipelineFactory),
             lease: Arc::new(crate::services::lease::EndpointLease::new()),
-            rescue_dir: dir.join("rescue"),
             space_check_every: Duration::from_secs(30),
             write_fault: Arc::new(AtomicBool::new(false)),
             folder_fault: Arc::new(AtomicBool::new(false)),
@@ -1472,7 +1410,6 @@ mod tests {
             gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
             pipeline,
             lease: Arc::new(crate::services::lease::EndpointLease::new()),
-            rescue_dir: dir.join("rescue"),
             space_check_every: Duration::from_secs(30),
             write_fault: Arc::new(AtomicBool::new(false)),
             folder_fault: Arc::new(AtomicBool::new(false)),

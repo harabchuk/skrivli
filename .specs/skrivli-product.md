@@ -101,17 +101,17 @@ Device choices are locked while a recording is active; a lock icon replaces Chan
 - After stop, the recording is saved as a playable file with a dated name (for example `Skrivli_YYYY-MM-DD_HH-MM-SS`).
 - Starting is refused or clearly blocked when the save location is not usable.
 
-### Durability and recovery (user-visible)
+### Durability (user-visible)
 
 Users should trust that Skrivli tries to keep usable audio when things go wrong:
 
-- Interrupted recordings are recovered on next launch when possible (presented as recovered files, not silently discarded).
+- If a recording fails part way, Skrivli saves what it can as a normal recording and says what went wrong. A recording interrupted by a crash or power loss is not recovered.
 - Low disk space is warned; recording stops in a controlled way before the disk is exhausted when the app can detect it.
 - If a device is unplugged or becomes unavailable mid-session, the other source can keep going; gaps are reflected as silence rather than a broken timeline.
 - Closing the window to the tray leaves recording running. Quitting while recording asks to stop and save.
 - Windows logoff/shutdown triggers a best-effort save; there is no guarantee of unlimited time, but the app attempts to finalize what it can.
 
-Skrivli does not silently delete usable partial recordings.
+Skrivli does not silently delete usable partial recordings. Leftover unfinished files are not shown in the app.
 
 ---
 
@@ -126,13 +126,13 @@ Skrivli does not silently delete usable partial recordings.
 - With no recordings, the tab shows an empty state ("No recordings yet", with a **Start recording** button that switches to the Record tab; it does not start recording). When the folder cannot be read, the list says "Recordings unavailable" with the reason.
 - Opening the tab with nothing selected selects the newest recording. "Select a recording" shows only if there is nothing to select.
 - In a window narrower than 680 px the list sits above the detail instead of beside it.
-- In-progress captures are not treated as finished library entries until saved (except when presenting recovered files).
+- In-progress captures are not treated as finished library entries until saved.
 
 ### Detail and playback
 
 - Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · WAV`), then a player card.
 - A pencil icon next to the name (dimmed until the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Transcribe again…** (enabled only when the recording has a transcript and no job is queued or running) and **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
-- A warning note appears under the title when a recording was recovered after an interruption ("The end of this recording may be missing"), when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
+- A warning note appears under the title when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
 - The player card has a round Play/Pause button, the current time, a seek bar and the total time. Play starts from the seek bar position, Pause keeps the position, and Play again resumes. Dragging the seek bar moves nothing until it is released. When a recording ends the player returns to the start. Only WAV recordings can be played: for other formats the player is disabled with the tooltip "Only WAV playback is available".
 - While a recording plays or is paused, the transcript paragraph being spoken is highlighted and the list scrolls to it when it changes. If you scroll the transcript yourself, it is not scrolled again for 5 seconds.
 - Changing selection, renaming or deleting stops playback.
@@ -149,7 +149,6 @@ Skrivli does not silently delete usable partial recordings.
 | *n*% | In progress |
 | Transcript (green) | Transcript available |
 | Failed | Last attempt failed and there is no transcript; audio is still intact. A failed or cancelled attempt on a recording that already has a transcript shows the transcript again, with no badge change |
-| Recovered | Recovered after an interruption; shown when no transcript is running, queued or failed |
 
 ---
 
@@ -269,7 +268,7 @@ A new user can: unzip → launch → record microphone and system audio → stop
 
 - Combined microphone + system recording with continuous timeline
 - Local save to a chosen folder
-- Durable capture with recovery for common failures
+- Durable capture that keeps usable audio after common failures (device loss, low disk, write errors)
 - Recordings library with playback, rename, delete, open folder
 - Offline post-recording transcription with model install, progress, cancel, and copyable text
 - Tray lifecycle, single instance, essential settings, hotkey, and keyboard-accessible main flows

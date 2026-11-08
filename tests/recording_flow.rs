@@ -31,6 +31,19 @@ fn wav_files(dir: &std::path::Path) -> Vec<PathBuf> {
     files
 }
 
+fn assert_finalized_only(dir: &std::path::Path) {
+    let names: Vec<String> = fs::read_dir(dir)
+        .expect("read")
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(wav_files(dir).len(), 1, "files: {names:?}");
+    assert!(
+        names.iter().all(|name| !name.contains("partial")),
+        "files: {names:?}"
+    );
+}
+
 #[test]
 fn start_stop_writes_header_lengths_and_stop_is_idempotent() {
     // Arrange
@@ -244,14 +257,7 @@ fn mid_session_low_disk_stops_with_warning() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(harness.workers(), 0);
-    assert!(
-        !wav_files(&dir).is_empty()
-            || dir
-                .read_dir()
-                .expect("dir")
-                .flatten()
-                .any(|entry| entry.file_name().to_string_lossy().contains("partial"))
-    );
+    assert_finalized_only(&dir);
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -278,26 +284,12 @@ fn mid_session_write_fault_preserves_usable_output() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(harness.workers(), 0);
-    let has_artifact = !wav_files(&dir).is_empty()
-        || dir.read_dir().expect("dir").flatten().any(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            name.contains("partial") || name.contains("rescued")
-        })
-        || harness
-            .rescue_dir()
-            .read_dir()
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .any(|entry| entry.file_name().to_string_lossy().contains("rescued"))
-            })
-            .unwrap_or(false);
-    assert!(has_artifact);
+    assert_finalized_only(&dir);
     let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
-fn folder_fault_rescues_readable_partial() {
+fn folder_fault_finalizes_in_place_and_reports_folder() {
     // Arrange
     let dir = temp_dir("folder-fault");
     let harness = RecordingHarness::new(&dir);
@@ -312,9 +304,8 @@ fn folder_fault_rescues_readable_partial() {
     std::thread::sleep(Duration::from_millis(40));
     harness.inject_folder_fault();
     let failed = harness
-        .wait_notice_contains("rescue folder")
-        .or_else(|_| harness.wait_notice_contains("partial file was kept"))
-        .expect("rescue or partial");
+        .wait_notice_contains("The recordings folder is not writable")
+        .expect("folder notice");
 
     // Assert
     assert!(matches!(
@@ -328,18 +319,7 @@ fn folder_fault_rescues_readable_partial() {
     while harness.workers() > 0 && std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
-    let rescued = harness
-        .rescue_dir()
-        .read_dir()
-        .expect("rescue")
-        .flatten()
-        .any(|entry| entry.file_name().to_string_lossy().contains("rescued"));
-    let partial_kept = dir
-        .read_dir()
-        .expect("dir")
-        .flatten()
-        .any(|entry| entry.file_name().to_string_lossy().contains("partial"));
-    assert!(rescued || partial_kept || !wav_files(&dir).is_empty());
+    assert_finalized_only(&dir);
     let _ = fs::remove_dir_all(dir);
 }
 
