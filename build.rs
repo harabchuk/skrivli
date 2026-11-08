@@ -14,8 +14,6 @@ fn main() {
     resources.set_icon("resources/skrivli.ico");
     resources.set("FileDescription", "Local Windows meeting recorder");
     resources.set("ProductName", "Skrivli");
-    resources.set("FileVersion", "0.1.0.0");
-    resources.set("ProductVersion", "0.1.0.0");
     resources.set("OriginalFilename", "skrivli.exe");
     resources.set("InternalName", "skrivli");
     if let Err(error) = resources.compile() {
