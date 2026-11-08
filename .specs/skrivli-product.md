@@ -110,7 +110,7 @@ Users should trust that Skrivli tries to keep usable audio when things go wrong:
 - If a device is unplugged or becomes unavailable mid-session, the other source can keep going; gaps are reflected as silence rather than a broken timeline.
 - Closing the window to the tray leaves recording running. Quitting while recording asks to stop and save.
 - A single recording stops by itself after 12 hours. The file is finalized and the app shows "Recording stopped because it reached the 12 hour limit."
-- Recordings are saved as `.flac` files (written as `.flac.partial` until you stop). Older `.wav` and `.m4a` files in the folder are not listed, played or transcribed; they are left untouched on disk.
+- Recordings are saved as `.flac` files (written as `.flac.partial` until you stop). Audio files in other formats in the folder are not listed, played or transcribed; they are left untouched on disk.
 - Windows logoff/shutdown triggers a best-effort save; there is no guarantee of unlimited time, but the app attempts to finalize what it can.
 
 Skrivli does not silently delete usable partial recordings. Leftover unfinished files are not shown in the app.

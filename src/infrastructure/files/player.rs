@@ -255,7 +255,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("dir");
         let path = dir.join("junk.flac");
-        fs::write(&path, b"RIFF....WAVE").expect("junk");
+        fs::write(&path, b"OggS....junk").expect("junk");
 
         // Act
         let result = FlacSource::open(&path);

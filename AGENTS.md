@@ -30,7 +30,7 @@ src/
 ├── services/             # recording, level monitor, transcription, ports
 ├── infrastructure/
 │   ├── audio/            # flexaudio capture, mixer, resample, device catalog
-│   ├── files/            # WAV, optional M4A, reader, player
+│   ├── files/            # FLAC writer, reader, player
 │   ├── ai/               # whisper.cpp, model files
 │   ├── storage/          # settings, library, sidecars
 │   └── platform/         # sole OS tree: windows/ today; cfg selects host

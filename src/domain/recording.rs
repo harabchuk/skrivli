@@ -389,7 +389,7 @@ mod tests {
             RecordingContainer::from_extension("flac"),
             Some(RecordingContainer::Flac)
         );
-        assert_eq!(RecordingContainer::from_extension("wav"), None);
+        assert_eq!(RecordingContainer::from_extension("ogg"), None);
         assert_eq!(RecordingContainer::from_extension("m4a"), None);
         assert_eq!(RecordingContainer::from_extension("partial"), None);
     }

@@ -198,19 +198,19 @@ mod tests {
         let dir = temp_dir("bad");
         let partial = dir.join("clip.flac.partial");
         fs::write(&partial, b"fLaC").expect("partial");
-        let wav = dir.join("clip.wav");
-        fs::write(&wav, b"RIFF").expect("wav");
+        let ogg = dir.join("clip.ogg");
+        fs::write(&ogg, b"OggS").expect("ogg");
         let mp3 = dir.join("clip.mp3");
         fs::write(&mp3, b"ID3").expect("mp3");
 
         // Act
         let partial_err = TranscriptFlacReader::open(&partial).err().expect("partial");
-        let wav_err = TranscriptFlacReader::open(&wav).err().expect("wav");
+        let ogg_err = TranscriptFlacReader::open(&ogg).err().expect("ogg");
         let mp3_err = TranscriptFlacReader::open(&mp3).err().expect("mp3");
 
         // Assert
         assert!(partial_err.to_string().contains("partial"));
-        assert!(wav_err.to_string().contains("wav"));
+        assert!(ogg_err.to_string().contains("ogg"));
         assert!(mp3_err.to_string().contains("mp3"));
         assert_eq!(
             AppError::message("transcription", "x").user_message(),
@@ -224,7 +224,7 @@ mod tests {
         // Arrange
         let dir = temp_dir("junk");
         let path = dir.join("junk.flac");
-        fs::write(&path, b"RIFF....WAVE").expect("junk");
+        fs::write(&path, b"OggS....junk").expect("junk");
 
         // Act
         let error = TranscriptFlacReader::open(&path).err().expect("junk");

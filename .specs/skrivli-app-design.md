@@ -380,7 +380,7 @@ System loopback uses flexaudio’s classic silent-render keepalive so idle endpo
 - When stopping: drain queued samples, flush and close the writer, persist metadata, and finalize (STREAMINFO with sample count and MD5, seek table) and rename to final `.flac`. Use a unique temporary path within the destination directory to keep rename semantics reliable.
 - Check free space before start and periodically (~30 s). Below a safety threshold (initially 200 MB) stop gracefully, finalize what can be saved, and notify.
 - After a failure during a session (write error, folder not writable, low disk, worker panic), note the problem and always try to finalize (rename to `.flac` and write the sidecar). If finalize fails, leave the `.flac.partial` where it is and report the original failure. Nothing scans for or repairs partials on launch. **Do not promise that already-failed filesystem writes can be recovered.**
-- There is no post-processing, conversion or WAV retention. FLAC is written directly. Old `.wav` / `.m4a` files are not listed, played or transcribed (no backward compatibility).
+- There is no post-processing or conversion. FLAC is written directly. Files in other formats are not listed, played or transcribed (no backward compatibility).
 - Store a sidecar `<basename>.json` containing start/end, duration, chosen device IDs, format, recording problems, transcription state, model and transcript linkage. Use a versioned schema and atomic JSON writes.
 
 ### 6.6 Recording lifecycle
@@ -412,7 +412,7 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 
 ### 7.2 Input normalization and chunking
 
-- Decode finalized `.flac` files with `flac-codec` in bounded chunks (`transcript_reader.rs`); refuse `.partial` and any non-FLAC file, naming the format. MP3 and WAV are not supported.
+- Decode finalized `.flac` files with `flac-codec` in bounded chunks (`transcript_reader.rs`); refuse `.partial` and any non-FLAC file, naming the format. Other formats are not supported.
 - Convert decoded input to **16 kHz mono `f32`** with explicit downmix and anti-alias resampling. Verify sample counts and timestamps.
 - Do not decode a two-hour file into a single in-memory buffer. Stream/cut long recordings into approximately **10-minute chunks** with a 30-second overlap, offset segment timestamps and deduplicate content in overlap regions.
 - Keep audio source immutable during transcription. A failed job must never alter the recorded file.
