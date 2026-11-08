@@ -23,7 +23,7 @@ Skrivli is distributed as a portable Windows application in a ZIP archive.
 
 ## Features
 
-- **Records both sides of a call.** Your microphone and system audio go into one continuous WAV file. Silence is kept, so the timing stays correct.
+- **Records both sides of a call.** Your microphone and system audio go into one continuous FLAC file (lossless, 16-bit stereo 48 kHz). Silence is kept, so the timing stays correct.
 - **Echo removal.** When system audio is captured, speaker echo is removed from the microphone automatically.
 - **Live level meters** for each source, with peak hold and a manual microphone gain slider.
 - **Device selection.** Pick any Windows microphone or output device. Devices are locked while recording.

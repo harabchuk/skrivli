@@ -78,7 +78,9 @@ The second source did not change the policy. Microphone and loopback each have o
 
 **Normal stop drains every layer:** the worker calls flexaudio `stop` and polls the chunks still in flexaudio's ring as its docs direct. It does not resample. The session then closes the stream and pulls the queue empty. The pipeline flushes its resamplers into the aligner before the tail pull, so the end of a recording is not cut off. The flush can add up to about 10 ms of mostly silent audio. Queue rejection still applies during this drain, because the worker runs before `close` returns and cannot wait for the session. A fatal capture error is queued after the remaining audio. A forced stop from low disk, a write failure, or the size limit does not drain.
 
-## D-05 — RIFF size limit
+## D-05 — Recording size limit (superseded by D-29)
+
+> Superseded 2026-11-08: recordings are FLAC with a 12 hour cap, see D-29. The text below is the original WAV decision, kept for history.
 
 **Outcome:** recordings are canonical PCM16 stereo 48 kHz RIFF, not RF64. Encoding uses the `hound` crate (`WavWriter` + periodic `flush` for header repair, `finalize` on close). The header is 44 bytes. The RIFF size field stores `36 + data_bytes` and must fit in `u32`, so the largest safe payload is `u32::MAX - 36` (`4_294_967_259` bytes, about 6 h 13 min). Before a write that would pass that limit, the writer emits only the frames that still fit, repairs the header, and stops. It does not publish a header whose length fields disagree with the bytes on disk. Lengths are rewritten about every 2 s of audio and again on finalize. A crash leaves `*.wav.partial` in place; nothing repairs it afterwards (see D-23).
 
@@ -100,7 +102,7 @@ Rescue copy and startup recovery were removed later, see D-23.
 
 - **Sidecar home:** write+load live in `infrastructure/storage/sidecar.rs` (schema **v3**, still accepts v2). `infrastructure/files/sidecar.rs` re-exports write for the recording service. Transcription fields default empty until M6; a present `.txt` surfaces as Ready.
 - **Identity:** `RecordingId` from sidecar `id` when valid; unpaired/malformed entries use a synthetic FNV-1a of the display stem. Selection is preserved by id across rescans and in-app renames that keep the sidecar. External rename of unpaired files may drop selection (no durable id without sidecar).
-- **Catalog:** `LibraryHost` scans on a worker; `*.wav.partial` skipped; `*.recovered.wav` (from older builds) is listed as a plain WAV; `.m4a` listed if present (playback deferred — WAV only). Colliding sidecar ids keep both rows.
+- **Catalog:** `LibraryHost` scans on a worker; `*.wav.partial` skipped; (Superseded by D-29: only `.flac` is listed; `.wav`, `.m4a` and `*.recovered.wav` are not.) Colliding sidecar ids keep both rows.
 - **Watch:** `FindFirstChangeNotificationW` with ~350 ms debounce plus a 30 s poll fallback. Missing folders poll until they appear.
 - **Delete:** `SHFileOperationW` with `FOF_ALLOWUNDO` (Recycle Bin) for audio + `.json` + `.txt` after confirm.
 - **Playback:** superseded by D-22 (Rodio). Selection change, delete and rename stop playback.
@@ -265,7 +267,7 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 ## D-22 — Playback engine is Rodio 0.21.1 (Phase 5 of the Recordings UI plan)
 
-**Outcome:** playback uses `rodio = "=0.21.1"` with `default-features = false` and features `playback` and `hound`, behind the `PlaybackOutput` and `PlaybackSession` ports. Rodio 0.21.1 depends on cpal `^0.16`, so `Cargo.lock` still has one cpal (0.16.0) and one hound (3.5.1), and no symphonia. Rodio 0.22 needs cpal 0.17, so do not upgrade without moving the capture code too. The cpal dependency stays for device code.
+**Outcome:** playback uses `rodio = "=0.21.1"` with `default-features = false` and features `playback` and `hound` (`hound` removed by D-29; only `playback` remains), behind the `PlaybackOutput` and `PlaybackSession` ports. Rodio 0.21.1 depends on cpal `^0.16`, so `Cargo.lock` still has one cpal (0.16.0) and one hound (3.5.1), and no symphonia. Rodio 0.22 needs cpal 0.17, so do not upgrade without moving the capture code too. The cpal dependency stays for device code.
 
 **Verified by reading the Rodio 0.21.1 source and by building:** the player type is `Sink` (`Sink::connect_new(stream.mixer())`, `append`, `pause`, `play`, `try_seek`, `get_pos`, `empty`). The stream comes from `OutputStreamBuilder::open_default_stream()` and holds a `cpal::Stream`, so it is kept with the sink inside one session object on the player worker (sink dropped before stream). `Decoder::new_wav` with the `hound` feature gives `total_duration` and frame-based seeking (`hound` `seek`, saturated at the end). `try_seek` blocks until the audio thread answers (a few ms, the sink polls every 5 ms), runs on the worker only, and silently does nothing if the sink is already empty. `get_pos` is refreshed every 5 ms by the sink. The mixer wraps every source in `UniformSourceIterator`, so a file rate or channel count different from the device is converted in Rodio. The hound seek converts the time to frames with `f32`, so on a 1 h 48 kHz file the target can be off by a few frames (under 1 ms); this is source reading, not a measurement. Unit tests use a fake `PlaybackOutput` and need no hardware.
 
@@ -309,3 +311,19 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 ## D-28 — Version comes only from `Cargo.toml` (release plan R1)
 
 **Outcome:** `build.rs` no longer sets a version. The release exe reports `ProductVersion` 0.1.0 and `FileVersionRaw` 0.1.0.0, matching `Cargo.toml`.
+
+## D-29 — WAV replaced by FLAC (2026-11-08)
+
+**Outcome:** FLAC is the only format Skrivli saves, plays and transcribes: 16-bit stereo 48 kHz, compression level 5, `Skrivli_YYYY-MM-DD_HH-MM-SS[-N].flac`, written as `.flac.partial` and renamed on finalize. Implemented in `infrastructure/files/flac.rs` (`FlacWriter`), `player.rs` (`FlacSource`) and `transcript_reader.rs`.
+
+**Pinned:** `flac-codec = "1.3"` in `Cargo.toml`, locked at **1.3.3** in `Cargo.lock`. Rodio stays `=0.21.1` with only the `playback` feature. `hound` and rodio's `hound` feature are removed. `RecordingContainer` has only `Flac` (`Wav` and `M4a` removed).
+
+**Durability:** blocks are flushed and `sync_all`ed about every 2 s. A crash leaves `.flac.partial` with a STREAMINFO that has no total samples or MD5; nothing repairs or lists it (D-23 still applies).
+
+**Padding:** the encoder reserves an 80,000-byte PADDING block. At finalize the writer rewrites STREAMINFO and a seek table into that space in place, without moving audio. One seek point per 10 s at 18 bytes each is 77,760 bytes for 12 h, so the table fits. Playback seeks then do not decode from the start.
+
+**Cap:** the 4 GB RIFF safe stop (D-05) is replaced by a **12 hour duration cap**. At the cap the writer keeps the frames that fit, the session finalizes, and the user sees "Recording stopped because it reached the 12 hour limit."
+
+**No backward compatibility:** old `.wav`, `.m4a`, `.wav.partial` and `.recovered.wav` files are not listed, played or transcribed. They are never touched or deleted.
+
+**Not verified on hardware:** seek accuracy and latency on a FLAC longer than one hour, and playback of a 12 h file. Unit and integration tests need no hardware.

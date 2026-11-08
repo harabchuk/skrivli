@@ -55,8 +55,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | Audio capture | flexaudio 0.8 (`Mic` + `SystemLoopback`) behind `CapturePort` | Dedicated worker threads; classic loopback keepalive on |
 | Device format conversion | flexaudio normalizer to 48 kHz stereo `f32`. The pipeline's Rubato nudge runs on the session thread | Internal 48 kHz stereo `f32`; device ids from `flexaudio::devices()` |
 | Audio pipeline | `Pipeline` on the session thread, bounded SPSC buffers | Align, mono microphone downmix, echo cancellation, sonora microphone gain, fixed system gain, sum, soft limit, peak taps |
-| Recording | PCM16 stereo 48 kHz WAV first | `.wav.partial` while writing; renamed to `.wav` on finalize |
-| Optional FLAC | `flac-codec` encode/decode | Post-processing worker; user opt-in |
+| Recording | `flac-codec` 1.3 `FlacSampleWriter`, PCM16 stereo 48 kHz, level 5 | Streamed straight to `.flac.partial`; renamed to `.flac` on finalize. FLAC is the only container |
 | Transcription | whisper.cpp via maintained Rust bindings or a pinned FFI adapter | Local CPU inference; explicitly controlled native build, optional acceleration later |
 | Default model | Quantized multilingual `base` model, subject to verified catalog/hash | Model isn't shipped; download only after user confirmation |
 | Persistent settings | `serde` + `serde_json` under `%APPDATA%\Skrivli\settings.json` | Atomic replacement and validation |
@@ -112,7 +111,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
  ┌──────────▼───────────────────────────▼───────────────────▼──────────────┐
  │ infrastructure/                                                      │
  │  audio: flexaudio mic + loopback → SPSC → Pipeline → peak snapshots │
- │  files: WAV writer / Rodio output / writability probe / FLAC │
+ │  files: FLAC writer / Rodio output / writability probe │
  │  ai: decode → 16 kHz mono → whisper.cpp → transcript                  │
  │  storage: settings / library / sidecars (no OS APIs)                 │
  │  platform/: shell, tray, trash, watch, replace, clocks, disk, wake   │
@@ -133,7 +132,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
 | Pipeline/writer thread | Align 10 ms blocks, run the chains, write the file, publish meter snapshots | Bounded latency; protect recording on I/O error |
 | Idle level-monitor worker(s) | Meter selected sources without recording | Stop/hand over before recording starts |
 | Transcription worker | At most one queued job at a time, decode/model infer/save | Cancellation, progress, no GPUI access |
-| Optional storage watcher/encoder | Directory notifications and FLAC conversion | Debounce updates; no UI thread I/O |
+| Optional storage watcher | Directory notifications | Debounce updates; no UI thread I/O |
 
 Use bounded channels/queues for commands and discrete events (`RecordingStarted`, `RecordingStopped { path }`, `RecordingFailed`, `TranscriptProgress`, `TranscriptReady`, `DevicesChanged`). Aggregate high-rate meter data into atomic snapshots and read it from a GPUI-owned timer/task at about 30 Hz; **never send one GPUI notification per audio frame**. Route worker events back to UI through a thread-safe application bridge scheduled on the GPUI foreground executor, using the *pinned* GPUI revision's supported API. Avoid `std::thread::spawn` without a shutdown owner; retain join handles or supervised worker lifecycle.
 
@@ -187,7 +186,7 @@ Do not sprinkle `cfg` through views, services, domain, or storage. If a call nee
 - **User directories.** Fill the three bases `AppPaths::from_bases` already takes. Windows: `%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`. A macOS host maps Application Support, Logs, and the home directory. A Linux host maps XDG config, state, and home. Default recordings stay under Documents via `AppPaths::recordings_dir`.
 - **Recording clock, performance counter, free space.** `RecordingClock::local` is civil local time. `PerformanceCounter::sample` returns `(ticks, ticks_per_second)` for the existing timeline in `domain/chunk_plan.rs` (Windows: QPC). `FreeSpace` reports bytes available for the recordings directory (Windows: `GetDiskFreeSpaceExW`).
 - **Capture.** Do not write a new `CapturePort` for Linux or macOS. flexaudio already selects the backend (cpal mic; PipeWire, WASAPI, or macOS system loopback) and normalizes to 48 kHz stereo `f32`. Keep `infrastructure/audio/flex_capture.rs`. Pass that OS’s `PerformanceCounter` into the existing adapters so the worker does not call QPC. Re-enumerate with `flexaudio::devices()` into the same `DeviceCatalog`. Implement `spawn_device_watch` for that OS: Windows needs `IMMNotificationClient` because flexaudio’s `DeviceWatcher` is a no-op except on Linux; an OS where `flexaudio::watch_devices` reports events should use that and still call `enumerate_catalog`. Do not change the pipeline. A capture adapter under `platform/<os>/` is only for a target flexaudio does not support.
-- **Playback.** `services/playback.rs` owns the command loop (`PlayerHost`: play, pause, resume, seek, stop). It talks to a `PlaybackOutput` port (a `Send` factory) whose `PlaybackSession` is created and used only on the player worker, because OS output streams are not `Send`. `files/player.rs` is the only Rodio user: Rodio 0.21 (cpal 0.16, default features off, only `playback` and `hound`) on the default output device. The worker uses `recv_timeout(100 ms)` while a session is live, and each tick publishes the end of playback (`Idle`, position 0) or a changed position. `PlayerSnapshot` carries `phase` (`Idle`, `Playing`, `Paused`, `Error`), `recording_id`, `notice`, `position_ms` and `duration_ms`; the bridge keeps only the latest one, so state, not events, is published. Seeking while paused stays paused, and a seek past the end clamps to the duration. Rename, delete and selection change stop playback first. Another OS output adapter would sit behind the same port.
+- **Playback.** `services/playback.rs` owns the command loop (`PlayerHost`: play, pause, resume, seek, stop). It talks to a `PlaybackOutput` port (a `Send` factory) whose `PlaybackSession` is created and used only on the player worker, because OS output streams are not `Send`. `files/player.rs` is the only Rodio user: Rodio 0.21 (cpal 0.16, default features off, only `playback`), fed by `FlacSource`, a `flac-codec` `FlacSampleReader` wrapped as a seekable Rodio `Source` on the default output device. The worker uses `recv_timeout(100 ms)` while a session is live, and each tick publishes the end of playback (`Idle`, position 0) or a changed position. `PlayerSnapshot` carries `phase` (`Idle`, `Playing`, `Paused`, `Error`), `recording_id`, `notice`, `position_ms` and `duration_ms`; the bridge keeps only the latest one, so state, not events, is published. Seeking while paused stays paused, and a seek past the end clamps to the duration. Rename, delete and selection change stop playback first. Another OS output adapter would sit behind the same port.
 - **Packaging.** Windows icon and manifest stay in `build.rs`. Add that OS’s bundle, `.desktop` file, or equivalent beside it. Do not compile `winresource` for the new target.
 - **Not built yet.** When autostart, global hotkey, or whisper.cpp land, their OS APIs and native build flags go under `platform/<os>/` (or that crate’s build script), behind a port in `services/ports.rs`. Services do not link shell or inference libraries themselves.
 
@@ -270,10 +269,9 @@ skrivli/
 │   │   │   └── sidecar.rs
 │   │   ├── files/
 │   │   │   ├── mod.rs
-│   │   │   ├── wav.rs
-│   │   │   ├── flac.rs
-│   │   │   ├── reader.rs
-│   │   │   ├── player.rs           # Rodio output (PlaybackOutput adapter)
+│   │   │   ├── flac.rs             # FlacWriter
+│   │   │   ├── transcript_reader.rs  # bounded-chunk FLAC decode for Whisper
+│   │   │   ├── player.rs           # Rodio output + FlacSource (PlaybackOutput adapter)
 │   │   │   └── writable.rs         # recordings folder probe
 │   │   └── platform/
 │   │       ├── mod.rs              # cfg(windows) → windows; else compile_error
@@ -330,7 +328,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `infrastructure/audio/` | flexaudio capture adapters, device catalog, the 48 kHz drift resampler, and the sonora echo and gain steps (no OS APIs). Production code imports `sonora` only in `sonora_steps.rs` |
 | `infrastructure/ai/` | Whisper engine integration and local model management |
 | `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
-| `infrastructure/files/` | WAV writer, Rodio output session, transcript reader, writability probe, optional FLAC |
+| `infrastructure/files/` | FLAC writer, Rodio output session with FLAC source, transcript reader, writability probe |
 | `infrastructure/platform/` | Sole home for OS APIs: shell, tray, trash, watch, replace, clocks, disk, device wake |
 | `ui/` | Reusable GPUI Kit compositions and custom GPUI elements such as level meters |
 | `views/` | GPUI screens, shell reducer (`Presentation` / commands), window composition |
@@ -377,12 +375,12 @@ System loopback uses flexaudio’s classic silent-render keepalive so idle endpo
 
 ### 6.5 Audio files, metadata and crash safety
 
-- Name recordings `Skrivli_YYYY-MM-DD_HH-MM-SS.wav` in local time, with a collision suffix.
-- Write into `*.wav.partial` first, as **48 kHz, stereo, PCM16 WAV**, using the `hound` library for encoding and header updates. Ensure the writer can periodically repair its RIFF/data length fields (e.g. every two seconds) and finalize lengths on close. Standard RIFF size limitations must be handled explicitly: stop/rotate before overflow or adopt a compatible large-file format; do not silently create corrupt recordings.
-- When stopping: drain queued samples, flush and close the writer, persist metadata, and rename to final `.wav`. Use a unique temporary path within the destination directory to keep rename semantics reliable.
+- Name recordings `Skrivli_YYYY-MM-DD_HH-MM-SS.flac` in local time, with a collision suffix.
+- Write into `*.flac.partial` first, as **48 kHz, stereo, 16-bit FLAC** (compression level 5) with `flac-codec`'s `FlacSampleWriter`. Encoded blocks are flushed and `sync_all`ed about every 2 s of audio, so a crash leaves a partial whose STREAMINFO lacks the total sample count and MD5. Encoder options reserve an **80,000-byte PADDING block** so finalize can rewrite STREAMINFO and a seek table (one point per 10 s, 18 bytes each, enough for 12 h) in place without moving audio. Size is bounded by a **12 hour duration cap** (`MAX_RECORDING_SECONDS`): the writer accepts the frames that fit, returns `FlacWrite::SafeStop`, and the session finalizes and shows "Recording stopped because it reached the 12 hour limit."
+- When stopping: drain queued samples, flush and close the writer, persist metadata, and finalize (STREAMINFO with sample count and MD5, seek table) and rename to final `.flac`. Use a unique temporary path within the destination directory to keep rename semantics reliable.
 - Check free space before start and periodically (~30 s). Below a safety threshold (initially 200 MB) stop gracefully, finalize what can be saved, and notify.
-- After a failure during a session (write error, folder not writable, low disk, worker panic), note the problem and always try to finalize (rename to `.wav` and write the sidecar). If finalize fails, leave the `.wav.partial` where it is and report the original failure. Nothing scans for or repairs partials on launch. **Do not promise that already-failed filesystem writes can be recovered.**
-- Optional post-recording lossless FLAC encoding with the `flac-codec` crate; only remove WAV after verifying the output (reopen/decode) and if user opted in.
+- After a failure during a session (write error, folder not writable, low disk, worker panic), note the problem and always try to finalize (rename to `.flac` and write the sidecar). If finalize fails, leave the `.flac.partial` where it is and report the original failure. Nothing scans for or repairs partials on launch. **Do not promise that already-failed filesystem writes can be recovered.**
+- There is no post-processing, conversion or WAV retention. FLAC is written directly. Old `.wav` / `.m4a` files are not listed, played or transcribed (no backward compatibility).
 - Store a sidecar `<basename>.json` containing start/end, duration, chosen device IDs, format, recording problems, transcription state, model and transcript linkage. Use a versioned schema and atomic JSON writes.
 
 ### 6.6 Recording lifecycle
@@ -414,7 +412,7 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 
 ### 7.2 Input normalization and chunking
 
-- Decode WAV/MP3 using a validated library; decode FLAC with `flac-codec` when needed. Do not assume any one decoder supports all target formats.
+- Decode finalized `.flac` files with `flac-codec` in bounded chunks (`transcript_reader.rs`); refuse `.partial` and any non-FLAC file, naming the format. MP3 and WAV are not supported.
 - Convert decoded input to **16 kHz mono `f32`** with explicit downmix and anti-alias resampling. Verify sample counts and timestamps.
 - Do not decode a two-hour file into a single in-memory buffer. Stream/cut long recordings into approximately **10-minute chunks** with a 30-second overlap, offset segment timestamps and deduplicate content in overlap regions.
 - Keep audio source immutable during transcription. A failed job must never alter the recorded file.
@@ -512,14 +510,14 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 - Right pane: empty state until selected; then **Play / Stop**, file metadata, and one transcript area chosen by `views/recordings.rs` `TranscriptPane` (`NoTranscript`, `Queued`, `Running`, `Failed`, `Ready`, `Unreadable`), mapped by the pure `transcript_pane`. A finished transcript is a scrolling list: `<basename>.txt` is read and parsed with `domain::transcript::parse_transcript` on `background_spawn`; `MainWindow` stores the paragraphs and a GPUI `ListState` (imported as `ParagraphListState`, because Kit has its own `ListState`). The list state resets only when the loaded text changes, so a progress tick or a reload of identical text keeps the scroll position. PageUp, PageDown, Home and End scroll it while it has focus. The Kit `Clipboard` button copies `Presentation::loaded_transcript()`. Text selection is not supported (D-21). A missing `.txt` on a Ready row shows the `Unreadable` pane with `user_message`, not a panic. Cancel is rendered only when the selected recording has an active job.
 - Actions: Play, Transcribe, Cancel, Retry, Model, Open folder, Rename, Delete, Refresh (header icon buttons for Open folder and Refresh). Transcribe is disabled while that recording is queued or running. Cancel is enabled only then. Retry is a `Transcribe` command for a row whose status is Failed. The list is a Kit `v_virtual_list` over `LibraryItem` values (day headers and rows) that `MainWindow` rebuilds from `RecordingRow`s; a progress tick changes one row's badge in place without reordering or resetting scroll, and the status strip updates alongside. Rows are always newest first; there is no sorting. Delete goes to the Windows Recycle Bin through a Windows Shell adapter and includes associated audio/`.txt`/`.json`; ask for confirmation and handle partial failures. Rename and delete notify the transcription host before files change. A queued or running job for that recording is cancelled, or a rename that lands before the transcript write retargets the same id.
 - Double-click/Enter can start playback; selection change stops playback by design.
-- Background directory watcher debounces changes; the library scans WAV/FLAC files and matches sidecars/transcripts. Preserve selected recording after refresh.
+- Background directory watcher debounces changes; the library scans `.flac` files and matches sidecars/transcripts. Preserve selected recording after refresh.
 - Playback audio runs through `services/playback` and the Rodio session in `files/player` (behind the `PlaybackOutput` and `PlaybackSession` ports in `services/ports.rs`); never decode files or drive playback from GPUI rendering.
 
 ### 8.4 Model prompt and settings
 
 **Model prompt:** `views/model_prompt.rs`, opened from the Recordings detail pane. The body uses the shared `DIALOG_WIDTH` (520px, `ui/components/dialog_style.rs`, which also holds the subtitle, footer and footer-note helpers). It always lists the manifest variants as `model_card`s (`ui/components/model_card.rs`: a `ListItem` with a `Radio` keyboard stop, name and `model_tag`, description from `model_copy`, Speed/Accuracy dots, size or "On this PC", and an optional Kit `Progress` block and danger-coloured failure text for the card's model). `ModelPromptView` carries plain `ModelCardData`; `download_progress_text` computes the approximate amount from the manifest size and whole percent. Other cards are disabled and dimmed while downloading. The network note shows in the footer only for `ModelFooter::Download`. The footer shows only the buttons that apply, chosen by `model_footer` (Close + Download with size, Close + Use name, Done, Cancel download, Close + Retry download). A pure `error_display(dialog_open)` sends distinct model errors inline (danger text in the dialog) while the dialog is open and to a Kit alert otherwise. Download, cancel, and retry are `AppCommand` effects the window hands to `ModelHost` off `render`; Download sends the selected variant id, and Retry repeats that id. Clicking a row only highlights it (`select_prompt_model`); `AppCommand::UseModel` (a Use button, enabled for an installed model that is not in use) or a finished download saves the selection. `Presentation` records the `download_target` (set by `begin_download`, which marks the phase Downloading immediately) and hands it over once through `take_installed_target` when the phase is Ready and the file is listed; `model_install_state` is the single rule for in use / installed / not installed. The window asks the model worker for the installed list at startup (`model_files_known` separates unchecked from empty). The dialog is closable (Close, X, Escape, backdrop) whenever no download is running; `on_close` clears `model_prompt_open`, the download target and any pending transcription, and `on_ok` returns false so Enter does not dismiss. Each opening resets the highlight to the saved model. A missing-model Transcribe stores `pending_transcription`; `after_model_ready` closes the dialog and starts that job when a model is chosen, and does nothing when there is none. Retry is offered only when the highlighted model is the download target. Verification errors use Kit alerts only when the dialog is not open.
 
-**Settings:** recording directory, default endpoints, microphone gain, optional stems, FLAC and WAV retention; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
+**Settings:** recording directory, default endpoints, microphone gain, optional stems; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
 
 ### 8.5 System tray (native Windows integration)
 
@@ -548,7 +546,7 @@ Use an OS-level named mutex such as `Local\Skrivli.SingleInstance`. A second ins
 | Loopback silent | Preserve monotonic recording time; fill missing source with zeros |
 | Device clock drift | Compensate conservatively and expose diagnostic counters in logs |
 | Destination deleted/unmounted/full | Stop and finalize as safely as possible; if finalize fails, leave the partial and report |
-| Recording writer/encoder failure | Preserve usable WAV, report problem and never silently overwrite |
+| Recording writer/encoder failure | Preserve usable FLAC, report problem and never silently overwrite |
 | Corrupt/missing transcription model, OOM | Mark failed, keep audio intact, allow retry |
 | Worker panic/shutdown | Surface fatal service state; join/clean up workers |
 | Closing window while recording | Close-to-tray does not stop recording; explicit Exit requests save confirmation |
@@ -593,7 +591,7 @@ Put small tests beside Rust implementations with `#[cfg(test)] mod tests`; extra
 - Ring buffer: capacity, SPSC order, wrap-around, overflow policy and concurrent stress tests.
 - Pipeline and aligner: QPC alignment, silent intervals, overlapping and late packets, bounded wait, 100 ppm simulated drift, microphone and system gain, the soft limiter, mono downmix, and echo-reference order.
 - Resampler: the capture nudge is 48 kHz to 48 kHz and reads the aligner error directly. Transcription uses a separate 48 kHz to 16 kHz path: a 1 kHz sine retains pitch and amplitude, content above 8 kHz is attenuated, and stereo downmix is checked.
-- WAV: correct RIFF sizes and PCM16 encoding, periodic repair, large-file boundary handling.
+- FLAC: PCM16 round trip, periodic flush, finalize (STREAMINFO, seek table, padding), 12 h cap boundary math, seekable playback source.
 - Transcript: time formatting beyond one hour, paragraph grouping, repeated-line suppression, overlap chunk stitching.
 - Library: audio/text/JSON pairing, sorting, stable selection keys, malformed metadata, partials skipped.
 - Services: invalid transitions, idempotent stop, cancellation, retry, startup failure rollback, single-job queue behavior.
@@ -605,7 +603,7 @@ Root `tests/recording_flow.rs` and `tests/transcription_flow.rs` should exercise
 
 ### 11.3 Windows hardware/manual verification
 
-- Record 10 minutes with intermittent system playback/speech, inspect WAV duration and sync using a shared audible cue.
+- Record 10 minutes with intermittent system playback/speech, inspect FLAC duration and sync using a shared audible cue.
 - Unplug/replug USB headset and change the Windows default audio device mid-take.
 - Record more than two hours; verify memory, file length limits, finalize behavior and long-transcript chunking.
 - Test silence while capturing loopback and check timeline continuity.
@@ -626,13 +624,13 @@ Each milestone ends with a runnable app or independently validated recording fun
 | --- | --- | --- |
 | **M0 — Foundation** | Cargo package, pinned Windows-tested GPUI Kit, manifest/resources, logging/settings skeleton, single-instance policy, COM threading design | Opens a GPUI window on target Windows hardware; Cargo checks pass |
 | **M1 — Shell UI** | Resizable tabbed window, placeholder Record/Recordings views, tray icon, close/minimize policy | UI/tray lifecycle works including Explorer restart |
-| **M2 — Microphone capture** | Device enumeration, single mic flexaudio capture, WAV `.partial`, folder picker, start/stop | Produces playable WAV and cleanly finalizes |
+| **M2 — Microphone capture** | Device enumeration, single mic flexaudio capture, FLAC `.partial`, folder picker, start/stop | Produces playable FLAC and cleanly finalizes |
 | **M3 — Loopback + mixer** | Loopback capture, timestamp alignment, ring buffers, mixer, gains, level meters and idle monitoring | Synthetic tests pass; real two-source sync verified |
 | **M4 — Robustness** | Endpoint changes, disk checks, privacy flow, shutdown behavior | Device loss and interrupted recording preserve usable data |
 | **M5 — Recording library** | Library scan/watch, sidecars, list, playback, rename/delete/open folder | Files remain correctly paired and selected (implemented; hardware browse/playback spot-check still recommended) |
 | **M6 — Transcription** | Pinned whisper.cpp binding, decoder/resampler, model manager, FIFO worker, text formatter | Offline transcription yields correct `.txt` and supports cancel |
 | **M7 — Transcript UI** | Paragraph list with Copy button, transcript statuses, progress and notification | Entire recording-to-transcript flow works from UI |
-| **M8 — Settings and polish** | Settings UI, hotkey/autostart, DPI and keyboard accessibility, optional FLAC | User preferences persist and critical interactions are accessible |
+| **M8 — Settings and polish** | Settings UI, hotkey/autostart, DPI and keyboard accessibility | User preferences persist and critical interactions are accessible |
 | **M9 — Release** | Release build, portable ZIP, licensing/README/privacy notes, manual test pass | Clean Windows machine can run app and record/transcribe |
 
 ---
@@ -647,12 +645,12 @@ Each milestone ends with a runnable app or independently validated recording fun
 | Silent loopback produces no packets | QPC timeline and silence insertion; investigate silent render keep-alive |
 | Drift between independent devices | Unit-test 100 ppm deviations; the pipeline reads aligner error and nudges each source's Rubato ratio |
 | Driver rejects requested format/conversion | Probe `IsFormatSupported`/mix format; test alternate converter path |
-| Long WAV exceeds RIFF 32-bit size | Monitor file length and stop/split or use compatible large-file format |
+| Very long session | 12 hour duration cap; FLAC has no 4 GB limit |
 | Speaker echo | Echo removal is always on while system audio is captured. There is no off switch. Double-talk can reduce the user's own voice while the far side is talking. The stored file is the processed mix, so a bad result cannot be recovered afterwards. |
 | Silence hallucination in Whisper | VAD when verified, conservative duplicate cleanup, progress/cancel |
 | whisper.cpp FFI/build mismatch | Pin tested native revision/binding; minimal isolated adapter; CI native-build test |
 | High CPU/memory on slow laptops | Quantized model choice, one inference job, bounded chunking, no blocking UI work |
-| Recording interrupted by crash/disk failure | Partial files, periodic WAV repair and actionable error |
+| Recording interrupted by crash/disk failure | Partial files, periodic flush/sync and actionable error |
 | Windows Shell/notification behavior changes | Native adapter with manual Windows/Explorer restart tests |
 
 ---
@@ -678,6 +676,6 @@ These are deliberate implementation choices to settle during M0–M3, not implic
 4. **Format conversion:** flexaudio converts the device rate to 48 kHz stereo `f32`. The pipeline resampler is 48 kHz to 48 kHz and reads the aligner's error directly (D-06).
 5. **Tray event bridge:** determine safe native HWND/message registration and shutdown interaction with the chosen GPUI Kit / GPUI Windows backend.
 6. **Model manifest:** pin actual model URLs, license terms, hashes and formats before exposing downloads.
-7. **Recording file maximum:** decide between RIFF-safe duration cap/rotation and RF64 or equivalent for long sessions.
+7. **Recording file maximum:** resolved (D-05, D-29): FLAC with a 12 hour duration cap.
 
 The implementation should favor the smallest working architecture, document real deviations in `.specs/`, and keep `AGENTS.md` and this design synchronized as decisions are validated.

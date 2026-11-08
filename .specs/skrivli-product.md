@@ -109,6 +109,8 @@ Users should trust that Skrivli tries to keep usable audio when things go wrong:
 - Low disk space is warned; recording stops in a controlled way before the disk is exhausted when the app can detect it.
 - If a device is unplugged or becomes unavailable mid-session, the other source can keep going; gaps are reflected as silence rather than a broken timeline.
 - Closing the window to the tray leaves recording running. Quitting while recording asks to stop and save.
+- A single recording stops by itself after 12 hours. The file is finalized and the app shows "Recording stopped because it reached the 12 hour limit."
+- Recordings are saved as `.flac` files (written as `.flac.partial` until you stop). Older `.wav` and `.m4a` files in the folder are not listed, played or transcribed; they are left untouched on disk.
 - Windows logoff/shutdown triggers a best-effort save; there is no guarantee of unlimited time, but the app attempts to finalize what it can.
 
 Skrivli does not silently delete usable partial recordings. Leftover unfinished files are not shown in the app.
@@ -130,10 +132,10 @@ Skrivli does not silently delete usable partial recordings. Leftover unfinished 
 
 ### Detail and playback
 
-- Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · WAV`), then a player card.
+- Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · FLAC`), then a player card.
 - A pencil icon next to the name (dimmed until the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Transcribe again…** (enabled only when the recording has a transcript and no job is queued or running) and **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
 - A warning note appears under the title when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
-- The player card has a round Play/Pause button, the current time, a seek bar and the total time. Play starts from the seek bar position, Pause keeps the position, and Play again resumes. Dragging the seek bar moves nothing until it is released. When a recording ends the player returns to the start. Only WAV recordings can be played: for other formats the player is disabled with the tooltip "Only WAV playback is available".
+- The player card has a round Play/Pause button, the current time, a seek bar and the total time. Play starts from the seek bar position, Pause keeps the position, and Play again resumes. Dragging the seek bar moves nothing until it is released. When a recording ends the player returns to the start. Every recording in the list can be played.
 - While a recording plays or is paused, the transcript paragraph being spoken is highlighted and the list scrolls to it when it changes. If you scroll the transcript yourself, it is not scrolled again for 5 seconds.
 - Changing selection, renaming or deleting stops playback.
 - Users can also open the recordings folder (list header icon button) and refresh the list (list header icon button).
@@ -211,7 +213,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 - Default microphone and system audio devices
 - Microphone gain, set with the manual slider
 - Optional separate source files (mic / system) — available when enabled; off by default
-- Optional lossless FLAC retention alongside or instead of WAV after a successful conversion — optional; WAV is never discarded on a failed conversion
+- Recordings are always saved as lossless FLAC (16-bit stereo 48 kHz). There is no format choice and no conversion step.
 
 ### Transcription
 
@@ -276,7 +278,6 @@ A new user can: unzip → launch → record microphone and system audio → stop
 
 ### Optional / deferrable without blocking core v1
 
-- Lossless FLAC post-processing
 - Separate mic/system stem files
 - Voice activity detection for transcription
 - Expanded theming and a full installer

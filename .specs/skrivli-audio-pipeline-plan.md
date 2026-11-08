@@ -1,5 +1,7 @@
 # Skrivli audio pipeline refactor plan
 
+> **2026-11-08:** recordings are FLAC-only now (D-29, `skrivli-flac-migration-plan.md`). WAV, `.wav.partial`, `hound` and RIFF mentions below describe the earlier design; read `.flac` / `.flac.partial` / `flac-codec` where they appear.
+
 Status: **Phases S (S1–S8) and 1–7 are done. Phase 8 updated the specs and added the sonora license notice. S9's 30-minute hardware drift measurement was not run, and the [section 11](#hardware-checks) hardware checks were not run.** Section 2 describes the pipeline this refactor replaced. `mixer.rs` is deleted. The phase checklists in [section 10](#10-migration-phases) track progress.
 
 **Goal in one sentence:** replace the all-in-one `Mixer` and the resampler hidden in the capture workers with one pipeline of swappable steps, use [sonora](https://github.com/dignifiedquire/sonora) for echo cancellation and microphone gain, and make audio readable at any processing point for meters and statistics.
