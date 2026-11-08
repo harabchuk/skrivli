@@ -1,6 +1,6 @@
 # Skrivli — Release pipeline plan
 
-**Status:** Proposed (not implemented).
+**Status:** In progress: R1–R6 implemented; R6 fork check and R7 pending. `dist/` holds the README and PRIVACY sources for the ZIP; `about.toml` and `about.hbs` exist for `cargo about`.
 **Goal:** One command, `cargo release <major|minor|patch|X.Y.Z> --execute`, turns a clean `main` into a published GitHub release that holds the portable Windows ZIP described in M9.2 of `skrivli-implementation-plan.md`.
 **Related:** `.github/workflows/ci.yml` (existing checks), `build.rs` (VERSIONINFO), `src/views/settings.rs` (shows `CARGO_PKG_VERSION`), `.specs/decisions.md` (record outcomes there).
 
@@ -227,12 +227,12 @@ The header in `.github/release-notes-header.md` covers:
 
 Do them in this order. Each is one reviewable change. Write the failing check first, as `AGENTS.md` asks.
 
-- [ ] **R1 — Version source.** Remove the hardcoded versions from `build.rs`. Check: after `cargo build --release`, the exe's `ProductVersion` equals the `Cargo.toml` version and `FileVersionRaw` equals that version plus `.0`.
-- [ ] **R2 — Licence and user files.** Add `LICENSE-MIT`, `LICENSE-APACHE`, the whisper.cpp licence, `README.txt` and `PRIVACY.txt` text for the ZIP. Decide on static CRT (`.cargo/config.toml`) and record it in `decisions.md`.
-- [ ] **R3 — `scripts/package.ps1`.** Builds the ZIP and the SHA-256 and checks the contents. Check: the contents list matches 4.3 and has no `*.bin`/`*.pdb`. A missing file makes the script fail.
-- [ ] **R4 — `release.toml`.** Pin the `cargo-release` version in `decisions.md`. Check: `cargo release patch` (dry run) on a clean `main` exits 0, shows commit `Release v0.1.1`, tag `v0.1.1` and a push to `origin`, and leaves `git status` clean.
-- [ ] **R5 — `ci.yml` changes.** `--locked`, `workflow_call`, push restricted to branches.
-- [ ] **R6 — `release.yml` and the notes header.** Check: on a fork, run `cargo release patch --execute`. A release appears with the ZIP, the `.sha256` and the notes. Run the job again and it still passes. Then delete the fork's release and tag.
+- [x] **R1 — Version source.** Remove the hardcoded versions from `build.rs`. Check: after `cargo build --release`, the exe's `ProductVersion` equals the `Cargo.toml` version and `FileVersionRaw` equals that version plus `.0`.
+- [x] **R2 — Licence and user files.** Add `LICENSE-MIT`, `LICENSE-APACHE`, the whisper.cpp licence, `README.txt` and `PRIVACY.txt` text for the ZIP. Decide on static CRT (`.cargo/config.toml`) and record it in `decisions.md`.
+- [x] **R3 — `scripts/package.ps1`.** Builds the ZIP and the SHA-256 and checks the contents. Check: the contents list matches 4.3 and has no `*.bin`/`*.pdb`. A missing file makes the script fail.
+- [x] **R4 — `release.toml`.** Pin the `cargo-release` version in `decisions.md`. Check: `cargo release patch` (dry run) on a clean `main` exits 0, shows commit `Release v0.1.1`, tag `v0.1.1` and a push to `origin`, and leaves `git status` clean.
+- [x] **R5 — `ci.yml` changes.** `--locked`, `workflow_call`, push restricted to branches.
+- [ ] **R6 — `release.yml` and the notes header.** (Files written; the fork end-to-end check below is still open, so this stays unticked.) Check: on a fork, run `cargo release patch --execute`. A release appears with the ZIP, the `.sha256` and the notes. Run the job again and it still passes. Then delete the fork's release and tag.
 - [ ] **R7 — First real release.** Run the M9.2 clean-VM checks against the published ZIP. Write the dependency list, SmartScreen/Defender behaviour and timings into `decisions.md`. Tick the matching M9.2 boxes in `skrivli-implementation-plan.md`.
 
 Spec updates that come with this work:

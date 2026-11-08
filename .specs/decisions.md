@@ -268,3 +268,30 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 **Verified by reading the Rodio 0.21.1 source and by building:** the player type is `Sink` (`Sink::connect_new(stream.mixer())`, `append`, `pause`, `play`, `try_seek`, `get_pos`, `empty`). The stream comes from `OutputStreamBuilder::open_default_stream()` and holds a `cpal::Stream`, so it is kept with the sink inside one session object on the player worker (sink dropped before stream). `Decoder::new_wav` with the `hound` feature gives `total_duration` and frame-based seeking (`hound` `seek`, saturated at the end). `try_seek` blocks until the audio thread answers (a few ms, the sink polls every 5 ms), runs on the worker only, and silently does nothing if the sink is already empty. `get_pos` is refreshed every 5 ms by the sink. The mixer wraps every source in `UniformSourceIterator`, so a file rate or channel count different from the device is converted in Rodio. The hound seek converts the time to frames with `f32`, so on a 1 h 48 kHz file the target can be off by a few frames (under 1 ms); this is source reading, not a measurement. Unit tests use a fake `PlaybackOutput` and need no hardware.
 
 **NOT verified on hardware:** seek accuracy and latency on a WAV longer than one hour; playback when the device sample rate differs from the file (conversion quality, no click); creating the `OutputStream` on the worker thread on Windows; audible playback to the end and the return to `Idle`; pause and seek with no click or hang; behavior when the default output device is removed during playback. Run these before Phase 6 is called done.
+
+
+## D-23 — Static CRT (release plan R2)
+
+**Outcome:** `.cargo/config.toml` sets `crt-static` for `x86_64-pc-windows-msvc`. `dumpbin /dependents` on the release exe shows no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports. The remaining non-base DLLs are `icuuc.dll` (Windows 10 and later) and `mmdevapi.dll`. The whisper.cpp licence text in the ZIP is copied from the vendored source of `whisper-rs-sys` 0.15.0.
+
+**Not verified:** a clean VM without Visual Studio (M9.2 stays open).
+
+## D-24 — Release tools pinned (release plan R4, R6)
+
+**Outcome:** `cargo-release` 1.1.7: installed, `release.toml` parsed, branch guard confirmed. `cargo-about` 0.9.3: install needs `--features cli`; generation tested locally (about 510 crates); `about.toml` accepts the extra licences `CDLA-Permissive-2.0` and `Unlicense`.
+
+**Not verified:** a full `cargo release patch` dry run on a clean `main`.
+
+## D-25 — Signing deferred
+
+**Outcome:** the exe is unsigned for now. The ZIP README tells users about the SmartScreen warning. Revisit when the distribution channel needs signing.
+
+## D-26 — Release built in GitHub Actions
+
+**Outcome:** a `v*` tag push runs `release.yml`, which builds, packages and publishes the GitHub release immediately (no draft).
+
+**Not verified:** `release.yml` and `scripts/package.ps1` end to end on a fork (R6 check). R7, the first real release, is not done.
+
+## D-27 — Version comes only from `Cargo.toml` (release plan R1)
+
+**Outcome:** `build.rs` no longer sets a version. The release exe reports `ProductVersion` 0.1.0 and `FileVersionRaw` 0.1.0.0, matching `Cargo.toml`.

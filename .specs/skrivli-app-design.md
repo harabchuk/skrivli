@@ -577,6 +577,12 @@ cargo build --release
 - Optional `scripts/start.ps1` and `scripts/test.ps1` wrap Cargo; keep Cargo as the application build and test entry point.
 - Initial deliverable is a portable ZIP with executable, required native runtime files, licensing notices and a README. Later consider WiX/MSIX if installation, autostart and shell integration require it. Do not bundle transcription models by default; download on user request.
 
+### Build and release
+
+- Pushing a tag `vX.Y.Z` (made by `cargo release`) starts `.github/workflows/release.yml`. It runs `ci.yml` (`workflow_call`), builds on a Windows runner, runs `scripts/package.ps1` to produce the ZIP and its SHA-256, and publishes both with `gh release` immediately.
+- The version has one source, `Cargo.toml`. `build.rs` does not set it; the exe `VERSIONINFO` and the Settings footer (`CARGO_PKG_VERSION`) follow it.
+- The CRT is linked statically (`.cargo/config.toml`, `crt-static`). Third-party licence text is generated with `cargo about` (`about.toml`, `about.hbs`). Details: `skrivli-release-plan.md` and D-23 to D-27.
+
 ---
 
 ## 11. Test strategy

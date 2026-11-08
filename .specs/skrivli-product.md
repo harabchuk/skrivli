@@ -254,6 +254,8 @@ Preferences persist across restarts. Hazardous options are disabled while record
 - Does not require a developer machine or hidden manually installed runtimes beyond what the package documents.
 - Transcription models are separate: size and network use are disclosed when the user chooses to download.
 - Privacy notes and licensing notices ship with the package.
+- Releases are downloaded from the GitHub Releases page of `harabchuk/skrivli`. Each release has the portable ZIP and a SHA-256 checksum file for it. The executable is not code-signed, so Windows SmartScreen may warn on first launch; the README in the ZIP explains this.
+- Settings shows the app version in its footer, matching the version of the release.
 
 ### Happy-path acceptance (clean PC)
 
