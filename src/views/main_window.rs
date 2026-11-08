@@ -57,7 +57,7 @@ use super::model_prompt::{
     open_model_alert, open_model_prompt, row_accessibility_label, row_meta, row_tag,
     AfterModelReady, ErrorDisplay, ModelPromptHandlers, ModelPromptView,
 };
-use super::recording::{record_tab, DeviceChoice, RecordView};
+use super::recording::{banner_notice, record_tab, DeviceChoice, RecordView};
 use super::recordings::{
     can_transcribe_again, default_selection, failure_reason, is_narrow, item_index_of,
     library_header, library_items, may_auto_scroll, open_delete_dialog, open_rename_dialog,
@@ -1607,7 +1607,7 @@ impl Render for MainWindow {
                     locked,
                     phase,
                     elapsed: SharedString::from(elapsed),
-                    notice: self.presentation.notice(),
+                    notice: banner_notice(self.presentation.notice()),
                     mic_db: self.mic_meter.level,
                     mic_hold: self.mic_meter.hold,
                     system_db: self.system_meter.level,

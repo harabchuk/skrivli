@@ -317,10 +317,8 @@ impl Presentation {
     }
 
     /// `elapsed` is passed in because the window owns the recording start time.
-    /// The Record tab shows recording state and notices itself, so only
-    /// transcription remains here on that tab.
+    /// Same text on every tab: activity, notice, then transcription progress.
     pub(crate) fn status_line(&self, elapsed: &str) -> String {
-        let on_record_tab = self.tab == AppTab::Record;
         let activity = match self.record_phase {
             RecordPhase::Starting => Some("Starting".to_string()),
             RecordPhase::Recording => Some(format!("Recording {elapsed}")),
@@ -337,12 +335,10 @@ impl Presentation {
         let parts: Vec<String> = activity
             .into_iter()
             .chain(self.notice.map(str::to_string))
-            .filter(|_| !on_record_tab)
             .chain(transcription)
             .collect();
         if parts.is_empty() {
-            let idle = if on_record_tab { "" } else { "Ready" };
-            idle.to_string()
+            "Ready".to_string()
         } else {
             parts.join(" · ")
         }
@@ -690,17 +686,34 @@ mod tests {
     }
 
     #[test]
-    fn status_line_on_record_tab_leaves_recording_state_to_the_view() {
+    fn status_line_is_the_same_on_both_tabs() {
         // Arrange
         let mut state = presentation();
         state.set_notice(Some("Saved."));
         state.set_record_phase(RecordPhase::Recording);
+        state.set_tab(AppTab::Record);
+        let on_record = state.status_line("00:00:07");
 
         // Act
-        let line = state.status_line("00:00:07");
+        state.set_tab(AppTab::Recordings);
+        let on_recordings = state.status_line("00:00:07");
 
         // Assert
-        assert_eq!(line, "");
+        assert_eq!(on_record, "Recording 00:00:07 · Saved.");
+        assert_eq!(on_record, on_recordings);
+    }
+
+    #[test]
+    fn status_line_reads_ready_when_idle_on_the_record_tab() {
+        // Arrange
+        let mut state = presentation();
+        state.set_tab(AppTab::Record);
+
+        // Act
+        let line = state.status_line("00:00:00");
+
+        // Assert
+        assert_eq!(line, "Ready");
     }
 
     #[test]
@@ -714,7 +727,7 @@ mod tests {
         let line = state.status_line("00:00:07");
 
         // Assert
-        assert_eq!(line, "Transcribing 42%");
+        assert_eq!(line, "Recording 00:00:07 · Transcribing 42%");
     }
 
     #[test]
