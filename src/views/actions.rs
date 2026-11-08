@@ -412,7 +412,7 @@ mod tests {
         assert!(effects.effects.is_empty());
         assert!(again.effects.is_empty());
         assert_eq!(state.shell_pulses(), 5);
-        assert_eq!(state.status_line("00:00:05"), "");
+        assert_eq!(state.status_line("00:00:05"), "Ready");
     }
 
     #[test]
@@ -507,7 +507,7 @@ mod tests {
                     info: RecordingInfo::new(
                         id,
                         "meeting",
-                        RecordingContainer::Wav,
+                        RecordingContainer::Flac,
                         None,
                         None,
                         1,
@@ -516,7 +516,7 @@ mod tests {
                         SidecarState::Present,
                         Vec::new(),
                     ),
-                    audio_path: PathBuf::from("meeting.wav"),
+                    audio_path: PathBuf::from("meeting.flac"),
                     sidecar_path: None,
                     transcript_path: None,
                 }],

@@ -77,7 +77,7 @@ mod tests {
         // Arrange
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        let missing = std::env::temp_dir().join(format!("skrivli-missing-{id}.wav"));
+        let missing = std::env::temp_dir().join(format!("skrivli-missing-{id}.flac"));
 
         // Act
         let result = send_to_recycle_bin(&[missing.as_path()]);

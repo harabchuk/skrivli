@@ -396,7 +396,7 @@ mod tests {
     }
 
     fn play(host: &PlayerHost, start_ms: u64) {
-        host.play(RecordingId::from_raw(1), PathBuf::from("a.wav"), start_ms);
+        host.play(RecordingId::from_raw(1), PathBuf::from("a.flac"), start_ms);
     }
 
     fn finish(host: &PlayerHost, handle: std::thread::JoinHandle<()>) {

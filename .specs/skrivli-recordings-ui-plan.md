@@ -1,5 +1,7 @@
 # Skrivli Recordings page redesign plan
 
+> **2026-11-08:** recordings are FLAC-only now (D-29, `skrivli-flac-migration-plan.md`). WAV, `.wav.partial`, `hound` and RIFF mentions below describe the earlier design; read `.flac` / `.flac.partial` / `flac-codec` where they appear.
+
 **Status:** Done in code (Phases 0 to 7). **Not signed off:** the app was never run during this work, so every "Not verified" note below and the final manual checks in Phase 7 are still open, as are the Phase 5 hardware checks. The code snippets in this plan were not compiled; the code itself builds and its tests pass.
 
 **Goal in one sentence:** turn the Recordings tab from a data table with a row of buttons into a calm list and detail page, where a person can find a recording, listen to it, seek through it, and transcribe it again.
@@ -15,7 +17,7 @@
 │  Record   [Recordings]                                                 ⚙ │
 ├──────────────────────────────┬────────────────────────────────────────────┤
 │  Recordings 6             📁 │  Weekly sync ✎                       🗑  ⋯ │
-│                              │  Today, 14:32 · 12:41 · 38 MB · WAV        │
+│                              │  Today, 14:32 · 12:41 · 38 MB · FLAC        │
 │  Today                       │                                            │
 │ ▌Weekly sync     ✓ Transcript│  ┌──────────────────────────────────────┐  │
 │  14:32 · 12:41 · 38 MB       │  │ ▶  00:00 ━━━━━●───────────────  12:41 │  │
@@ -112,7 +114,7 @@ Each phase should be one reviewable commit or PR, and should leave the app worki
 - [x] Add row text helpers in `views/recordings.rs`:
   - Today and Yesterday rows: `14:32 · 12:41 · 38 MB`
   - Earlier rows: `Nov 3 · 31:04 · 93 MB`
-  - Detail line: `Today, 14:32 · 12:41 · 38 MB · WAV`
+  - Detail line: `Today, 14:32 · 12:41 · 38 MB · FLAC`
 - [x] Add `RowBadge { None, Queued, Progress(u8), Ready, Failed, Recovered }`, with a pure mapping from status and the recovered flag. An active or failed status wins over Recovered. Superseded: Recovered removed (D-23).
 
 **Remove**

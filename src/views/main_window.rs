@@ -25,7 +25,8 @@ use crate::domain::audio::format_elapsed;
 use crate::domain::gain::{db_fs, format_gain};
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::{
-    settled_transcript_status, RecordPhase, RecordingContainer, TranscriptStatus,
+    settled_transcript_status, MaxMeetingDuration, RecordPhase, RecordingContainer,
+    TranscriptStatus,
 };
 use crate::domain::theme::ThemePreference;
 use crate::domain::transcript::{current_paragraph, parse_transcript, TranscriptParagraph};
@@ -57,7 +58,7 @@ use super::model_prompt::{
     open_model_alert, open_model_prompt, row_accessibility_label, row_meta, row_tag,
     AfterModelReady, ErrorDisplay, ModelPromptHandlers, ModelPromptView,
 };
-use super::recording::{record_tab, DeviceChoice, RecordView};
+use super::recording::{banner_notice, record_tab, DeviceChoice, RecordView};
 use super::recordings::{
     can_transcribe_again, default_selection, failure_reason, is_narrow, item_index_of,
     library_header, library_items, may_auto_scroll, open_delete_dialog, open_rename_dialog,
@@ -69,7 +70,7 @@ use super::recordings::{
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
-    settings_model_row, SettingsView,
+    settings_model_row, SettingsHandlers, SettingsView,
 };
 
 const BOUNDS_DEBOUNCE: Duration = Duration::from_millis(400);
@@ -335,6 +336,16 @@ impl MainWindow {
         cx.notify();
     }
 
+    pub(crate) fn set_max_meeting_duration(
+        &mut self,
+        duration: MaxMeetingDuration,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.set_max_meeting_duration(duration);
+        self.hooks.save_settings(self.settings.clone());
+        cx.notify();
+    }
+
     pub(crate) fn cycle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let system_is_dark = matches!(
             window.appearance(),
@@ -531,6 +542,12 @@ impl MainWindow {
                 let session = cx.entity();
                 let watched = session.clone();
                 let model_entity = session.clone();
+                let duration_entity = session.clone();
+                let on_max_duration =
+                    move |duration: MaxMeetingDuration, _: &mut Window, cx: &mut App| {
+                        duration_entity
+                            .update(cx, |view, cx| view.set_max_meeting_duration(duration, cx));
+                    };
                 let on_change = move |checked: &bool, _: &mut Window, cx: &mut App| {
                     session.update(cx, |view, cx| view.set_close_to_tray(*checked, cx));
                 };
@@ -540,7 +557,16 @@ impl MainWindow {
                     });
                 };
                 let read = move |cx: &App| watched.read_with(cx, |view, _| view.settings_view());
-                open_settings(window, cx, read, on_change, on_change_model);
+                open_settings(
+                    window,
+                    cx,
+                    read,
+                    SettingsHandlers {
+                        on_close_to_tray: on_change,
+                        on_max_duration,
+                        on_change_model,
+                    },
+                );
             }
             Effect::OpenModelDialog => self.open_model_prompt(window, cx),
             Effect::OpenAbout => open_about(window, cx),
@@ -1073,6 +1099,7 @@ impl MainWindow {
         });
         SettingsView {
             close_to_tray: self.close_to_tray(),
+            max_duration: self.settings.max_meeting_duration(),
             model: settings_model_row(&status, bytes),
         }
     }
@@ -1295,7 +1322,7 @@ impl MainWindow {
         let Some(entry) = self.library_catalog.find(id) else {
             return;
         };
-        if entry.info.container() != RecordingContainer::Wav {
+        if entry.info.container() != RecordingContainer::Flac {
             return;
         }
         match play_action(
@@ -1322,7 +1349,7 @@ impl MainWindow {
         let entity = cx.entity();
         open_rename_dialog(window, cx, current, move |name, _window, cx| {
             entity.update(cx, |view, _cx| {
-                // The open WAV would make the rename fail on Windows.
+                // The open FLAC file would make the rename fail on Windows.
                 view.player.stop();
                 view.library.rename(id, name);
             });
@@ -1420,6 +1447,7 @@ impl MainWindow {
             self.settings.microphone(),
             self.settings.system_audio(),
             &self.catalog,
+            self.settings.max_meeting_duration(),
         ) {
             StartRequestBuild::Ready(request) => self.recording.start(request),
             StartRequestBuild::Refused { notice } => {
@@ -1607,7 +1635,7 @@ impl Render for MainWindow {
                     locked,
                     phase,
                     elapsed: SharedString::from(elapsed),
-                    notice: self.presentation.notice(),
+                    notice: banner_notice(self.presentation.notice()),
                     mic_db: self.mic_meter.level,
                     mic_hold: self.mic_meter.hold,
                     system_db: self.system_meter.level,
@@ -1666,10 +1694,6 @@ impl Render for MainWindow {
                 });
                 let playing = self.snapshot_is_selected()
                     && self.player_snapshot.phase == PlayerPhase::Playing;
-                let playable = self
-                    .library_selected
-                    .and_then(|id| self.library_catalog.find(id))
-                    .is_some_and(|entry| entry.info.container() == RecordingContainer::Wav);
                 let error = self.library_catalog.error.map(SharedString::from);
                 let selected_id = self.library_selected;
                 let status = selected_id
@@ -1778,7 +1802,6 @@ impl Render for MainWindow {
                         selected: selected_row.as_ref(),
                         player: PlayerCard {
                             playing,
-                            playable,
                             position_ms: self.shown_position_ms(),
                             duration_ms: self.selected_duration_ms(),
                             seek: &self.seek_slider,

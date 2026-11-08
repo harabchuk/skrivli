@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-/// Internal processing and WAV rate.
+/// Internal processing and FLAC rate.
 pub(crate) const INTERNAL_SAMPLE_RATE: u32 = 48_000;
 /// Internal channel count. Mono sources are duplicated onto both channels.
 pub(crate) const INTERNAL_CHANNELS: u16 = 2;

@@ -298,10 +298,10 @@ mod tests {
     fn host_refresh_lists_saved_recording() {
         // Arrange
         let dir = temp_dir("host");
-        let wav = dir.join("clip.wav");
-        fs::write(&wav, b"RIFF").expect("wav");
+        let audio_file = dir.join("clip.flac");
+        fs::write(&audio_file, b"fLaC").expect("audio_file");
         write_sidecar(
-            &wav,
+            &audio_file,
             &Sidecar {
                 id: 99,
                 started_at_unix_ms: 10,
@@ -359,10 +359,10 @@ mod tests {
     fn delete_asks_trash_and_leaves_files_on_disk() {
         // Arrange
         let dir = temp_dir("delete");
-        let wav = dir.join("clip.wav");
-        fs::write(&wav, b"RIFF").expect("wav");
+        let audio_file = dir.join("clip.flac");
+        fs::write(&audio_file, b"fLaC").expect("audio_file");
         write_sidecar(
-            &wav,
+            &audio_file,
             &Sidecar {
                 id: 42,
                 started_at_unix_ms: 10,
@@ -425,10 +425,10 @@ mod tests {
         // Assert
         let paths = discarded.discarded.lock().expect("lock");
         assert!(
-            paths.iter().any(|path| path == &wav),
-            "trash should receive the wav path"
+            paths.iter().any(|path| path == &audio_file),
+            "trash should receive the audio_file path"
         );
-        assert!(wav.exists(), "fake trash must leave files on disk");
+        assert!(audio_file.exists(), "fake trash must leave files on disk");
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -366,6 +366,7 @@ impl RecordingHarness {
             system_audio_id: "system".to_string(),
             open_microphone: true,
             degraded_notice: None,
+            max_duration: crate::domain::recording::MaxMeetingDuration::default(),
         });
     }
 

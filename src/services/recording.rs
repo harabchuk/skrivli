@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 
 use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_SAMPLE_RATE};
 use crate::domain::ids::RecordingId;
+use crate::domain::recording::MaxMeetingDuration;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-use crate::infrastructure::files::wav::{WavWrite, WavWriter};
+use crate::infrastructure::files::flac::{max_recording_frames, FlacWrite, FlacWriter};
 use crate::infrastructure::files::writable::ensure_writable;
 use crate::infrastructure::storage::sidecar::{write_sidecar, Sidecar};
 use crate::services::audio_pipeline::{AudioSource, EchoStats, Pipeline, PipelineSetup};
@@ -45,7 +46,8 @@ pub(crate) const NOTICE_FOLDER: &str = "The recordings folder is not writable.";
 pub(crate) const NOTICE_DISK: &str = "There is not enough free disk space to record.";
 pub(crate) const NOTICE_LOW_DISK: &str = "Recording stopped because free disk space is low.";
 pub(crate) const NOTICE_SAVE: &str = "Could not save the recording.";
-pub(crate) const NOTICE_LIMIT: &str = "Recording stopped because the file reached its size limit.";
+pub(crate) const NOTICE_LIMIT: &str =
+    "Recording stopped because it reached the maximum meeting duration.";
 pub(crate) const NOTICE_FALLBACK: &str =
     "The selected microphone is unavailable. Using the Windows default.";
 pub(crate) const NOTICE_SYSTEM_FALLBACK: &str =
@@ -64,7 +66,7 @@ pub(crate) struct RecordSnapshot {
     pub(crate) phase: RecordPhase,
     pub(crate) notice: Option<&'static str>,
     pub(crate) id: Option<RecordingId>,
-    /// Finalized WAV path after stop; drives auto-transcribe enqueue.
+    /// Finalized FLAC path after stop; drives auto-transcribe enqueue.
     pub(crate) finalized_path: Option<PathBuf>,
 }
 
@@ -87,6 +89,15 @@ pub(crate) struct StartRequest {
     pub(crate) open_microphone: bool,
     /// Shown instead of the saved notice when a chosen device was substituted.
     pub(crate) degraded_notice: Option<&'static str>,
+    /// Stops a forgotten recording at this length.
+    pub(crate) max_duration: MaxMeetingDuration,
+}
+
+/// Frames the writer accepts for `duration`, never past the file format's ceiling.
+pub(crate) fn writer_frame_cap(duration: MaxMeetingDuration) -> u64 {
+    duration
+        .frames(INTERNAL_SAMPLE_RATE)
+        .min(max_recording_frames())
 }
 
 /// Outcome of turning settings and a device catalog into a start request.
@@ -101,6 +112,7 @@ pub(crate) fn build_start_request(
     microphone: &crate::infrastructure::storage::settings::StoredEndpoint,
     system_audio: &crate::infrastructure::storage::settings::StoredEndpoint,
     catalog: &crate::infrastructure::audio::devices::DeviceCatalog,
+    max_duration: MaxMeetingDuration,
 ) -> StartRequestBuild {
     use crate::domain::audio::{resolve_endpoint, EndpointChoice, EndpointFlow};
 
@@ -174,6 +186,7 @@ pub(crate) fn build_start_request(
         system_audio_id,
         open_microphone,
         degraded_notice: notice,
+        max_duration,
     })
 }
 
@@ -364,8 +377,12 @@ fn session_body(
     let _lease = LeaseGuard(lease);
     let started_ms = engine.clock.unix_millis();
     let when = engine.clock.local();
-    let mut wav = match WavWriter::create(&request.directory, when) {
-        Ok(wav) => wav,
+    let mut flac = match FlacWriter::create(
+        &request.directory,
+        when,
+        writer_frame_cap(request.max_duration),
+    ) {
+        Ok(flac) => flac,
         Err(error) => {
             tracing::error!(error = %error, "recording file was not created");
             return Err(error.user_message());
@@ -375,7 +392,7 @@ fn session_body(
     let origin = match SessionOrigin::new(ticks, frequency, INTERNAL_SAMPLE_RATE) {
         Some(origin) => origin,
         None => {
-            let _ = wav.abandon();
+            let _ = flac.abandon();
             return Err(NOTICE_START);
         }
     };
@@ -395,7 +412,7 @@ fn session_body(
         Err(error) => {
             if system_result.is_err() {
                 tracing::error!("microphone capture did not start");
-                if let Err(abandon) = wav.abandon() {
+                if let Err(abandon) = flac.abandon() {
                     tracing::error!(error = %abandon, "partial recording was not removed");
                 }
                 return Err(capture_notice(error));
@@ -411,7 +428,7 @@ fn session_body(
         Err(error) => {
             if mic.is_none() {
                 tracing::error!("system audio capture did not start");
-                if let Err(abandon) = wav.abandon() {
+                if let Err(abandon) = flac.abandon() {
                     tracing::error!(error = %abandon, "partial recording was not removed");
                 }
                 return Err(mic_error.map(capture_notice).unwrap_or(NOTICE_START));
@@ -448,7 +465,7 @@ fn session_body(
             if let Some(stream) = system.as_mut() {
                 stream.close();
             }
-            if let Err(abandon) = wav.abandon() {
+            if let Err(abandon) = flac.abandon() {
                 tracing::error!(error = %abandon, "partial recording was not removed");
             }
             return Err(NOTICE_START);
@@ -594,14 +611,14 @@ fn session_body(
         let now = frame_now(origin, engine.performance.as_ref());
         let mut wrote = false;
         while let Some(mixed) = pipeline.pull(now, stopping || limited) {
-            match wav.write_samples(mixed) {
-                Ok(WavWrite::Wrote { frames: written }) => {
+            match flac.write_samples(mixed) {
+                Ok(FlacWrite::Wrote { frames: written }) => {
                     frames = frames.saturating_add(written);
                     wrote = true;
                     wrote_any = true;
                     last_progress = Instant::now();
                 }
-                Ok(WavWrite::SafeStop { frames: written }) => {
+                Ok(FlacWrite::SafeStop { frames: written }) => {
                     frames = frames.saturating_add(written);
                     wrote_any = wrote_any || written > 0;
                     note(&mut problems, "safe_stop");
@@ -666,7 +683,7 @@ fn session_body(
         stream.close();
     }
     finish_session(
-        wav,
+        flac,
         engine,
         &request.directory,
         id,
@@ -840,7 +857,7 @@ fn try_reopen_sources(
 
 #[allow(clippy::too_many_arguments)]
 fn finish_session(
-    wav: WavWriter,
+    flac: FlacWriter,
     engine: &RecordingEngine,
     directory: &Path,
     id: RecordingId,
@@ -857,7 +874,7 @@ fn finish_session(
         !engine.folder_fault.load(Ordering::Acquire) && ensure_writable(directory).is_ok();
     if let Some(notice) = failed.or(if folder_ok { None } else { Some(NOTICE_FOLDER) }) {
         return keep_after_failure(
-            wav,
+            flac,
             engine,
             id,
             started_ms,
@@ -868,7 +885,7 @@ fn finish_session(
             notice,
         );
     }
-    let path = match wav.finalize() {
+    let path = match flac.finalize() {
         Ok(path) => path,
         Err(error) => {
             tracing::error!(error = %error, "recording was not finalized");
@@ -877,7 +894,7 @@ fn finish_session(
     };
     let ended_ms = engine.clock.unix_millis().max(started_ms);
     let duration_ms = frames.saturating_mul(1_000) / u64::from(INTERNAL_SAMPLE_RATE);
-    let hit_size_limit = problems.iter().any(|problem| problem == "safe_stop");
+    let hit_duration_limit = problems.iter().any(|problem| problem == "safe_stop");
     let sidecar = Sidecar {
         id: id.raw(),
         started_at_unix_ms: started_ms,
@@ -891,7 +908,7 @@ fn finish_session(
         tracing::error!(error = %error, "recording sidecar was not written");
         return Err(NOTICE_SAVE);
     }
-    let notice = if limited && (hit_size_limit || degraded.is_none()) {
+    let notice = if limited && (hit_duration_limit || degraded.is_none()) {
         NOTICE_LIMIT
     } else {
         degraded.unwrap_or(NOTICE_SAVED)
@@ -908,7 +925,7 @@ fn finish_session(
 /// on disk untouched. The original failure is always the notice.
 #[allow(clippy::too_many_arguments)]
 fn keep_after_failure(
-    wav: WavWriter,
+    flac: FlacWriter,
     engine: &RecordingEngine,
     id: RecordingId,
     started_ms: u64,
@@ -919,7 +936,7 @@ fn keep_after_failure(
     failure: &'static str,
 ) -> Result<RecordSnapshot, &'static str> {
     note(&mut problems, "save_error");
-    match wav.finalize() {
+    match flac.finalize() {
         Ok(path) => {
             let ended_ms = engine.clock.unix_millis().max(started_ms);
             let duration_ms = frames.saturating_mul(1_000) / u64::from(INTERNAL_SAMPLE_RATE);
@@ -990,6 +1007,22 @@ mod tests {
     };
     use crate::domain::audio::AudioBlock;
     use crate::infrastructure::files::writable::ensure_writable;
+
+    #[test]
+    fn writer_cap_follows_the_chosen_meeting_duration() {
+        // Arrange
+        let two = crate::domain::recording::MaxMeetingDuration::from_hours(2).expect("two");
+
+        // Act
+        let frames = super::writer_frame_cap(two);
+
+        // Assert
+        assert_eq!(frames, 2 * 3_600 * 48_000);
+        assert_eq!(
+            super::NOTICE_LIMIT,
+            "Recording stopped because it reached the maximum meeting duration."
+        );
+    }
     use crate::services::audio_pipeline::PassThroughPipelineFactory;
 
     struct OneShot {
@@ -1088,6 +1121,7 @@ mod tests {
             system_audio_id: "system".to_string(),
             open_microphone: true,
             degraded_notice: None,
+            max_duration: crate::domain::recording::MaxMeetingDuration::default(),
         };
         let mut engine = super::RecordingEngine {
             mic: Box::new(port),
@@ -1175,6 +1209,7 @@ mod tests {
             system_audio_id: "unavailable".to_string(),
             open_microphone: true,
             degraded_notice: None,
+            max_duration: crate::domain::recording::MaxMeetingDuration::default(),
         };
         let mut engine = super::RecordingEngine {
             mic: Box::new(TailPort {
@@ -1204,9 +1239,11 @@ mod tests {
 
         // Assert
         let path = snapshot.finalized_path.expect("saved recording");
-        let bytes = std::fs::read(path).expect("wav");
-        let data = u32::from_le_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]);
-        assert_eq!(data, 480 * 4);
+        let reader = flac_codec::decode::FlacSampleReader::open(path).expect("flac");
+        assert_eq!(
+            flac_codec::metadata::Metadata::total_samples(&reader),
+            Some(480)
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1263,6 +1300,7 @@ mod tests {
             &StoredEndpoint::Default,
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1294,6 +1332,7 @@ mod tests {
             &StoredEndpoint::explicit("gone"),
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1318,6 +1357,7 @@ mod tests {
             &StoredEndpoint::Default,
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1343,6 +1383,7 @@ mod tests {
             &StoredEndpoint::Default,
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1368,6 +1409,7 @@ mod tests {
             &StoredEndpoint::Default,
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1393,6 +1435,7 @@ mod tests {
             system_audio_id: "unavailable".to_string(),
             open_microphone: true,
             degraded_notice: None,
+            max_duration: crate::domain::recording::MaxMeetingDuration::default(),
         };
         let mut engine = super::RecordingEngine {
             mic: Box::new(TailPort {

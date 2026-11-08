@@ -23,49 +23,18 @@ fn temp_dir(label: &str) -> PathBuf {
     dir
 }
 
-fn write_dummy_wav(path: &Path, payload: &[u8]) {
-    let mut bytes = Vec::with_capacity(44 + payload.len());
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + payload.len() as u32).to_le_bytes());
-    bytes.extend_from_slice(b"WAVE");
-    bytes.extend_from_slice(b"fmt ");
-    bytes.extend_from_slice(&16_u32.to_le_bytes());
-    bytes.extend_from_slice(&1_u16.to_le_bytes());
-    bytes.extend_from_slice(&2_u16.to_le_bytes());
-    bytes.extend_from_slice(&48_000_u32.to_le_bytes());
-    bytes.extend_from_slice(&(48_000_u32 * 4).to_le_bytes());
-    bytes.extend_from_slice(&4_u16.to_le_bytes());
-    bytes.extend_from_slice(&16_u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+fn write_dummy_flac(path: &Path, payload: &[u8]) {
+    let mut bytes = b"fLaC".to_vec();
     bytes.extend_from_slice(payload);
-    fs::write(path, bytes).expect("wav");
+    fs::write(path, bytes).expect("flac");
 }
 
-fn write_pcm_wav(path: &Path, frames: usize) {
-    let channels = 2_usize;
-    let sample_rate = 48_000_u32;
-    let data_bytes = (frames * channels * 2) as u32;
-    let mut bytes = Vec::with_capacity(44 + data_bytes as usize);
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + data_bytes).to_le_bytes());
-    bytes.extend_from_slice(b"WAVE");
-    bytes.extend_from_slice(b"fmt ");
-    bytes.extend_from_slice(&16_u32.to_le_bytes());
-    bytes.extend_from_slice(&1_u16.to_le_bytes());
-    bytes.extend_from_slice(&(channels as u16).to_le_bytes());
-    bytes.extend_from_slice(&sample_rate.to_le_bytes());
-    bytes.extend_from_slice(&(sample_rate * channels as u32 * 2).to_le_bytes());
-    bytes.extend_from_slice(&((channels * 2) as u16).to_le_bytes());
-    bytes.extend_from_slice(&16_u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&data_bytes.to_le_bytes());
-    bytes.extend(std::iter::repeat_n(0_u8, data_bytes as usize));
-    fs::write(path, bytes).expect("wav");
+fn write_pcm_flac(path: &Path, frames: usize) {
+    skrivli::testing::write_silent_flac(path, frames).expect("flac");
 }
 
-fn seed_sidecar(wav: &Path, id: u64) {
-    skrivli::testing::write_recording_sidecar(wav, id).expect("sidecar");
+fn seed_sidecar(audio: &Path, id: u64) {
+    skrivli::testing::write_recording_sidecar(audio, id).expect("sidecar");
 }
 
 fn short_config() -> TranscriptionFlowConfig {
@@ -77,36 +46,36 @@ fn short_config() -> TranscriptionFlowConfig {
 }
 
 #[test]
-fn successful_format_and_write_leaves_wav_unchanged() {
+fn successful_format_and_write_leaves_flac_unchanged() {
     // Arrange
     let dir = temp_dir("ok");
-    let wav = dir.join("meeting.wav");
+    let audio = dir.join("meeting.flac");
     let payload = vec![1_u8, 2, 3, 4, 5, 6, 7, 8];
-    write_dummy_wav(&wav, &payload);
-    let before = fs::read(&wav).expect("before");
+    write_dummy_flac(&audio, &payload);
+    let before = fs::read(&audio).expect("before");
     let text = format_transcript_segments(&[(3_661_000, 3_662_000, "hello café")]);
 
     // Act
-    let path = write_transcript_text(&wav, &text).expect("write");
-    let after = fs::read(&wav).expect("after");
+    let path = write_transcript_text(&audio, &text).expect("write");
+    let after = fs::read(&audio).expect("after");
     let written = fs::read_to_string(&path).expect("txt");
 
     // Assert
     assert_eq!(before, after);
-    assert_eq!(path, transcript_path_for(&wav).expect("path"));
+    assert_eq!(path, transcript_path_for(&audio).expect("path"));
     assert!(written.starts_with("[01:01:01] hello café"));
     assert!(!dir.join("meeting.txt.tmp").exists());
     let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
-fn failed_transcript_write_leaves_previous_txt_and_wav() {
+fn failed_transcript_write_leaves_previous_txt_and_flac() {
     // Arrange
     let dir = temp_dir("fail");
-    let wav = dir.join("clip.wav");
+    let audio = dir.join("clip.flac");
     let payload = vec![9_u8, 8, 7, 6];
-    write_dummy_wav(&wav, &payload);
-    let wav_before = fs::read(&wav).expect("wav before");
+    write_dummy_flac(&audio, &payload);
+    let audio_before = fs::read(&audio).expect("audio before");
     let txt = dir.join("clip.txt");
     fs::write(&txt, "previous transcript\n").expect("prev");
     // Block the temp sibling so the atomic write cannot open it.
@@ -114,11 +83,11 @@ fn failed_transcript_write_leaves_previous_txt_and_wav() {
     fs::create_dir_all(&blocker).expect("blocker");
 
     // Act
-    let result = write_transcript_text(&wav, "replacement\n");
+    let result = write_transcript_text(&audio, "replacement\n");
 
     // Assert
     assert!(result.is_err());
-    assert_eq!(fs::read(&wav).expect("wav after"), wav_before);
+    assert_eq!(fs::read(&audio).expect("audio after"), audio_before);
     assert_eq!(
         fs::read_to_string(&txt).expect("txt after"),
         "previous transcript\n"
@@ -130,21 +99,28 @@ fn failed_transcript_write_leaves_previous_txt_and_wav() {
 fn host_success_writes_transcript_updates_sidecar() {
     // Arrange
     let dir = temp_dir("host-ok");
-    let wav = dir.join("meeting.wav");
-    write_pcm_wav(&wav, 48_000);
-    let before = fs::read(&wav).expect("before");
-    seed_sidecar(&wav, 11);
+    let audio = dir.join("meeting.flac");
+    write_pcm_flac(&audio, 48_000);
+    let before = fs::read(&audio).expect("before");
+    seed_sidecar(&audio, 11);
     let model = dir.join("ggml-base.bin");
     fs::write(&model, b"ggml").expect("model");
     let engine = FakeInferenceEngine::success("hello café");
 
     // Act
-    let result =
-        run_transcription_flow(engine, short_config(), 11, &wav, &model, "base-q5_1", None);
+    let result = run_transcription_flow(
+        engine,
+        short_config(),
+        11,
+        &audio,
+        &model,
+        "base-q5_1",
+        None,
+    );
 
     // Assert
     assert_eq!(result.phase, TranscriptionFlowPhase::Done);
-    assert_eq!(fs::read(&wav).expect("after"), before);
+    assert_eq!(fs::read(&audio).expect("after"), before);
     let text = fs::read_to_string(dir.join("meeting.txt")).expect("txt");
     assert!(text.contains("hello café"));
     assert_eq!(result.sidecar_status.as_deref(), Some("ready"));
@@ -155,10 +131,10 @@ fn host_success_writes_transcript_updates_sidecar() {
 fn host_engine_failure_marks_failed() {
     // Arrange
     let dir = temp_dir("host-fail");
-    let wav = dir.join("clip.wav");
-    write_pcm_wav(&wav, 8_000);
-    let before = fs::read(&wav).expect("before");
-    seed_sidecar(&wav, 12);
+    let audio = dir.join("clip.flac");
+    write_pcm_flac(&audio, 8_000);
+    let before = fs::read(&audio).expect("before");
+    seed_sidecar(&audio, 12);
     let model = dir.join("ggml-base.bin");
     fs::write(&model, b"ggml").expect("model");
 
@@ -167,7 +143,7 @@ fn host_engine_failure_marks_failed() {
         FakeInferenceEngine::fail_chunk(),
         short_config(),
         12,
-        &wav,
+        &audio,
         &model,
         "base-q5_1",
         None,
@@ -175,7 +151,7 @@ fn host_engine_failure_marks_failed() {
 
     // Assert
     assert_eq!(result.phase, TranscriptionFlowPhase::Failed);
-    assert_eq!(fs::read(&wav).expect("after"), before);
+    assert_eq!(fs::read(&audio).expect("after"), before);
     assert!(!dir.join("clip.txt").exists());
     assert_eq!(result.sidecar_status.as_deref(), Some("failed"));
     let _ = fs::remove_dir_all(dir);
@@ -185,10 +161,10 @@ fn host_engine_failure_marks_failed() {
 fn host_cancel_stops_running_job() {
     // Arrange
     let dir = temp_dir("host-cancel");
-    let wav = dir.join("clip.wav");
-    write_pcm_wav(&wav, 48_000);
-    let before = fs::read(&wav).expect("before");
-    seed_sidecar(&wav, 13);
+    let audio = dir.join("clip.flac");
+    write_pcm_flac(&audio, 48_000);
+    let before = fs::read(&audio).expect("before");
+    seed_sidecar(&audio, 13);
     let model = dir.join("ggml-base.bin");
     fs::write(&model, b"ggml").expect("model");
 
@@ -197,7 +173,7 @@ fn host_cancel_stops_running_job() {
         FakeInferenceEngine::slow(800),
         short_config(),
         13,
-        &wav,
+        &audio,
         &model,
         "base-q5_1",
         Some(Duration::from_millis(50)),
@@ -205,7 +181,7 @@ fn host_cancel_stops_running_job() {
 
     // Assert
     assert_eq!(result.phase, TranscriptionFlowPhase::Cancelled);
-    assert_eq!(fs::read(&wav).expect("after"), before);
+    assert_eq!(fs::read(&audio).expect("after"), before);
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -213,9 +189,9 @@ fn host_cancel_stops_running_job() {
 fn host_cancel_racing_completion_is_stable() {
     // Arrange
     let dir = temp_dir("host-race");
-    let wav = dir.join("clip.wav");
-    write_pcm_wav(&wav, 4_000);
-    seed_sidecar(&wav, 14);
+    let audio = dir.join("clip.flac");
+    write_pcm_flac(&audio, 4_000);
+    seed_sidecar(&audio, 14);
     let model = dir.join("ggml-base.bin");
     fs::write(&model, b"ggml").expect("model");
     let race = Arc::new(AtomicBool::new(true));
@@ -225,7 +201,7 @@ fn host_cancel_racing_completion_is_stable() {
         FakeInferenceEngine::race_cancel(Arc::clone(&race)),
         short_config(),
         14,
-        &wav,
+        &audio,
         &model,
         "base-q5_1",
         Some(Duration::from_millis(10)),
@@ -238,7 +214,7 @@ fn host_cancel_racing_completion_is_stable() {
             | TranscriptionFlowPhase::Cancelled
             | TranscriptionFlowPhase::Failed
     ));
-    assert!(wav.is_file());
+    assert!(audio.is_file());
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -246,10 +222,10 @@ fn host_cancel_racing_completion_is_stable() {
 fn host_invalid_model_fails() {
     // Arrange
     let dir = temp_dir("host-model");
-    let wav = dir.join("clip.wav");
-    write_pcm_wav(&wav, 2_000);
-    let before = fs::read(&wav).expect("before");
-    seed_sidecar(&wav, 15);
+    let audio = dir.join("clip.flac");
+    write_pcm_flac(&audio, 2_000);
+    let before = fs::read(&audio).expect("before");
+    seed_sidecar(&audio, 15);
     let model = dir.join("invalid.bin");
     fs::write(&model, b"nope").expect("model");
 
@@ -258,7 +234,7 @@ fn host_invalid_model_fails() {
         FakeInferenceEngine::success("x"),
         short_config(),
         15,
-        &wav,
+        &audio,
         &model,
         "bad",
         None,
@@ -266,7 +242,7 @@ fn host_invalid_model_fails() {
 
     // Assert
     assert_eq!(result.phase, TranscriptionFlowPhase::Failed);
-    assert_eq!(fs::read(&wav).expect("after"), before);
+    assert_eq!(fs::read(&audio).expect("after"), before);
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -274,17 +250,24 @@ fn host_invalid_model_fails() {
 fn host_long_input_stays_chunked() {
     // Arrange
     let dir = temp_dir("host-chunk");
-    let wav = dir.join("long.wav");
-    write_pcm_wav(&wav, 24_000);
-    seed_sidecar(&wav, 16);
+    let audio = dir.join("long.flac");
+    write_pcm_flac(&audio, 24_000);
+    seed_sidecar(&audio, 16);
     let model = dir.join("ggml-base.bin");
     fs::write(&model, b"ggml").expect("model");
     let calls = Arc::new(Mutex::new(Vec::new()));
     let engine = FakeInferenceEngine::success_with_calls("chunk", Arc::clone(&calls));
 
     // Act
-    let result =
-        run_transcription_flow(engine, short_config(), 16, &wav, &model, "base-q5_1", None);
+    let result = run_transcription_flow(
+        engine,
+        short_config(),
+        16,
+        &audio,
+        &model,
+        "base-q5_1",
+        None,
+    );
     let sizes = calls.lock().expect("lock").clone();
 
     // Assert
@@ -306,12 +289,12 @@ fn host_long_input_stays_chunked() {
 fn host_fifo_two_queued_recordings() {
     // Arrange
     let dir = temp_dir("host-fifo");
-    let wav_a = dir.join("a.wav");
-    let wav_b = dir.join("b.wav");
-    write_pcm_wav(&wav_a, 4_000);
-    write_pcm_wav(&wav_b, 4_000);
-    seed_sidecar(&wav_a, 21);
-    seed_sidecar(&wav_b, 22);
+    let audio_a = dir.join("a.flac");
+    let audio_b = dir.join("b.flac");
+    write_pcm_flac(&audio_a, 4_000);
+    write_pcm_flac(&audio_b, 4_000);
+    seed_sidecar(&audio_a, 21);
+    seed_sidecar(&audio_b, 22);
     let model = dir.join("ggml-base.bin");
     fs::write(&model, b"ggml").expect("model");
     let order = Arc::new(Mutex::new(Vec::new()));
@@ -320,7 +303,7 @@ fn host_fifo_two_queued_recordings() {
     let seen = skrivli::testing::run_transcription_fifo(
         FakeInferenceEngine::slow(80),
         short_config(),
-        &[(21, wav_a.as_path()), (22, wav_b.as_path())],
+        &[(21, audio_a.as_path()), (22, audio_b.as_path())],
         &model,
         "base-q5_1",
         Arc::clone(&order),
@@ -360,10 +343,10 @@ fn queued_rename_cancels_and_writes_no_transcript() {
 
     // Arrange
     let dir = temp_dir("queued-rename");
-    let blocker = dir.join("blocker.wav");
-    let clip = dir.join("clip.wav");
-    write_pcm_wav(&blocker, 4_000);
-    write_pcm_wav(&clip, 4_000);
+    let blocker = dir.join("blocker.flac");
+    let clip = dir.join("clip.flac");
+    write_pcm_flac(&blocker, 4_000);
+    write_pcm_flac(&clip, 4_000);
     seed_sidecar(&blocker, 1);
     seed_sidecar(&clip, 2);
     let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
@@ -375,7 +358,7 @@ fn queued_rename_cancels_and_writes_no_transcript() {
 
     // Act
     session.rename(2, "renamed");
-    wait_for_file(&dir.join("renamed.wav"));
+    wait_for_file(&dir.join("renamed.flac"));
     session.release();
     session.shutdown();
 
@@ -391,10 +374,10 @@ fn queued_delete_cancels_and_writes_no_transcript() {
 
     // Arrange
     let dir = temp_dir("queued-delete");
-    let blocker = dir.join("blocker.wav");
-    let clip = dir.join("clip.wav");
-    write_pcm_wav(&blocker, 4_000);
-    write_pcm_wav(&clip, 4_000);
+    let blocker = dir.join("blocker.flac");
+    let clip = dir.join("clip.flac");
+    write_pcm_flac(&blocker, 4_000);
+    write_pcm_flac(&clip, 4_000);
     seed_sidecar(&blocker, 1);
     seed_sidecar(&clip, 2);
     let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
@@ -423,18 +406,18 @@ fn session_paths_include_txt(dir: &Path) -> bool {
 }
 
 #[test]
-fn running_delete_cancels_before_write_and_keeps_wav() {
+fn running_delete_cancels_before_write_and_keeps_flac() {
     use skrivli::testing::{IdentitySession, InferenceHold};
 
     // Arrange
     let dir = temp_dir("running-delete");
-    let wav = dir.join("clip.wav");
-    write_pcm_wav(&wav, 4_000);
-    seed_sidecar(&wav, 5);
-    let before = fs::read(&wav).expect("before");
+    let audio = dir.join("clip.flac");
+    write_pcm_flac(&audio, 4_000);
+    seed_sidecar(&audio, 5);
+    let before = fs::read(&audio).expect("before");
     let session = IdentitySession::start(&dir, InferenceHold::DuringChunk { honor_cancel: true });
     session.wait_for_library_id(5);
-    session.enqueue(5, &wav);
+    session.enqueue(5, &audio);
     session.wait_until_held();
 
     // Act
@@ -447,7 +430,7 @@ fn running_delete_cancels_before_write_and_keeps_wav() {
     session.shutdown();
 
     // Assert
-    assert_eq!(fs::read(&wav).expect("after"), before);
+    assert_eq!(fs::read(&audio).expect("after"), before);
     assert!(!dir.join("clip.txt").exists());
     let _ = fs::remove_dir_all(dir);
 }
@@ -458,18 +441,18 @@ fn rename_before_write_retargets_transcript_beside_new_audio() {
 
     // Arrange
     let dir = temp_dir("retarget");
-    let wav = dir.join("meeting.wav");
-    write_pcm_wav(&wav, 4_000);
-    seed_sidecar(&wav, 6);
-    let before = fs::read(&wav).expect("before");
+    let audio = dir.join("meeting.flac");
+    write_pcm_flac(&audio, 4_000);
+    seed_sidecar(&audio, 6);
+    let before = fs::read(&audio).expect("before");
     let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
     session.wait_for_library_id(6);
-    session.enqueue(6, &wav);
+    session.enqueue(6, &audio);
     session.wait_until_held();
 
     // Act
     session.rename(6, "notes");
-    wait_for_file(&dir.join("notes.wav"));
+    wait_for_file(&dir.join("notes.flac"));
     session.release();
     session.wait_terminal();
     let phase = session.phase();
@@ -477,7 +460,7 @@ fn rename_before_write_retargets_transcript_beside_new_audio() {
 
     // Assert
     assert_eq!(phase, skrivli::testing::TranscriptionFlowPhase::Done);
-    assert_eq!(fs::read(dir.join("notes.wav")).expect("moved"), before);
+    assert_eq!(fs::read(dir.join("notes.flac")).expect("moved"), before);
     let text = fs::read_to_string(dir.join("notes.txt")).expect("txt");
     assert!(text.contains("noted"));
     assert!(!dir.join("meeting.txt").exists());
@@ -490,10 +473,10 @@ fn rename_of_a_different_id_does_not_cancel() {
 
     // Arrange
     let dir = temp_dir("other-rename");
-    let keep = dir.join("keep.wav");
-    let other = dir.join("other.wav");
-    write_pcm_wav(&keep, 4_000);
-    write_pcm_wav(&other, 4_000);
+    let keep = dir.join("keep.flac");
+    let other = dir.join("other.flac");
+    write_pcm_flac(&keep, 4_000);
+    write_pcm_flac(&other, 4_000);
     seed_sidecar(&keep, 7);
     seed_sidecar(&other, 8);
     let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
@@ -504,7 +487,7 @@ fn rename_of_a_different_id_does_not_cancel() {
 
     // Act
     session.rename(8, "moved");
-    wait_for_file(&dir.join("moved.wav"));
+    wait_for_file(&dir.join("moved.flac"));
     session.release();
     session.wait_terminal();
     let phase = session.phase();
@@ -523,10 +506,10 @@ fn delete_ready_recording_trashes_audio_sidecar_and_transcript() {
 
     // Arrange
     let dir = temp_dir("ready-delete");
-    let wav = dir.join("clip.wav");
-    write_pcm_wav(&wav, 4_000);
-    seed_sidecar(&wav, 9);
-    write_transcript_text(&wav, "already promoted\n").expect("txt");
+    let audio = dir.join("clip.flac");
+    write_pcm_flac(&audio, 4_000);
+    seed_sidecar(&audio, 9);
+    write_transcript_text(&audio, "already promoted\n").expect("txt");
     let session = IdentitySession::start(&dir, InferenceHold::BeforeOpen);
     session.wait_for_library_id(9);
 
@@ -544,7 +527,7 @@ fn delete_ready_recording_trashes_audio_sidecar_and_transcript() {
     session.shutdown();
 
     // Assert
-    assert!(names.iter().any(|name| name == "clip.wav"), "{names:?}");
+    assert!(names.iter().any(|name| name == "clip.flac"), "{names:?}");
     assert!(names.iter().any(|name| name == "clip.json"), "{names:?}");
     assert!(names.iter().any(|name| name == "clip.txt"), "{names:?}");
     let _ = fs::remove_dir_all(dir);
@@ -556,10 +539,10 @@ fn late_completion_after_delete_does_not_write_transcript() {
 
     // Arrange
     let dir = temp_dir("late-delete");
-    let wav = dir.join("clip.wav");
-    write_pcm_wav(&wav, 4_000);
-    seed_sidecar(&wav, 10);
-    let before = fs::read(&wav).expect("before");
+    let audio = dir.join("clip.flac");
+    write_pcm_flac(&audio, 4_000);
+    seed_sidecar(&audio, 10);
+    let before = fs::read(&audio).expect("before");
     let session = IdentitySession::start(
         &dir,
         InferenceHold::DuringChunk {
@@ -567,7 +550,7 @@ fn late_completion_after_delete_does_not_write_transcript() {
         },
     );
     session.wait_for_library_id(10);
-    session.enqueue(10, &wav);
+    session.enqueue(10, &audio);
     session.wait_until_held();
 
     // Act
@@ -580,7 +563,7 @@ fn late_completion_after_delete_does_not_write_transcript() {
     session.shutdown();
 
     // Assert
-    assert_eq!(fs::read(&wav).expect("after"), before);
+    assert_eq!(fs::read(&audio).expect("after"), before);
     assert!(!dir.join("clip.txt").exists());
     let _ = fs::remove_dir_all(dir);
 }

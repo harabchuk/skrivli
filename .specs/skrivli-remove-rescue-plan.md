@@ -1,5 +1,7 @@
 # Skrivli: remove rescue and crash recovery
 
+> **2026-11-08:** recordings are FLAC-only now (D-29, `skrivli-flac-migration-plan.md`). WAV, `.wav.partial`, `hound` and RIFF mentions below describe the earlier design; read `.flac` / `.flac.partial` / `flac-codec` where they appear.
+
 **Status:** Done (automated checks). The three manual Windows checks are Not verified.
 
 **Goal in one sentence:** take out every path that saves, renames, lists or labels a recording after something went wrong (the rescue copy, startup recovery and the "Recovered" label), so a recording is either finalized as a normal `.wav` or not saved at all.

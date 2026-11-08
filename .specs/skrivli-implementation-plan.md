@@ -1,5 +1,7 @@
 # Skrivli — Milestone-Based Implementation Plan
 
+> **2026-11-08 note:** recordings are now FLAC-only (see `skrivli-flac-migration-plan.md` and D-29). The checked milestone items below that mention WAV, `hound`, `wav.rs` or RIFF record what was built at the time; `infrastructure/files/flac.rs` replaced `wav.rs`, the RIFF safe stop became a 12 hour cap, and the M8.3 FLAC post-processing item is superseded.
+
 **Target:** Windows 10/11, x86_64-pc-windows-msvc  
 **Stack:** Rust stable, GPUI Kit/GPUI, flexaudio (WASAPI/cpal), local whisper.cpp  
 **Source of truth:** `.specs/skrivli-product.md` for what the user can do; `.specs/skrivli-app-design.md` for architecture; `AGENTS.md` for source placement, layering, and coding conventions.  
@@ -363,9 +365,9 @@ Landed after M3.3. `Pipeline` and `Aligner` replace the all-in-one mixer. The M3
 
 ### M8.3 — Optional post-processing (feature-gated)
 
-- [ ] After the M0–M7 gates are green, add `infrastructure/files/flac.rs` and confirm the `flac-codec` encode API (`FlacSampleWriter` or its byte writer) against the pinned crate (D-09). A background host, spawned and joined like `PlayerHost`, encodes the finalized WAV. Reopen and decode that FLAC and compare duration and sample bounds before any optional WAV removal. `scan_library` already pairs FLAC with its sidecar and `.txt`. The GPUI thread does not encode. A failed encode leaves the WAV in place and records a sidecar problem string.
-- [ ] Add separate `*.mic.wav` and `*.system.wav` stems, and whisper VAD, only after the capture port and the inference port already used by recording and transcription can supply them. Both default off. A failed stem or VAD pass records a sidecar problem and leaves the mixed WAV as the library entry.
-- [ ] When the FLAC spike fails encode, decode, or packaging, record the v1 exclusion in `.specs/decisions.md` and `.specs/skrivli-product.md` and skip stems and VAD in that same note. The release stays on WAV plus the offline transcript path.
+- [x] ~~Optional post-processing~~ Superseded by the FLAC migration (D-29): FLAC is the only recording format, written directly by `infrastructure/files/flac.rs`; no conversion or WAV removal exists. Original text: After the M0–M7 gates are green, add `infrastructure/files/flac.rs` and confirm the `flac-codec` encode API (`FlacSampleWriter` or its byte writer) against the pinned crate (D-09). A background host, spawned and joined like `PlayerHost`, encodes the finalized WAV. Reopen and decode that FLAC and compare duration and sample bounds before any optional WAV removal. `scan_library` already pairs FLAC with its sidecar and `.txt`. The GPUI thread does not encode. A failed encode leaves the WAV in place and records a sidecar problem string.
+- [ ] Add separate `*.mic.flac` and `*.system.flac` stems, and whisper VAD, only after the capture port and the inference port already used by recording and transcription can supply them. Both default off. A failed stem or VAD pass records a sidecar problem and leaves the mixed WAV as the library entry.
+- [x] ~~When the FLAC spike fails…~~ Not applicable: the FLAC spike passed (D-29). Original text: When the FLAC spike fails encode, decode, or packaging, record the v1 exclusion in `.specs/decisions.md` and `.specs/skrivli-product.md` and skip stems and VAD in that same note. The release stays on WAV plus the offline transcript path.
 
 ### M8 acceptance
 
@@ -464,16 +466,16 @@ Done when: observable milestone acceptance condition
 | D-02 | M1 | Tray hidden HWND/message-pump bridge | Explorer restart + shutdown test |
 | D-03 | M2 | flexaudio CapturePort adapters + device ids | Real mic/loopback opening spikes |
 | D-04 | M2–M3 | Bounded SPSC implementation, overflow/drop/gap semantics | Concurrent stress + synthetic timeline tests |
-| D-05 | M2 | RIFF size cap/rotation vs RF64 | Header boundary tests + long-session design |
+| D-05 | M2 | RIFF size cap/rotation vs RF64 | Resolved by D-29: FLAC with a 12 hour cap |
 | D-06 | M3 | Adaptive Rubato ratio for gradual drift; sparse hole/overlap only | ±100 ppm error publication + resampler ratio tests |
 | D-07 | M6 | whisper.cpp binding/version, native runtime and licenses | Clean MSVC CPU build + transcription demo |
 | D-08 | M6 | Model catalog, exact trusted URLs/digests and compatibility | Verified manifest and corrupted-download test |
-| D-09 | M8 | `flac-codec` FLAC encode/decode viability and optional feature priority | Encode/decode/packaging proof |
+| D-09 | M8 | `flac-codec` FLAC encode/decode viability and optional feature priority | Resolved by D-29: FLAC is the sole format |
 
 ## Scope discipline
 
 **Mandatory v1:** M0–M7 core goals, M8 essential settings/hotkey/accessibility, M9 distribution.  
-**Optional/defer if needed:** FLAC, separate recording stems, VAD, expanded theming and installers.  
+**Optional/defer if needed:** separate recording stems, VAD, expanded theming and installers.  
 **Outside v1:** live transcription, cloud sync, diarization, summaries, GPU transcription and cross-platform support.
 
 This plan is derived from the supplied Skrivli app design. It intentionally converts its decisions into implementation tasks and acceptance evidence without claiming untested Rust/GPUI Kit/Windows APIs already work.

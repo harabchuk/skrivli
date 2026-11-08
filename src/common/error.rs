@@ -47,7 +47,9 @@ impl AppError {
             "free space" => "There is not enough free disk space to record.",
             "microphone" => "The microphone is not available.",
             "microphone privacy" => "Microphone access is turned off in Windows privacy settings.",
-            "wav limit" => "Recording stopped because the file reached its size limit.",
+            "recording limit" => {
+                "Recording stopped because it reached the maximum meeting duration."
+            }
             "library" | "library rename" | "library delete" | "library watch" => {
                 "Could not update the recordings library."
             }
@@ -103,7 +105,7 @@ mod tests {
             "save settings",
             std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                r"C:\Users\me\Documents\Skrivli\take.wav",
+                r"C:\Users\me\Documents\Skrivli\take.flac",
             ),
         );
 
@@ -113,9 +115,9 @@ mod tests {
 
         // Assert
         assert_eq!(shown, "Could not save settings.");
-        assert!(!shown.contains("take.wav"));
+        assert!(!shown.contains("take.flac"));
         assert!(diagnostic.contains("save settings"));
-        assert!(diagnostic.contains("take.wav"));
+        assert!(diagnostic.contains("take.flac"));
         assert!(error.source().is_some());
     }
 

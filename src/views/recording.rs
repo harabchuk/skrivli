@@ -420,6 +420,11 @@ fn notice_tone(notice: &str) -> NoticeTone {
     }
 }
 
+/// Good news ("Saved.") lives in the shared status bar; only warnings get the banner.
+pub(crate) fn banner_notice(notice: Option<&'static str>) -> Option<&'static str> {
+    notice.filter(|notice| notice_tone(notice) == NoticeTone::Warning)
+}
+
 /// An unknown choice shows the first option, the Windows default.
 fn selected_index<T: PartialEq>(choices: &[T], current: &T) -> usize {
     choices
@@ -474,6 +479,22 @@ mod tests {
 
         // Assert
         assert_eq!(tones, (NoticeTone::Info, NoticeTone::Warning));
+    }
+
+    #[test]
+    fn saved_stays_out_of_the_banner_but_warnings_stay_in() {
+        // Arrange
+        let failure = "The microphone is not available.";
+
+        // Act
+        let shown = (
+            banner_notice(Some(NOTICE_SAVED)),
+            banner_notice(Some(failure)),
+            banner_notice(None),
+        );
+
+        // Assert
+        assert_eq!(shown, (None, Some(failure), None));
     }
 
     #[test]
