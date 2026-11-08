@@ -20,8 +20,7 @@ function Get-ExpectedEntries([string]$Root) {
         "$Root/skrivli.exe",
         "$Root/README.txt",
         "$Root/PRIVACY.txt",
-        "$Root/LICENSE-MIT.txt",
-        "$Root/LICENSE-APACHE.txt",
+        "$Root/LICENSE.txt",
         "$Root/licenses/sonora-BSD-3-Clause.txt",
         "$Root/licenses/whisper.cpp-MIT.txt",
         "$Root/licenses/THIRD-PARTY.txt"
@@ -82,8 +81,7 @@ function Invoke-Package {
         @($exe, 'skrivli.exe'),
         @('dist\README.txt', 'README.txt'),
         @('dist\PRIVACY.txt', 'PRIVACY.txt'),
-        @('LICENSE-MIT', 'LICENSE-MIT.txt'),
-        @('LICENSE-APACHE', 'LICENSE-APACHE.txt'),
+        @('LICENSE', 'LICENSE.txt'),
         @('licenses\sonora-BSD-3-Clause.txt', 'licenses\sonora-BSD-3-Clause.txt'),
         @('licenses\whisper.cpp-MIT.txt', 'licenses\whisper.cpp-MIT.txt')
     )
