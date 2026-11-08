@@ -54,8 +54,6 @@ pub(crate) const NOTICE_SYSTEM_MISSING: &str =
     "System audio is unavailable. Recording the microphone with silence on that side.";
 pub(crate) const NOTICE_MIC_MISSING: &str =
     "The microphone is unavailable. Recording system audio with silence on that side.";
-pub(crate) const NOTICE_RECOVERED: &str = "A previous recording was recovered.";
-pub(crate) const NOTICE_RECOVER_FAILED: &str = "A previous recording could not be recovered.";
 pub(crate) const NOTICE_WORKER: &str = "Recording stopped because a capture worker failed.";
 pub(crate) const NOTICE_STALL: &str = "Audio capture appears stalled.";
 

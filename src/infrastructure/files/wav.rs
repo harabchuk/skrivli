@@ -9,7 +9,9 @@
 //! removes a partial only after a failed start before usable audio must be kept.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+#[cfg(test)]
+use std::io::Read;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::common::error::AppError;
@@ -280,136 +282,6 @@ fn allocate_paths(directory: &Path, when: CivilTime) -> Result<(PathBuf, PathBuf
     ))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RecoveryReport {
-    pub(crate) recovered: usize,
-    pub(crate) unrecoverable: usize,
-}
-
-/// Repair `*.wav.partial` files that still have a readable canonical header.
-/// Unsafe files stay in place.
-pub(crate) fn recover_partials(directory: &Path) -> RecoveryReport {
-    let mut report = RecoveryReport {
-        recovered: 0,
-        unrecoverable: 0,
-    };
-    let entries = match std::fs::read_dir(directory) {
-        Ok(entries) => entries,
-        Err(_) => return report,
-    };
-    for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !name.ends_with(".wav.partial") {
-            continue;
-        }
-        match recover_one(&path) {
-            Ok(()) => report.recovered = report.recovered.saturating_add(1),
-            Err(error) => {
-                tracing::error!(error = %error, "a partial recording was left in place");
-                report.unrecoverable = report.unrecoverable.saturating_add(1);
-            }
-        }
-    }
-    report
-}
-
-fn recover_one(partial: &Path) -> Result<(), AppError> {
-    let length = std::fs::metadata(partial)
-        .map_err(|source| AppError::io("recover recording", source))?
-        .len();
-    if length < WAV_HEADER_BYTES {
-        return Err(AppError::message(
-            "recover recording",
-            "partial header is incomplete",
-        ));
-    }
-    {
-        let reader = hound::WavReader::open(partial)
-            .map_err(|error| map_hound("recover recording", error))?;
-        if reader.spec() != wav_spec() {
-            return Err(AppError::message(
-                "recover recording",
-                "partial header is not a Skrivli wav",
-            ));
-        }
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(partial)
-        .map_err(|source| AppError::io("recover recording", source))?;
-    let mut data_tag = [0_u8; 4];
-    file.seek(SeekFrom::Start(36))
-        .map_err(|source| AppError::io("recover recording", source))?;
-    file.read_exact(&mut data_tag)
-        .map_err(|source| AppError::io("recover recording", source))?;
-    if &data_tag != b"data" {
-        return Err(AppError::message(
-            "recover recording",
-            "partial header is not a canonical 44-byte wav",
-        ));
-    }
-    let data_bytes = (length - WAV_HEADER_BYTES) / BYTES_PER_FRAME * BYTES_PER_FRAME;
-    if !data_bytes_fit(0, data_bytes) {
-        return Err(AppError::message(
-            "recover recording",
-            "partial exceeds the RIFF size field",
-        ));
-    }
-    let data_u32 = u32::try_from(data_bytes)
-        .map_err(|_| AppError::message("recover recording", "data length does not fit"))?;
-    let riff_size = data_u32.saturating_add(RIFF_OVERHEAD_BYTES as u32);
-    file.seek(SeekFrom::Start(4))
-        .map_err(|source| AppError::io("recover recording", source))?;
-    file.write_all(&riff_size.to_le_bytes())
-        .map_err(|source| AppError::io("recover recording", source))?;
-    file.seek(SeekFrom::Start(40))
-        .map_err(|source| AppError::io("recover recording", source))?;
-    file.write_all(&data_u32.to_le_bytes())
-        .map_err(|source| AppError::io("recover recording", source))?;
-    file.set_len(WAV_HEADER_BYTES + data_bytes)
-        .map_err(|source| AppError::io("recover recording", source))?;
-    file.sync_all()
-        .map_err(|source| AppError::io("recover recording", source))?;
-    drop(file);
-    let recovered = recovered_path(partial)?;
-    std::fs::rename(partial, &recovered)
-        .map_err(|source| AppError::io("recover recording", source))?;
-    Ok(())
-}
-
-fn recovered_path(partial: &Path) -> Result<PathBuf, AppError> {
-    let name = partial
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| AppError::message("recover recording", "partial name is not unicode"))?;
-    let stem = name
-        .strip_suffix(".wav.partial")
-        .ok_or_else(|| AppError::message("recover recording", "partial name is unexpected"))?;
-    let directory = partial.parent().unwrap_or(Path::new("."));
-    for suffix in 0..10_000 {
-        let file_name = if suffix == 0 {
-            format!("{stem}.recovered.wav")
-        } else {
-            format!("{stem}-{}.recovered.wav", suffix + 1)
-        };
-        let candidate = directory.join(file_name);
-        if !candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    Err(AppError::message(
-        "recover recording",
-        "could not choose a recovered name",
-    ))
-}
-
 #[cfg(test)]
 pub(crate) fn read_wav_lengths(path: &Path) -> Result<(u32, u32, u64), AppError> {
     let mut file = File::open(path).map_err(|source| AppError::io("save recording", source))?;
@@ -427,11 +299,11 @@ pub(crate) fn read_wav_lengths(path: &Path) -> Result<(u32, u32, u64), AppError>
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{self, OpenOptions};
+    use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        data_bytes_fit, quantize_sample, read_wav_lengths, recover_partials, WavWrite, WavWriter,
+        data_bytes_fit, quantize_sample, read_wav_lengths, WavWrite, WavWriter,
         MAX_SAFE_DATA_BYTES, RIFF_OVERHEAD_BYTES,
     };
     use crate::domain::audio::CivilTime;
@@ -547,40 +419,6 @@ mod tests {
         assert_eq!(second_name, "Skrivli_2026-11-04_13-01-02-2.wav");
         first.abandon().expect("abandon");
         second.abandon().expect("abandon");
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn recoverable_partial_is_renamed_and_a_bad_header_is_left() {
-        // Arrange
-        let dir = temp_dir("recover");
-        let writer = WavWriter::create(&dir, stamp()).expect("create");
-        let partial = writer.partial_path().to_path_buf();
-        drop(writer);
-        {
-            use std::io::Write;
-            let mut file = OpenOptions::new()
-                .append(true)
-                .open(&partial)
-                .expect("append");
-            file.write_all(&[1, 0, 2, 0, 3, 0, 4, 0]).expect("pcm");
-        }
-        let garbage = dir.join("Skrivli_bad.wav.partial");
-        fs::write(&garbage, b"not a wav header at all, still too short").expect("garbage");
-
-        // Act
-        let report = recover_partials(&dir);
-
-        // Assert
-        assert_eq!(report.recovered, 1);
-        assert_eq!(report.unrecoverable, 1);
-        assert!(!partial.exists());
-        assert!(garbage.exists());
-        let recovered = dir.join("Skrivli_2026-11-04_13-01-02.recovered.wav");
-        let (riff, data, length) = read_wav_lengths(&recovered).expect("recovered");
-        assert_eq!(data, 8);
-        assert_eq!(riff, 44);
-        assert_eq!(length, 52);
         let _ = fs::remove_dir_all(dir);
     }
 

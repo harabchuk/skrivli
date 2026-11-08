@@ -132,13 +132,13 @@ Each phase leaves the tree building with `cargo fmt`, `cargo clippy --all-target
 
 **Why:** after this phase the app no longer reads or renames `*.wav.partial` on launch, and the launch notice disappears.
 
-- [ ] `infrastructure/files/wav.rs`: delete `RecoveryReport`, `recover_partials`, `recover_one` and `recovered_path` (about lines 293–420). Delete the test `recoverable_partial_is_renamed_and_a_bad_header_is_left` and remove `recover_partials` from the test `use` list. If `File`, `Read` or `Seek` imports become unused outside `#[cfg(test)] read_wav_lengths`, move them under `cfg(test)` or drop them as clippy reports.
-- [ ] `app/bootstrap.rs`:
+- [x] `infrastructure/files/wav.rs`: delete `RecoveryReport`, `recover_partials`, `recover_one` and `recovered_path` (about lines 293–420). Delete the test `recoverable_partial_is_renamed_and_a_bad_header_is_left` and remove `recover_partials` from the test `use` list. If `File`, `Read` or `Seek` imports become unused outside `#[cfg(test)] read_wav_lengths`, move them under `cfg(test)` or drop them as clippy reports.
+- [x] `app/bootstrap.rs`:
   - delete `fn recovery_notice` and the `use …::wav::recover_partials` import,
   - remove `NOTICE_RECOVERED` and `NOTICE_RECOVER_FAILED` from the `services::recording` import,
   - remove `let recovery_notice = …`, the `recovery_notice` parameter of `open_shell`, and `presentation.set_notice(recovery_notice);`. `Presentation::set_notice` stays: other callers use it.
-- [ ] `services/recording.rs`: delete `NOTICE_RECOVERED` and `NOTICE_RECOVER_FAILED`.
-- [ ] `views/recording.rs`:
+- [x] `services/recording.rs`: delete `NOTICE_RECOVERED` and `NOTICE_RECOVER_FAILED`.
+- [x] `views/recording.rs`:
   - **Red:** change `good_news_is_not_shown_as_a_warning` to check only `NOTICE_SAVED` (Info) against a failure (Warning). It fails to compile until the next step, which is acceptable here because the change is a pure removal.
   - **Green:** `notice_tone` becomes `if notice == NOTICE_SAVED { Info } else { Warning }`. Drop `NOTICE_RECOVERED` from the import.
 

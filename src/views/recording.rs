@@ -18,7 +18,7 @@ use gpui_kit::{
 };
 
 use crate::domain::recording::RecordPhase;
-use crate::services::recording::{NOTICE_RECOVERED, NOTICE_SAVED};
+use crate::services::recording::NOTICE_SAVED;
 use crate::ui::components::level_meter::level_meter;
 
 const COLUMN_MAX_WIDTH: f32 = 520.;
@@ -413,7 +413,7 @@ enum NoticeTone {
 }
 
 fn notice_tone(notice: &str) -> NoticeTone {
-    if notice == NOTICE_SAVED || notice == NOTICE_RECOVERED {
+    if notice == NOTICE_SAVED {
         NoticeTone::Info
     } else {
         NoticeTone::Warning
@@ -470,17 +470,10 @@ mod tests {
         let failure = "The microphone is not available.";
 
         // Act
-        let tones = (
-            notice_tone(NOTICE_SAVED),
-            notice_tone(NOTICE_RECOVERED),
-            notice_tone(failure),
-        );
+        let tones = (notice_tone(NOTICE_SAVED), notice_tone(failure));
 
         // Assert
-        assert_eq!(
-            tones,
-            (NoticeTone::Info, NoticeTone::Info, NoticeTone::Warning)
-        );
+        assert_eq!(tones, (NoticeTone::Info, NoticeTone::Warning));
     }
 
     #[test]

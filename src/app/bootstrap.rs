@@ -21,7 +21,6 @@ use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCaptu
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::audio::sonora_steps::SonoraPipelineFactory;
 use crate::infrastructure::files::player::RodioOutput;
-use crate::infrastructure::files::wav::recover_partials;
 use crate::infrastructure::platform::{self, PlatformHost};
 use crate::infrastructure::storage::settings::Settings;
 use crate::services::lease::EndpointLease;
@@ -30,9 +29,7 @@ use crate::services::library::LibraryHost;
 use crate::services::models::ModelHost;
 use crate::services::playback::PlayerHost;
 use crate::services::ports::{ActivationWatch, HostCommand, InstanceAcquire};
-use crate::services::recording::{
-    spawn_recording_host, RecordingEngine, RecordingHost, NOTICE_RECOVERED, NOTICE_RECOVER_FAILED,
-};
+use crate::services::recording::{spawn_recording_host, RecordingEngine, RecordingHost};
 use crate::services::transcription::TranscriptionHost;
 use crate::ui::theme::apply_theme;
 use crate::views::actions::{AppCommand, BridgeMessage};
@@ -107,7 +104,6 @@ pub(crate) fn run() -> i32 {
     let (tx, rx) = mpsc::channel();
     let writer = SettingsWriter::spawn(settings_path, &shutdown);
     let recording_flag = Arc::new(AtomicBool::new(false));
-    let recovery_notice = recovery_notice(settings.recordings_directory());
     let levels = Arc::new(LevelSnapshot::new());
     let gain = Arc::new(GainControl::new(settings.mic_gain()));
     let lease = Arc::new(EndpointLease::new());
@@ -142,7 +138,6 @@ pub(crate) fn run() -> i32 {
         writer,
         shutdown.clone(),
         workers,
-        recovery_notice,
         levels,
         gain,
         targets,
@@ -359,7 +354,6 @@ fn open_shell(
     writer: SettingsWriter,
     shutdown: ShutdownController,
     workers: ShellWorkers,
-    recovery_notice: Option<&'static str>,
     levels: Arc<LevelSnapshot>,
     gain: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
@@ -373,12 +367,11 @@ fn open_shell(
             apply_theme(theme, None, cx);
             register(cx);
             let options = shell_window_options(&settings, cx);
-            let mut presentation = Presentation::new(
+            let presentation = Presentation::new(
                 settings.close_to_tray(),
                 settings.tray_explanation_seen(),
                 !settings.start_hidden(),
             );
-            presentation.set_notice(recovery_notice);
             let window_recording = workers.recording;
             let window_library = workers.library;
             let window_player = workers.player;
@@ -496,17 +489,6 @@ fn logical_area(bounds: Bounds<Pixels>) -> Option<LogicalRect> {
         bounds.size.width.to_i32().max(1),
         bounds.size.height.to_i32().max(1),
     )
-}
-
-fn recovery_notice(directory: &std::path::Path) -> Option<&'static str> {
-    let report = recover_partials(directory);
-    if report.unrecoverable > 0 {
-        Some(NOTICE_RECOVER_FAILED)
-    } else if report.recovered > 0 {
-        Some(NOTICE_RECOVERED)
-    } else {
-        None
-    }
 }
 
 fn prepare_local_dirs(paths: &AppPaths) -> Result<(), AppError> {
