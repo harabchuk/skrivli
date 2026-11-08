@@ -12,6 +12,15 @@
 
 Skrivli is a Windows app that records and transcribes meetings entirely on your computer, keeping your audio and text private.
 
+## Download and installation
+
+Skrivli is distributed as a portable Windows application in a ZIP archive.
+
+**Install**
+1. Download from the [Releases](https://github.com/harabchuk/skrivli/releases) page.
+1. Unzip the whole folder anywhere you like.
+1. Run skrivli.exe. There is no installer.
+
 ## Features
 
 - **Records both sides of a call.** Your microphone and system audio go into one continuous WAV file. Silence is kept, so the timing stays correct.
@@ -52,7 +61,6 @@ Target: `x86_64-pc-windows-msvc` on Windows 10 or 11.
     $env:Path = "$env:USERPROFILE\.cargo\bin;" + $env:Path
    ```
 2. Install the MSVC Build Tools (Visual Studio Build Tools workload "Desktop development with C++") and a Windows 10/11 SDK. The linker is `link.exe` from that toolchain.
-3. DPI awareness is Per-Monitor V2. `gpui-pre` 0.3.11 already embeds that manifest, and the MSVC linker rejects a second one, so `build.rs` embeds the icon and version resource only. `resources/skrivli.manifest` is the same DPI contract, kept in the repo and not embedded. 100% and 150% scaling were not exercised on hardware for this milestone.
 
 ### Commands
 
