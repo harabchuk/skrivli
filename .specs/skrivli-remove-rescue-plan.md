@@ -1,6 +1,6 @@
 # Skrivli: remove rescue and crash recovery
 
-**Status:** Not started.
+**Status:** Done (automated checks). The three manual Windows checks are Not verified.
 
 **Goal in one sentence:** take out every path that saves, renames, lists or labels a recording after something went wrong (the rescue copy, startup recovery and the "Recovered" label), so a recording is either finalized as a normal `.wav` or not saved at all.
 
@@ -224,17 +224,17 @@ Each phase leaves the tree building with `cargo fmt`, `cargo clippy --all-target
 
 `.specs/skrivli-remove-rescue-plan.md` (this file)
 
-- [ ] Set **Status** to Done and add an evidence note (the commands and results from Phase 6).
+- [x] Set **Status** to Done and add an evidence note (the commands and results from Phase 6).
 
 ---
 
 ### Phase 6: Verify
 
-- [ ] `cargo fmt --check`
-- [ ] `cargo clippy --all-targets -- -D warnings`
-- [ ] `cargo test`
-- [ ] `cargo build`
-- [ ] Leftover sweep. Each must return only the expected hits:
+- [x] `cargo fmt --check`
+- [x] `cargo clippy --all-targets -- -D warnings`
+- [x] `cargo test`
+- [x] `cargo build`
+- [x] Leftover sweep. Each must return only the expected hits:
   - `rg -i rescue src tests` → none
   - `rg "recover_partials|RecoveryReport|release_partial|NOTICE_RECOVER|NOTICE_RESCUED|NOTICE_PARTIAL_KEPT|NOTE_RECOVERED|RowBadge::Recovered" src tests` → none
   - `rg -i "recovered" src` → only `ChunkFlags::RECOVERED` and the playback test variable
@@ -243,6 +243,21 @@ Each phase leaves the tree building with `cargo fmt`, `cargo clippy --all-target
   1. Put a copy of an old `Skrivli_….wav.partial` and an old `Skrivli_….recovered.wav` in the recordings folder, then launch. Expect no launch notice; the partial is untouched and not listed; the recovered file is listed as `Skrivli_….recovered` with no badge.
   2. Start recording, then make the folder read-only (or remove the USB drive it is on), then stop. Expect the folder notice. If the rename was possible, the recording is in the list with the "Problems occurred" note. No `rescue` folder is created under `%LOCALAPPDATA%\Skrivli\`.
   3. Kill the process during a recording, then relaunch. Expect no notice. The `.wav.partial` remains on disk and is not listed.
+
+**Evidence (Phase 6, run on branch `harabchuk/Remove-rescue`):**
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --check` | Clean (exit 0) |
+| `cargo clippy --all-targets -- -D warnings` | Clean (exit 0) |
+| `cargo test` | Pass: lib 333 passed, 4 ignored; `recording_flow` 11 passed; `transcription_flow` 16 passed. The flaky `transcription_flow` tests did not fail on this run, so no rerun was needed. |
+| `cargo build` | Finished, no warnings |
+| `rg -i rescue src tests` | No hits |
+| `rg "recover_partials\|RecoveryReport\|release_partial\|NOTICE_RECOVER\|NOTICE_RESCUED\|NOTICE_PARTIAL_KEPT\|NOTE_RECOVERED\|RowBadge::Recovered" src tests` | No hits |
+| `rg -i recovered src` | Only `ChunkFlags::RECOVERED` (`flex_capture.rs`), the `recovered` variable in `services/playback.rs` tests, and the new library test `scan_skips_partials_and_lists_old_recovered_as_plain_wav` (it exercises an old `crash.recovered.wav`) |
+| `rg -i "rescue\|\.recovered\.wav" .specs` | Only this plan, D-10 (its title and the pointer to D-23), D-11, D-23, and the struck-through M4.2 history lines in `skrivli-implementation-plan.md` |
+
+Manual Windows checks 1, 2 and 3 above: **Not verified** (cannot be run by the agent).
 
 ---
 
