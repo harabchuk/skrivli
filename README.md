@@ -1,6 +1,6 @@
 # Skrivli
 
-Skrivli is a local Windows meeting recorder. It captures meeting audio on the machine and keeps recordings and transcripts as ordinary files. Nothing in the foundation build sends audio or transcripts off the computer.
+Skrivli is a Windows app that records and transcribes meetings entirely on your computer, keeping your audio and text private.
 
 ## Features
 
@@ -13,7 +13,6 @@ Skrivli is a local Windows meeting recorder. It captures meeting audio on the ma
 - **Reliable saving.** If something fails during a recording, the audio captured so far is saved. You get a warning when disk space runs low, and a recording is still saved if one device drops.
 - **Recordings library** grouped by Today, Yesterday and Earlier. It updates live when files change, and has playback with a seek bar, rename, delete to the Recycle Bin, and Show in folder.
 - **Offline transcription** with whisper.cpp. Choose multilingual, English or Swedish (KB-Whisper) models, downloaded only when you ask. Transcripts have `[HH:MM:SS]` timestamps, are saved as `.txt` files next to the audio, can be copied with one click, and highlight the current paragraph during playback.
-- **Transcription queue** with progress, cancel and retry. Auto-transcribe is optional. Transcribing again replaces the old transcript only once the new one succeeds.
 - **Light, dark and system themes**, keyboard navigation, single instance, and the window remembers its size and position.
 
 ## Screenshots
