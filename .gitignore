@@ -9,3 +9,4 @@
 .vs/
 *.user
 *.suo
+/releases/licenses/THIRD-PARTY.txt

@@ -309,3 +309,7 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 ## D-28 — Version comes only from `Cargo.toml` (release plan R1)
 
 **Outcome:** `build.rs` no longer sets a version. The release exe reports `ProductVersion` 0.1.0 and `FileVersionRaw` 0.1.0.0, matching `Cargo.toml`.
+
+## D-29 — Release files live under `releases/`
+
+**Date:** 2026-11-08. **Outcome:** Release-only files moved into one folder: `releases/package.ps1` (was `scripts/`), `releases/release-notes-header.md` (was `.github/`), `releases/about.toml` and `releases/about.hbs` (was root; CI passes `-c releases/about.toml`), `releases/dist/` and `releases/licenses/` (were root). `release.toml` was folded into `Cargo.toml` as `[package.metadata.release]`, since cargo-release only reads config from the root. `.github/workflows/release.yml` stays where GitHub requires it. Paths inside the ZIP are unchanged. `scripts/build_run.bat` stays in `scripts/` (dev tool, not release).

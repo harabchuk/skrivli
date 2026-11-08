@@ -51,3 +51,11 @@ windows = { version = "0.58", features = [
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[package.metadata.release]
+allow-branch = ["main"]
+publish = false                       # not a crates.io crate
+tag-name = "v{{version}}"
+tag-message = "Skrivli {{version}}"
+pre-release-commit-message = "Release v{{version}}"
+pre-release-hook = ["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"]

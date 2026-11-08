@@ -76,7 +76,7 @@ cargo run
 
 ### Release process
 
-Releases are cut with [`cargo-release`](https://github.com/crate-ci/cargo-release) (configured in `release.toml`) and built and published by GitHub Actions.
+Releases are cut with [`cargo-release`](https://github.com/crate-ci/cargo-release) (configured in `[package.metadata.release]` in `Cargo.toml`) and built and published by GitHub Actions.
 
 #### Before you start
 
@@ -110,13 +110,13 @@ Pushing a tag like `vX.Y.Z` starts the `release` workflow (`.github/workflows/re
 1. **CI.** Runs the full CI workflow first (format, clippy, tests, release build). If it fails, nothing is published.
 2. **Version check.** Fails if the tag does not match the `Cargo.toml` version.
 3. **Build.** `cargo build --release --locked`, then checks that the exe's `ProductVersion` and `FileVersionRaw` equal the version.
-4. **Licenses.** Generates `licenses/THIRD-PARTY.txt` with `cargo about`.
+4. **Licenses.** Generates `releases/licenses/THIRD-PARTY.txt` with `cargo about`.
 5. **Package.** `scripts/package.ps1` builds `target/dist/skrivli-X.Y.Z-windows-x64.zip` and its `.sha256` file. The ZIP holds `skrivli.exe`, `README.txt`, `PRIVACY.txt`, the licenses and the third-party notices. It must not contain `.bin` or `.pdb` files. If `SKRIVLI_SIGN_CMD` is set, the exe is signed first (not used yet).
-6. **Release notes.** Takes `.github/release-notes-header.md` (install steps, SmartScreen note, SHA-256) and adds the commit subjects since the previous tag, with merge commits left out.
+6. **Release notes.** Takes `releases/release-notes-header.md` (install steps, SmartScreen note, SHA-256) and adds the commit subjects since the previous tag, with merge commits left out.
 7. **Publish.** Creates the GitHub release `Skrivli X.Y.Z` immediately (not a draft), marked as latest, with the ZIP and checksum attached. If the release already exists, the assets are replaced instead.
 8. **Artifact.** Also uploads the ZIP and checksum as a workflow artifact, kept for 7 days.
 
-To test packaging locally, run `cargo build --release` and then `./scripts/package.ps1 -Version X.Y.Z -AllowMissingThirdParty`. The result contains a placeholder third-party file and must not be released.
+To test packaging locally, run `cargo build --release` and then `./releases/package.ps1 -Version X.Y.Z -AllowMissingThirdParty`. The result contains a placeholder third-party file and must not be released.
 
 ## License
 
