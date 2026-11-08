@@ -16,7 +16,7 @@ use crate::domain::transcript::{
     WINDOW_OVERLAP,
 };
 use crate::infrastructure::ai::resample::pcm16_to_whisper_mono;
-use crate::infrastructure::files::transcript_reader::{TranscriptWavReader, DEFAULT_CHUNK_FRAMES};
+use crate::infrastructure::files::transcript_reader::{TranscriptFlacReader, DEFAULT_CHUNK_FRAMES};
 use crate::infrastructure::storage::sidecar::{
     load_sidecar, transcript_path_for, update_transcription, write_transcript_text, SidecarLoad,
     TranscriptionWrite,
@@ -1187,7 +1187,7 @@ fn transcribe_file(
     config: TranscriptionConfig,
     on_progress: &mut dyn FnMut(u8),
 ) -> Result<String, AppError> {
-    let mut reader = TranscriptWavReader::open(audio_path)?;
+    let mut reader = TranscriptFlacReader::open(audio_path)?;
     let format = reader.format();
     let total_frames = reader.frames_remaining().unwrap_or(0);
     let total_duration = if format.sample_rate() == 0 {
@@ -1447,31 +1447,13 @@ mod tests {
         dir
     }
 
-    fn write_pcm_wav(path: &Path, frames: usize) {
-        let channels = 2_usize;
-        let sample_rate = 48_000_u32;
-        let data_bytes = (frames * channels * 2) as u32;
-        let mut bytes = Vec::with_capacity(44 + data_bytes as usize);
-        bytes.extend_from_slice(b"RIFF");
-        bytes.extend_from_slice(&(36 + data_bytes).to_le_bytes());
-        bytes.extend_from_slice(b"WAVE");
-        bytes.extend_from_slice(b"fmt ");
-        bytes.extend_from_slice(&16_u32.to_le_bytes());
-        bytes.extend_from_slice(&1_u16.to_le_bytes());
-        bytes.extend_from_slice(&(channels as u16).to_le_bytes());
-        bytes.extend_from_slice(&sample_rate.to_le_bytes());
-        bytes.extend_from_slice(&(sample_rate * channels as u32 * 2).to_le_bytes());
-        bytes.extend_from_slice(&((channels * 2) as u16).to_le_bytes());
-        bytes.extend_from_slice(&16_u16.to_le_bytes());
-        bytes.extend_from_slice(b"data");
-        bytes.extend_from_slice(&data_bytes.to_le_bytes());
-        bytes.extend(std::iter::repeat_n(0_u8, data_bytes as usize));
-        fs::write(path, bytes).expect("wav");
+    fn write_pcm_flac(path: &Path, frames: usize) {
+        crate::infrastructure::files::flac::write_silence(path, frames).expect("flac");
     }
 
-    fn seed_sidecar(wav: &Path, id: u64) {
+    fn seed_sidecar(audio: &Path, id: u64) {
         write_sidecar(
-            wav,
+            audio,
             &Sidecar {
                 id,
                 started_at_unix_ms: 1,
@@ -1538,9 +1520,9 @@ mod tests {
     fn progress_is_published_while_a_chunk_is_decoding() {
         // Arrange
         let dir = temp_dir("live-progress");
-        let wav = dir.join("meeting.wav");
-        write_pcm_wav(&wav, 48_000);
-        seed_sidecar(&wav, 31);
+        let audio = dir.join("meeting.flac");
+        write_pcm_flac(&audio, 48_000);
+        seed_sidecar(&audio, 31);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let published = Arc::new(AtomicU8::new(0));
@@ -1559,7 +1541,7 @@ mod tests {
         );
 
         // Act
-        host.enqueue(RecordingId::from_raw(31), wav, model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(31), audio, model, "base-q5_1");
         wait_until(&host, |snap| snap.phase == JobPhase::Done);
         host.shutdown();
         let _ = handle.join();
@@ -1595,12 +1577,12 @@ mod tests {
 
     fn scripted_percents(label: &str, frames: usize, script: Vec<u8>) -> Vec<u8> {
         let dir = temp_dir(label);
-        let wav = dir.join("clip.wav");
-        write_pcm_wav(&wav, frames);
+        let audio = dir.join("clip.flac");
+        write_pcm_flac(&audio, frames);
         let mut percents = Vec::new();
         transcribe_file(
             &mut ScriptedInference { script },
-            &wav,
+            &audio,
             &Arc::new(AtomicBool::new(false)),
             short_config(),
             &mut |percent| percents.push(percent),
@@ -1651,10 +1633,10 @@ mod tests {
     fn success_writes_transcript_and_sidecar() {
         // Arrange
         let dir = temp_dir("ok");
-        let wav = dir.join("meeting.wav");
-        write_pcm_wav(&wav, 48_000);
-        let before = fs::read(&wav).expect("before");
-        seed_sidecar(&wav, 11);
+        let audio = dir.join("meeting.flac");
+        write_pcm_flac(&audio, 48_000);
+        let before = fs::read(&audio).expect("before");
+        seed_sidecar(&audio, 11);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -1675,16 +1657,16 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(11), wav.clone(), model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(11), audio.clone(), model, "base-q5_1");
         wait_until(&host, |snap| snap.phase == JobPhase::Done);
         host.shutdown();
         let _ = handle.join();
 
         // Assert
-        assert_eq!(fs::read(&wav).expect("after"), before);
+        assert_eq!(fs::read(&audio).expect("after"), before);
         let text = fs::read_to_string(dir.join("meeting.txt")).expect("txt");
         assert!(text.contains("hello café"));
-        match load_sidecar(&wav) {
+        match load_sidecar(&audio) {
             SidecarLoad::Loaded(doc) => assert_eq!(doc.transcript, TranscriptStatus::Ready),
             other => panic!("{other:?}"),
         }
@@ -1693,13 +1675,13 @@ mod tests {
     }
 
     #[test]
-    fn engine_failure_marks_failed_and_keeps_wav() {
+    fn engine_failure_marks_failed_and_keeps_flac() {
         // Arrange
         let dir = temp_dir("fail");
-        let wav = dir.join("clip.wav");
-        write_pcm_wav(&wav, 8_000);
-        let before = fs::read(&wav).expect("before");
-        seed_sidecar(&wav, 12);
+        let audio = dir.join("clip.flac");
+        write_pcm_flac(&audio, 8_000);
+        let before = fs::read(&audio).expect("before");
+        seed_sidecar(&audio, 12);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let fake = FakeInference {
@@ -1715,7 +1697,7 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(12), wav.clone(), model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(12), audio.clone(), model, "base-q5_1");
         wait_until(&host, |snap| snap.phase == JobPhase::Failed);
         let snap = host.snapshot();
         host.shutdown();
@@ -1723,9 +1705,9 @@ mod tests {
 
         // Assert
         assert_eq!(snap.notice, Some(NOTICE_FAILED));
-        assert_eq!(fs::read(&wav).expect("after"), before);
+        assert_eq!(fs::read(&audio).expect("after"), before);
         assert!(!dir.join("clip.txt").exists());
-        match load_sidecar(&wav) {
+        match load_sidecar(&audio) {
             SidecarLoad::Loaded(doc) => assert_eq!(doc.transcript, TranscriptStatus::Failed),
             other => panic!("{other:?}"),
         }
@@ -1736,9 +1718,9 @@ mod tests {
     fn failing_rerun_leaves_the_old_transcript_byte_identical() {
         // Arrange
         let dir = temp_dir("rerun-fail");
-        let wav = dir.join("clip.wav");
-        write_pcm_wav(&wav, 8_000);
-        seed_sidecar(&wav, 41);
+        let audio = dir.join("clip.flac");
+        write_pcm_flac(&audio, 8_000);
+        seed_sidecar(&audio, 41);
         let old = "[00:00:00] old café text
 "
         .as_bytes()
@@ -1759,7 +1741,7 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(41), wav, model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(41), audio, model, "base-q5_1");
         wait_until(&host, |snap| snap.phase == JobPhase::Failed);
         host.shutdown();
         let _ = handle.join();
@@ -1773,9 +1755,9 @@ mod tests {
     fn cancelled_rerun_leaves_the_old_transcript_byte_identical() {
         // Arrange
         let dir = temp_dir("rerun-cancel");
-        let wav = dir.join("clip.wav");
-        write_pcm_wav(&wav, 48_000);
-        seed_sidecar(&wav, 42);
+        let audio = dir.join("clip.flac");
+        write_pcm_flac(&audio, 48_000);
+        seed_sidecar(&audio, 42);
         let old = "[00:00:00] old café text
 "
         .as_bytes()
@@ -1800,7 +1782,7 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(42), wav, model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(42), audio, model, "base-q5_1");
         wait_until(&host, |snap| {
             matches!(snap.phase, JobPhase::Preparing | JobPhase::Transcribing)
         });
@@ -1819,9 +1801,9 @@ mod tests {
     fn failed_snapshot_detail_is_user_message_not_engine_text() {
         // Arrange
         let dir = temp_dir("fail-detail");
-        let wav = dir.join("clip.wav");
-        write_pcm_wav(&wav, 8_000);
-        seed_sidecar(&wav, 22);
+        let audio = dir.join("clip.flac");
+        write_pcm_flac(&audio, 8_000);
+        seed_sidecar(&audio, 22);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let fake = FakeInference {
@@ -1837,7 +1819,7 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(22), wav, model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(22), audio, model, "base-q5_1");
         wait_until(&host, |snap| snap.phase == JobPhase::Failed);
         let snap = host.snapshot();
         host.shutdown();
@@ -1857,10 +1839,10 @@ mod tests {
     fn cancel_stops_running_job() {
         // Arrange
         let dir = temp_dir("cancel");
-        let wav = dir.join("clip.wav");
-        write_pcm_wav(&wav, 48_000);
-        let before = fs::read(&wav).expect("before");
-        seed_sidecar(&wav, 13);
+        let audio = dir.join("clip.flac");
+        write_pcm_flac(&audio, 48_000);
+        let before = fs::read(&audio).expect("before");
+        seed_sidecar(&audio, 13);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let fake = FakeInference {
@@ -1880,7 +1862,7 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(13), wav.clone(), model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(13), audio.clone(), model, "base-q5_1");
         wait_until(&host, |snap| {
             matches!(snap.phase, JobPhase::Preparing | JobPhase::Transcribing)
         });
@@ -1893,7 +1875,7 @@ mod tests {
 
         // Assert
         assert_eq!(snap.notice, Some(NOTICE_CANCELLED));
-        assert_eq!(fs::read(&wav).expect("after"), before);
+        assert_eq!(fs::read(&audio).expect("after"), before);
         assert!(
             !dir.join("clip.txt").exists() || {
                 // Cancel may race a write; audio must stay intact either way.
@@ -1907,9 +1889,9 @@ mod tests {
     fn cancel_racing_completion_is_stable() {
         // Arrange
         let dir = temp_dir("race");
-        let wav = dir.join("clip.wav");
-        write_pcm_wav(&wav, 4_000);
-        seed_sidecar(&wav, 14);
+        let audio = dir.join("clip.flac");
+        write_pcm_flac(&audio, 4_000);
+        seed_sidecar(&audio, 14);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let race = Arc::new(AtomicBool::new(true));
@@ -1930,7 +1912,7 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(14), wav.clone(), model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(14), audio.clone(), model, "base-q5_1");
         wait_until(&host, |snap| snap.job_id.is_some());
         if let Some(job) = host.snapshot().job_id {
             host.cancel(job);
@@ -1945,23 +1927,23 @@ mod tests {
         host.shutdown();
         let _ = handle.join();
 
-        // Assert — either terminal state is fine; must not panic or corrupt WAV.
+        // Assert — either terminal state is fine; must not panic or corrupt the audio.
         assert!(matches!(
             phase,
             JobPhase::Done | JobPhase::Cancelled | JobPhase::Failed
         ));
-        assert!(wav.is_file());
+        assert!(audio.is_file());
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn invalid_model_fails_without_touching_wav() {
+    fn invalid_model_fails_without_touching_flac() {
         // Arrange
         let dir = temp_dir("model");
-        let wav = dir.join("clip.wav");
-        write_pcm_wav(&wav, 2_000);
-        let before = fs::read(&wav).expect("before");
-        seed_sidecar(&wav, 15);
+        let audio = dir.join("clip.flac");
+        write_pcm_flac(&audio, 2_000);
+        let before = fs::read(&audio).expect("before");
+        seed_sidecar(&audio, 15);
         let model = dir.join("invalid.bin");
         fs::write(&model, b"nope").expect("model");
         let fake = FakeInference {
@@ -1977,7 +1959,7 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(15), wav.clone(), model, "bad");
+        host.enqueue(RecordingId::from_raw(15), audio.clone(), model, "bad");
         wait_until(&host, |snap| snap.phase == JobPhase::Failed);
         let snap = host.snapshot();
         host.shutdown();
@@ -1985,7 +1967,7 @@ mod tests {
 
         // Assert
         assert_eq!(snap.notice, Some(NOTICE_MODEL));
-        assert_eq!(fs::read(&wav).expect("after"), before);
+        assert_eq!(fs::read(&audio).expect("after"), before);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -1993,9 +1975,9 @@ mod tests {
     fn long_input_stays_chunked_across_windows() {
         // Arrange — ~0.5 s at 48 kHz with 200 ms windows → multiple infer calls.
         let dir = temp_dir("chunk");
-        let wav = dir.join("long.wav");
-        write_pcm_wav(&wav, 24_000);
-        seed_sidecar(&wav, 16);
+        let audio = dir.join("long.flac");
+        write_pcm_flac(&audio, 24_000);
+        seed_sidecar(&audio, 16);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -2016,7 +1998,7 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(16), wav.clone(), model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(16), audio.clone(), model, "base-q5_1");
         wait_until(&host, |snap| snap.phase == JobPhase::Done);
         host.shutdown();
         let _ = handle.join();
@@ -2040,12 +2022,12 @@ mod tests {
     fn fifo_runs_two_queued_recordings_in_order() {
         // Arrange
         let dir = temp_dir("fifo");
-        let wav_a = dir.join("a.wav");
-        let wav_b = dir.join("b.wav");
-        write_pcm_wav(&wav_a, 4_000);
-        write_pcm_wav(&wav_b, 4_000);
-        seed_sidecar(&wav_a, 21);
-        seed_sidecar(&wav_b, 22);
+        let audio_a = dir.join("a.flac");
+        let audio_b = dir.join("b.flac");
+        write_pcm_flac(&audio_a, 4_000);
+        write_pcm_flac(&audio_b, 4_000);
+        seed_sidecar(&audio_a, 21);
+        seed_sidecar(&audio_b, 22);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let order = Arc::new(Mutex::new(Vec::new()));
@@ -2078,15 +2060,20 @@ mod tests {
         // Act
         host.enqueue(
             RecordingId::from_raw(21),
-            wav_a.clone(),
+            audio_a.clone(),
             model.clone(),
             "base-q5_1",
         );
-        host.enqueue(RecordingId::from_raw(22), wav_b.clone(), model, "base-q5_1");
+        host.enqueue(
+            RecordingId::from_raw(22),
+            audio_b.clone(),
+            model,
+            "base-q5_1",
+        );
         // Duplicate enqueue is a no-op.
         host.enqueue(
             RecordingId::from_raw(21),
-            wav_a.clone(),
+            audio_a.clone(),
             dir.join("ggml-base.bin"),
             "base-q5_1",
         );
@@ -2128,9 +2115,9 @@ mod tests {
     fn completion_notifies_once_when_enabled() {
         // Arrange
         let dir = temp_dir("notify-on");
-        let wav = dir.join("meeting.wav");
-        write_pcm_wav(&wav, 8_000);
-        seed_sidecar(&wav, 31);
+        let audio = dir.join("meeting.flac");
+        write_pcm_flac(&audio, 8_000);
+        seed_sidecar(&audio, 31);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let (notifier, ids) = notifier_pair();
@@ -2156,7 +2143,7 @@ mod tests {
         );
 
         // Act
-        host.enqueue(RecordingId::from_raw(31), wav, model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(31), audio, model, "base-q5_1");
         wait_until(&host, |snap| snap.phase == JobPhase::Done);
         host.shutdown();
         let _ = handle.join();
@@ -2171,9 +2158,9 @@ mod tests {
     fn completion_does_not_notify_when_disabled() {
         // Arrange
         let dir = temp_dir("notify-off");
-        let wav = dir.join("meeting.wav");
-        write_pcm_wav(&wav, 8_000);
-        seed_sidecar(&wav, 32);
+        let audio = dir.join("meeting.flac");
+        write_pcm_flac(&audio, 8_000);
+        seed_sidecar(&audio, 32);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
         let (notifier, ids) = notifier_pair();
@@ -2200,7 +2187,7 @@ mod tests {
         );
 
         // Act
-        host.enqueue(RecordingId::from_raw(32), wav.clone(), model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(32), audio.clone(), model, "base-q5_1");
         wait_until(&host, |snap| snap.phase == JobPhase::Done);
         host.shutdown();
         let _ = handle.join();

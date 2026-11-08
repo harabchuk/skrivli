@@ -149,7 +149,7 @@ fn row_meta(day: RecordingDay, started: Option<CivilTime>, duration: &str, size:
     format!("{when} · {duration} · {size}")
 }
 
-/// Detail header line: `Today, 14:32 · 12:41 · 38 MB · WAV`.
+/// Detail header line: `Today, 14:32 · 12:41 · 38 MB · FLAC`.
 fn detail_line(
     day: RecordingDay,
     started: Option<CivilTime>,
@@ -412,7 +412,7 @@ pub(crate) struct PlayerCard<'a> {
     pub(crate) seek: &'a Entity<SliderState>,
 }
 
-const NOT_PLAYABLE_TOOLTIP: &str = "Only WAV playback is available";
+const NOT_PLAYABLE_TOOLTIP: &str = "Only FLAC playback is available";
 
 fn time_label(text: String, cx: &App) -> Div {
     div()
@@ -1181,7 +1181,7 @@ mod tests {
         let info = RecordingInfo::new(
             RecordingId::from_raw(1),
             "clip",
-            RecordingContainer::Wav,
+            RecordingContainer::Flac,
             Some(0),
             Some(65_000),
             2048,
@@ -1200,7 +1200,7 @@ mod tests {
         assert_eq!(row.notes.len(), 1);
         assert_eq!(
             row.detail_line.as_ref(),
-            "Jan 1, 00:00 · 01:05 · 2.0 KB · WAV"
+            "Jan 1, 00:00 · 01:05 · 2.0 KB · FLAC"
         );
     }
 
@@ -1217,7 +1217,7 @@ mod tests {
         RecordingInfo::new(
             RecordingId::from_raw(1),
             "clip",
-            RecordingContainer::Wav,
+            RecordingContainer::Flac,
             started,
             Some(761_000),
             38 * 1024 * 1024,
@@ -1302,18 +1302,18 @@ mod tests {
         assert_eq!(today_row.meta.as_ref(), "14:32 · 12:41 · 38.0 MB");
         assert_eq!(
             today_row.detail_line.as_ref(),
-            "Today, 14:32 · 12:41 · 38.0 MB · WAV"
+            "Today, 14:32 · 12:41 · 38.0 MB · FLAC"
         );
         assert_eq!(yesterday_row.day, RecordingDay::Yesterday);
         assert_eq!(
             yesterday_row.detail_line.as_ref(),
-            "Yesterday, 23:59 · 12:41 · 38.0 MB · WAV"
+            "Yesterday, 23:59 · 12:41 · 38.0 MB · FLAC"
         );
         assert_eq!(earlier_row.day, RecordingDay::Earlier);
         assert_eq!(earlier_row.meta.as_ref(), "Nov 3 · 12:41 · 38.0 MB");
         assert_eq!(
             earlier_row.detail_line.as_ref(),
-            "Nov 3, 09:05 · 12:41 · 38.0 MB · WAV"
+            "Nov 3, 09:05 · 12:41 · 38.0 MB · FLAC"
         );
     }
 
@@ -1346,7 +1346,7 @@ mod tests {
         // Assert
         assert_eq!(row.day, RecordingDay::Earlier);
         assert_eq!(row.meta.as_ref(), "— · 12:41 · 38.0 MB");
-        assert_eq!(row.detail_line.as_ref(), "— · 12:41 · 38.0 MB · WAV");
+        assert_eq!(row.detail_line.as_ref(), "— · 12:41 · 38.0 MB · FLAC");
     }
 
     #[test]
@@ -1507,7 +1507,7 @@ mod tests {
         let info = RecordingInfo::new(
             RecordingId::from_raw(id),
             name,
-            RecordingContainer::Wav,
+            RecordingContainer::Flac,
             started,
             Some(1_000),
             1,
@@ -1711,7 +1711,7 @@ mod tests {
         let info = RecordingInfo::new(
             RecordingId::from_raw(raw),
             "clip",
-            RecordingContainer::Wav,
+            RecordingContainer::Flac,
             None,
             Some(1_000),
             1024,

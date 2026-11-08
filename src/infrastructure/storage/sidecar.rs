@@ -100,7 +100,7 @@ pub(crate) fn transcript_path_for(audio_path: &Path) -> Result<PathBuf, AppError
 /// Atomically write UTF-8 transcript text beside the audio file.
 ///
 /// Uses a temp sibling, `sync_all`, then [`platform::replace_file`]. A failed
-/// write leaves any previous `.txt` and the WAV bytes unchanged.
+/// write leaves any previous `.txt` and the FLAC bytes unchanged.
 pub(crate) fn write_transcript_text(audio_path: &Path, text: &str) -> Result<PathBuf, AppError> {
     let path = transcript_path_for(audio_path)?;
     let temp = temp_sibling(&path);
@@ -120,8 +120,8 @@ pub(crate) fn write_transcript_text(audio_path: &Path, text: &str) -> Result<Pat
     Ok(path)
 }
 
-pub(crate) fn write_sidecar(wav_path: &Path, sidecar: &Sidecar) -> Result<PathBuf, AppError> {
-    let path = sidecar_path_for(wav_path)?;
+pub(crate) fn write_sidecar(audio_path: &Path, sidecar: &Sidecar) -> Result<PathBuf, AppError> {
+    let path = sidecar_path_for(audio_path)?;
     let body = SidecarBody {
         schema_version: SIDECAR_SCHEMA,
         id: sidecar.id,
@@ -345,10 +345,7 @@ fn audio_stem(audio_path: &Path) -> Result<String, AppError> {
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| AppError::message("library", "recording name is not unicode"))?;
-    let stem = name
-        .strip_suffix(".wav")
-        .or_else(|| name.strip_suffix(".m4a"))
-        .unwrap_or(name);
+    let stem = name.strip_suffix(".flac").unwrap_or(name);
     Ok(stem.to_string())
 }
 
@@ -385,7 +382,7 @@ mod tests {
     fn sidecar_round_trip_omits_samples() {
         // Arrange
         let dir = temp_dir("rt");
-        let wav = dir.join("Skrivli_2026-11-04_13-01-02.wav");
+        let audio_file = dir.join("Skrivli_2026-11-04_13-01-02.flac");
         let sidecar = Sidecar {
             id: 7,
             started_at_unix_ms: 10,
@@ -397,9 +394,9 @@ mod tests {
         };
 
         // Act
-        let path = write_sidecar(&wav, &sidecar).expect("write");
+        let path = write_sidecar(&audio_file, &sidecar).expect("write");
         let text = fs::read_to_string(&path).expect("read");
-        let loaded = load_sidecar(&wav);
+        let loaded = load_sidecar(&audio_file);
 
         // Assert
         assert!(text.contains(&format!("\"schema_version\": {SIDECAR_SCHEMA}")));
@@ -422,7 +419,7 @@ mod tests {
     fn load_tolerates_schema_v2_and_marks_corrupt() {
         // Arrange
         let dir = temp_dir("v2");
-        let wav = dir.join("clip.wav");
+        let audio_file = dir.join("clip.flac");
         let json = dir.join("clip.json");
         fs::write(
             &json,
@@ -439,13 +436,13 @@ mod tests {
             }"#,
         )
         .expect("v2");
-        let bad = dir.join("bad.wav");
+        let bad = dir.join("bad.flac");
         fs::write(dir.join("bad.json"), "{not-json").expect("bad");
 
         // Act
-        let v2 = load_sidecar(&wav);
+        let v2 = load_sidecar(&audio_file);
         let malformed = load_sidecar(&bad);
-        let missing = load_sidecar(&dir.join("gone.wav"));
+        let missing = load_sidecar(&dir.join("gone.flac"));
 
         // Assert
         match v2 {
@@ -458,14 +455,14 @@ mod tests {
     }
 
     #[test]
-    fn update_transcription_persists_progress_and_leaves_wav() {
+    fn update_transcription_persists_progress_and_leaves_flac() {
         // Arrange
         let dir = temp_dir("tx");
-        let wav = dir.join("meeting.wav");
-        fs::write(&wav, b"RIFF....WAVE").expect("wav");
-        let wav_before = fs::read(&wav).expect("before");
+        let audio_file = dir.join("meeting.flac");
+        fs::write(&audio_file, b"fLaC").expect("audio_file");
+        let wav_before = fs::read(&audio_file).expect("before");
         write_sidecar(
-            &wav,
+            &audio_file,
             &Sidecar {
                 id: 3,
                 started_at_unix_ms: 1,
@@ -479,12 +476,16 @@ mod tests {
         .expect("sidecar");
 
         // Act
-        update_transcription(&wav, TranscriptionWrite::Progress(42), Some("base-q5_1"))
-            .expect("update");
-        let loaded = load_sidecar(&wav);
+        update_transcription(
+            &audio_file,
+            TranscriptionWrite::Progress(42),
+            Some("base-q5_1"),
+        )
+        .expect("update");
+        let loaded = load_sidecar(&audio_file);
 
         // Assert
-        assert_eq!(fs::read(&wav).expect("after"), wav_before);
+        assert_eq!(fs::read(&audio_file).expect("after"), wav_before);
         match loaded {
             SidecarLoad::Loaded(doc) => {
                 assert_eq!(doc.transcript, TranscriptStatus::Progress(42));
@@ -501,10 +502,10 @@ mod tests {
     fn interrupt_marks_queued_as_failed_without_resume() {
         // Arrange
         let dir = temp_dir("int");
-        let wav = dir.join("clip.wav");
-        fs::write(&wav, b"RIFF....WAVE").expect("wav");
+        let audio_file = dir.join("clip.flac");
+        fs::write(&audio_file, b"fLaC").expect("audio_file");
         write_sidecar(
-            &wav,
+            &audio_file,
             &Sidecar {
                 id: 4,
                 started_at_unix_ms: 1,
@@ -516,13 +517,13 @@ mod tests {
             },
         )
         .expect("sidecar");
-        update_transcription(&wav, TranscriptionWrite::Queued, None).expect("queued");
-        write_transcript_text(&wav, "keep me\n").expect("txt");
+        update_transcription(&audio_file, TranscriptionWrite::Queued, None).expect("queued");
+        write_transcript_text(&audio_file, "keep me\n").expect("txt");
 
         // Act
-        let changed = interrupt_in_progress_transcription(&wav);
-        let again = interrupt_in_progress_transcription(&wav);
-        let loaded = load_sidecar(&wav);
+        let changed = interrupt_in_progress_transcription(&audio_file);
+        let again = interrupt_in_progress_transcription(&audio_file);
+        let loaded = load_sidecar(&audio_file);
 
         // Assert
         assert!(changed);
@@ -542,10 +543,10 @@ mod tests {
     fn cancelled_status_loads_apart_from_failed() {
         // Arrange
         let dir = temp_dir("cancelled");
-        let wav = dir.join("clip.wav");
-        fs::write(&wav, b"RIFF....WAVE").expect("wav");
+        let audio_file = dir.join("clip.flac");
+        fs::write(&audio_file, b"fLaC").expect("audio_file");
         write_sidecar(
-            &wav,
+            &audio_file,
             &Sidecar {
                 id: 5,
                 started_at_unix_ms: 1,
@@ -559,10 +560,10 @@ mod tests {
         .expect("sidecar");
 
         // Act
-        update_transcription(&wav, TranscriptionWrite::Cancelled, None).expect("cancelled");
-        let cancelled = load_sidecar(&wav);
-        update_transcription(&wav, TranscriptionWrite::Failed, None).expect("failed");
-        let failed = load_sidecar(&wav);
+        update_transcription(&audio_file, TranscriptionWrite::Cancelled, None).expect("cancelled");
+        let cancelled = load_sidecar(&audio_file);
+        update_transcription(&audio_file, TranscriptionWrite::Failed, None).expect("failed");
+        let failed = load_sidecar(&audio_file);
 
         // Assert
         match (cancelled, failed) {

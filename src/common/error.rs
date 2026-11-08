@@ -47,7 +47,7 @@ impl AppError {
             "free space" => "There is not enough free disk space to record.",
             "microphone" => "The microphone is not available.",
             "microphone privacy" => "Microphone access is turned off in Windows privacy settings.",
-            "wav limit" => "Recording stopped because the file reached its size limit.",
+            "recording limit" => "Recording stopped because it reached the 12 hour limit.",
             "library" | "library rename" | "library delete" | "library watch" => {
                 "Could not update the recordings library."
             }

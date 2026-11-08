@@ -228,7 +228,7 @@ impl Pipeline {
     ///
     /// A short tail is padded to [`FRAME_LEN`] for the chains. The returned
     /// slice is only the real `valid_frames * 2` interleaved samples, so the
-    /// padding does not lengthen the WAV.
+    /// padding does not lengthen the recording.
     pub(crate) fn pull(&mut self, now_frame: u64, tail: bool) -> Option<&[f32]> {
         let aligned = self.aligner.pull(now_frame, tail)?;
         let valid = usize::try_from(aligned.frames)

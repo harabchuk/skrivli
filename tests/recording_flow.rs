@@ -16,7 +16,7 @@ fn temp_dir(label: &str) -> PathBuf {
     dir
 }
 
-fn wav_files(dir: &std::path::Path) -> Vec<PathBuf> {
+fn flac_files(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for entry in fs::read_dir(dir).expect("read") {
         let path = entry.expect("entry").path();
@@ -24,7 +24,7 @@ fn wav_files(dir: &std::path::Path) -> Vec<PathBuf> {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if name.ends_with(".wav") && !name.ends_with(".partial") {
+        if name.ends_with(".flac") && !name.ends_with(".partial") {
             files.push(path);
         }
     }
@@ -37,7 +37,7 @@ fn assert_finalized_only(dir: &std::path::Path) {
         .flatten()
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(wav_files(dir).len(), 1, "files: {names:?}");
+    assert_eq!(flac_files(dir).len(), 1, "files: {names:?}");
     assert!(
         names.iter().all(|name| !name.contains("partial")),
         "files: {names:?}"
@@ -45,7 +45,7 @@ fn assert_finalized_only(dir: &std::path::Path) {
 }
 
 #[test]
-fn start_stop_writes_header_lengths_and_stop_is_idempotent() {
+fn start_stop_writes_streaminfo_and_stop_is_idempotent() {
     // Arrange
     let dir = temp_dir("save");
     let harness = RecordingHarness::new(&dir);
@@ -64,7 +64,7 @@ fn start_stop_writes_header_lengths_and_stop_is_idempotent() {
         .expect("idle");
     harness.stop();
     std::thread::sleep(Duration::from_millis(50));
-    let files = wav_files(&dir);
+    let files = flac_files(&dir);
 
     // Assert
     assert!(recording.notice.is_none());
@@ -77,12 +77,13 @@ fn start_stop_writes_header_lengths_and_stop_is_idempotent() {
         .expect("dir")
         .flatten()
         .all(|entry| !entry.file_name().to_string_lossy().ends_with(".partial")));
-    let bytes = fs::read(&files[0]).expect("wav");
-    let data = u32::from_le_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]);
-    let riff = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-    assert_eq!(data, 480 * 4);
-    assert_eq!(riff, 36 + data);
-    assert_eq!(bytes.len() as u32, 44 + data);
+    let reader = flac_codec::decode::FlacSampleReader::open(&files[0]).expect("flac");
+    assert_eq!(
+        flac_codec::metadata::Metadata::total_samples(&reader),
+        Some(480)
+    );
+    assert_eq!(flac_codec::metadata::Metadata::sample_rate(&reader), 48_000);
+    assert_eq!(flac_codec::metadata::Metadata::channel_count(&reader), 2);
     assert!(
         dir.join(files[0].file_stem().expect("stem"))
             .with_extension("json")
@@ -121,12 +122,12 @@ fn stop_ends_a_live_capture_session() {
         .contains("System audio is unavailable"));
     assert_eq!(harness.workers(), 0);
     assert_eq!(harness.capture_threads(), 0);
-    assert_eq!(wav_files(&dir).len(), 1);
+    assert_eq!(flac_files(&dir).len(), 1);
     let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
-fn startup_failure_leaves_no_worker_and_no_wav() {
+fn startup_failure_leaves_no_worker_and_no_flac() {
     // Arrange
     let dir = temp_dir("privacy");
     let harness = RecordingHarness::new(&dir);
@@ -146,7 +147,7 @@ fn startup_failure_leaves_no_worker_and_no_wav() {
     );
     assert_eq!(harness.workers(), 0);
     assert_eq!(harness.capture_threads(), 0);
-    assert!(wav_files(&dir).is_empty());
+    assert!(flac_files(&dir).is_empty());
     assert!(dir
         .read_dir()
         .expect("dir")
@@ -170,7 +171,7 @@ fn idle_stop_does_not_create_a_recording() {
 
     // Assert
     assert_eq!(harness.workers(), 0);
-    assert!(wav_files(&dir).is_empty());
+    assert!(flac_files(&dir).is_empty());
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -206,11 +207,12 @@ fn mixed_sources_are_summed_and_a_dead_loopback_still_saves() {
         .expect("mic only");
 
     // Assert
-    let wav = wav_files(&mixed_dir);
-    assert_eq!(wav.len(), 1);
-    let bytes = fs::read(&wav[0]).expect("wav");
-    let sample = i16::from_le_bytes([bytes[44], bytes[45]]);
-    assert!(sample > 8_000 && sample < 14_000);
+    let flac = flac_files(&mixed_dir);
+    assert_eq!(flac.len(), 1);
+    let mut reader = flac_codec::decode::FlacSampleReader::open(&flac[0]).expect("flac");
+    let mut decoded = [0_i32; 2];
+    assert_eq!(reader.read(&mut decoded).expect("decode"), 2);
+    assert!(decoded[0] > 8_000 && decoded[0] < 14_000);
     assert!(saved
         .notice
         .unwrap_or("")
@@ -349,7 +351,7 @@ fn mid_session_mic_loss_keeps_system_and_degrades() {
     // Assert
     assert!(degraded.notice.unwrap_or("").contains("microphone"));
     assert!(idle.notice.is_some());
-    assert_eq!(wav_files(&dir).len(), 1);
+    assert_eq!(flac_files(&dir).len(), 1);
     let sidecar = fs::read_dir(&dir)
         .expect("dir")
         .flatten()

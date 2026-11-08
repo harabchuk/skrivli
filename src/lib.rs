@@ -54,6 +54,12 @@ pub mod testing {
             .map_err(|error| error.to_string())
     }
 
+    /// Write `frames` of stereo 48 kHz silence as a finalized FLAC (integration tests).
+    pub fn write_silent_flac(path: &Path, frames: usize) -> Result<(), String> {
+        crate::infrastructure::files::flac::write_silence(path, frames)
+            .map_err(|error| error.to_string())
+    }
+
     /// Resolve `<basename>.txt` for an audio path (integration tests).
     pub fn transcript_path_for(audio_path: &Path) -> Result<PathBuf, String> {
         crate::infrastructure::storage::sidecar::transcript_path_for(audio_path)
@@ -364,7 +370,7 @@ pub mod testing {
     /// Where the fake inference blocks. No microphone and no whisper.cpp.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum InferenceHold {
-        /// Block in `load`, before the WAV is opened, so a rename can move the file.
+        /// Block in `load`, before the audio file is opened, so a rename can move the file.
         BeforeOpen,
         /// Block inside `transcribe_chunk`. When `honor_cancel` is false the chunk
         /// still returns text after release (a late completion callback).
@@ -442,10 +448,10 @@ pub mod testing {
             }
         }
 
-        pub fn enqueue(&self, id: u64, wav: &Path) {
+        pub fn enqueue(&self, id: u64, audio: &Path) {
             self.transcription.enqueue(
                 RecordingId::from_raw(id),
-                wav.to_path_buf(),
+                audio.to_path_buf(),
                 self.model.clone(),
                 "base-q5_1",
             );

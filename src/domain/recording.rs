@@ -16,25 +16,25 @@ pub(crate) enum RecordPhase {
     Error,
 }
 
-/// On-disk audio container the library can list.
+/// Longest recording Skrivli writes. Reaching it finalizes the file.
+pub(crate) const MAX_RECORDING_SECONDS: u64 = 12 * 60 * 60;
+
+/// On-disk audio container the library can list. FLAC is the only one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecordingContainer {
-    Wav,
-    M4a,
+    Flac,
 }
 
 impl RecordingContainer {
     pub(crate) fn extension(self) -> &'static str {
         match self {
-            Self::Wav => "wav",
-            Self::M4a => "m4a",
+            Self::Flac => "flac",
         }
     }
 
     pub(crate) fn from_extension(ext: &str) -> Option<Self> {
         match ext {
-            "wav" => Some(Self::Wav),
-            "m4a" => Some(Self::M4a),
+            "flac" => Some(Self::Flac),
             _ => None,
         }
     }
@@ -344,7 +344,7 @@ mod tests {
         RecordingInfo::new(
             RecordingId::from_raw(id),
             name,
-            RecordingContainer::Wav,
+            RecordingContainer::Flac,
             started,
             Some(1_000),
             100,
@@ -384,11 +384,13 @@ mod tests {
     #[test]
     fn container_extension_round_trip() {
         // Arrange / Act / Assert
-        assert_eq!(RecordingContainer::Wav.extension(), "wav");
+        assert_eq!(RecordingContainer::Flac.extension(), "flac");
         assert_eq!(
-            RecordingContainer::from_extension("m4a"),
-            Some(RecordingContainer::M4a)
+            RecordingContainer::from_extension("flac"),
+            Some(RecordingContainer::Flac)
         );
+        assert_eq!(RecordingContainer::from_extension("wav"), None);
+        assert_eq!(RecordingContainer::from_extension("m4a"), None);
         assert_eq!(RecordingContainer::from_extension("partial"), None);
     }
 

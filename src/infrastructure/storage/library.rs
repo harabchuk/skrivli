@@ -69,7 +69,7 @@ pub(crate) fn scan_library(directory: &Path) -> LibraryCatalog {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        // `.wav.partial` files are skipped here: the extension `partial` maps to no container.
+        // `.flac.partial` files are skipped here: the extension `partial` maps to no container.
         let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
         let Some(container) = RecordingContainer::from_extension(&ext.to_ascii_lowercase()) else {
             continue;
@@ -351,8 +351,7 @@ fn entry_without_sidecar(
 
 fn display_stem(file_name: &str) -> String {
     file_name
-        .strip_suffix(".wav")
-        .or_else(|| file_name.strip_suffix(".m4a"))
+        .strip_suffix(".flac")
         .unwrap_or(file_name)
         .to_string()
 }
@@ -395,8 +394,8 @@ mod tests {
         dir
     }
 
-    fn write_wav(path: &std::path::Path, bytes: &[u8]) {
-        fs::write(path, bytes).expect("wav");
+    fn write_flac(path: &std::path::Path, bytes: &[u8]) {
+        fs::write(path, bytes).expect("audio_file");
     }
 
     #[test]
@@ -410,10 +409,10 @@ mod tests {
             ("cancel-without", 24, TranscriptionWrite::Cancelled, false),
         ];
         for (name, id, write, has_txt) in cases {
-            let wav = dir.join(format!("{name}.wav"));
-            write_wav(&wav, b"RIFF");
+            let audio_file = dir.join(format!("{name}.flac"));
+            write_flac(&audio_file, b"fLaC");
             write_sidecar(
-                &wav,
+                &audio_file,
                 &Sidecar {
                     id,
                     started_at_unix_ms: 100,
@@ -425,7 +424,7 @@ mod tests {
                 },
             )
             .expect("side");
-            update_transcription(&wav, write, None).expect("status");
+            update_transcription(&audio_file, write, None).expect("status");
             if has_txt {
                 fs::write(dir.join(format!("{name}.txt")), "old").expect("txt");
             }
@@ -450,15 +449,15 @@ mod tests {
     }
 
     #[test]
-    fn scan_skips_partials_and_lists_old_recovered_as_plain_wav() {
+    fn scan_skips_partials_and_lists_old_recovered_as_plain_flac() {
         // Arrange
         let dir = temp_dir("scan");
-        write_wav(&dir.join("keep.wav"), b"RIFF");
-        write_wav(&dir.join("busy.wav.partial"), b"partial");
-        write_wav(&dir.join("crash.recovered.wav"), b"RIFF");
+        write_flac(&dir.join("keep.flac"), b"fLaC");
+        write_flac(&dir.join("busy.flac.partial"), b"partial");
+        write_flac(&dir.join("crash.recovered.flac"), b"fLaC");
         fs::write(dir.join("orphan.txt"), "transcript only").expect("txt");
         write_sidecar(
-            &dir.join("keep.wav"),
+            &dir.join("keep.flac"),
             &Sidecar {
                 id: 11,
                 started_at_unix_ms: 100,
@@ -488,7 +487,7 @@ mod tests {
         assert!(!catalog
             .entries
             .iter()
-            .any(|entry| entry.audio_path.ends_with("busy.wav.partial")));
+            .any(|entry| entry.audio_path.ends_with("busy.flac.partial")));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -496,10 +495,10 @@ mod tests {
     fn scan_preserves_malformed_sidecar_and_sorts_newest_first() {
         // Arrange
         let dir = temp_dir("bad");
-        write_wav(&dir.join("new.wav"), b"RIFF-new");
-        write_wav(&dir.join("old.wav"), b"RIFF-old");
+        write_flac(&dir.join("new.flac"), b"fLaC-new");
+        write_flac(&dir.join("old.flac"), b"fLaC-old");
         write_sidecar(
-            &dir.join("new.wav"),
+            &dir.join("new.flac"),
             &Sidecar {
                 id: 2,
                 started_at_unix_ms: 200,
@@ -512,7 +511,7 @@ mod tests {
         )
         .expect("new");
         write_sidecar(
-            &dir.join("old.wav"),
+            &dir.join("old.flac"),
             &Sidecar {
                 id: 1,
                 started_at_unix_ms: 50,
@@ -547,9 +546,9 @@ mod tests {
     fn collisions_and_external_delete_are_visible() {
         // Arrange
         let dir = temp_dir("col");
-        write_wav(&dir.join("a.wav"), b"a");
-        write_wav(&dir.join("b.wav"), b"b");
-        for name in ["a.wav", "b.wav"] {
+        write_flac(&dir.join("a.flac"), b"a");
+        write_flac(&dir.join("b.flac"), b"b");
+        for name in ["a.flac", "b.flac"] {
             write_sidecar(
                 &dir.join(name),
                 &Sidecar {
@@ -568,7 +567,7 @@ mod tests {
         // Act
         let catalog = scan_library(&dir);
         let collisions = colliding_ids(&catalog);
-        fs::remove_file(dir.join("a.wav")).expect("delete");
+        fs::remove_file(dir.join("a.flac")).expect("delete");
         let after = scan_library(&dir);
 
         // Assert
@@ -583,10 +582,10 @@ mod tests {
     fn rename_groups_associated_files() {
         // Arrange
         let dir = temp_dir("ren");
-        let wav = dir.join("alpha.wav");
-        write_wav(&wav, b"RIFF");
+        let audio_file = dir.join("alpha.flac");
+        write_flac(&audio_file, b"fLaC");
         write_sidecar(
-            &wav,
+            &audio_file,
             &Sidecar {
                 id: 5,
                 started_at_unix_ms: 1,
@@ -609,10 +608,10 @@ mod tests {
         // Assert
         assert!(result.audio_ok && result.sidecar_ok && result.transcript_ok);
         assert!(!result.partial_failure());
-        assert!(dir.join("beta.wav").is_file());
+        assert!(dir.join("beta.flac").is_file());
         assert!(dir.join("beta.json").is_file());
         assert!(dir.join("beta.txt").is_file());
-        assert!(!dir.join("alpha.wav").exists());
+        assert!(!dir.join("alpha.flac").exists());
         assert_eq!(refreshed.entries[0].info.name(), "beta");
         assert_eq!(refreshed.entries[0].info.id().raw(), 5);
         let paths = associated_paths(&refreshed.entries[0]);

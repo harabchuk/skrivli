@@ -1295,7 +1295,7 @@ impl MainWindow {
         let Some(entry) = self.library_catalog.find(id) else {
             return;
         };
-        if entry.info.container() != RecordingContainer::Wav {
+        if entry.info.container() != RecordingContainer::Flac {
             return;
         }
         match play_action(
@@ -1669,7 +1669,7 @@ impl Render for MainWindow {
                 let playable = self
                     .library_selected
                     .and_then(|id| self.library_catalog.find(id))
-                    .is_some_and(|entry| entry.info.container() == RecordingContainer::Wav);
+                    .is_some_and(|entry| entry.info.container() == RecordingContainer::Flac);
                 let error = self.library_catalog.error.map(SharedString::from);
                 let selected_id = self.library_selected;
                 let status = selected_id

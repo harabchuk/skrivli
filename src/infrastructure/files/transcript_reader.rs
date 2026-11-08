@@ -1,42 +1,65 @@
-//! Bounded PCM16 WAV reader for offline transcription.
+//! Bounded FLAC reader for offline transcription.
 //!
-//! Separate from playback, which decodes through Rodio. Opens the finalized
-//! path only — never `.wav.partial`. MP3 stays out of v1. FLAC decode will arrive
-//! in M8 through `flac-codec`.
+//! Separate from playback. Opens the finalized path only: never `.flac.partial`
+//! and never a non-FLAC container. Decodes through `flac-codec` in chunks.
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::BufReader;
 use std::path::Path;
+
+use flac_codec::decode::FlacSampleReader;
+use flac_codec::metadata::Metadata;
 
 use crate::common::error::AppError;
 use crate::domain::audio::{AudioFormat, SampleEncoding};
-use crate::infrastructure::files::wav::WAV_HEADER_BYTES;
+use crate::infrastructure::files::flac::map_flac;
 
 /// Default read size: about one second of 48 kHz stereo PCM16.
 pub(crate) const DEFAULT_CHUNK_FRAMES: usize = 48_000;
 
-/// Opened finalized PCM16 WAV for chunked transcription reads.
-#[derive(Debug)]
-pub(crate) struct TranscriptWavReader {
-    file: File,
+/// Opened finalized 16-bit FLAC for chunked transcription reads.
+pub(crate) struct TranscriptFlacReader {
+    reader: FlacSampleReader<BufReader<File>>,
     format: AudioFormat,
-    data_bytes: u64,
+    total_frames: Option<u64>,
     position: u64,
+    scratch: Vec<i32>,
 }
 
-impl TranscriptWavReader {
-    /// Open a finalized recording. Refuses `.wav.partial` and non-WAV containers.
+impl TranscriptFlacReader {
+    /// Open a finalized recording. Refuses `.flac.partial` and non-FLAC files.
     pub(crate) fn open(path: &Path) -> Result<Self, AppError> {
         refuse_unsupported_path(path)?;
-        let mut file = File::open(path).map_err(|source| AppError::io("transcription", source))?;
-        let (format, data_start, data_bytes) = parse_wav_header(&mut file)?;
-        file.seek(SeekFrom::Start(data_start))
-            .map_err(|source| AppError::io("transcription", source))?;
+        let file = File::open(path).map_err(|source| AppError::io("transcription", source))?;
+        let reader = FlacSampleReader::new(BufReader::new(file))
+            .map_err(|error| map_flac("transcription", error))?;
+        if reader.bits_per_sample() != 16 {
+            return Err(AppError::message(
+                "transcription",
+                format!(
+                    "unsupported container/codec: {}-bit FLAC",
+                    reader.bits_per_sample()
+                ),
+            ));
+        }
+        let format = AudioFormat::new(
+            reader.sample_rate(),
+            u16::from(reader.channel_count()),
+            SampleEncoding::I16,
+        )
+        .ok_or_else(|| {
+            AppError::message(
+                "transcription",
+                "unsupported container/codec: invalid pcm16 format",
+            )
+        })?;
+        let total_frames = reader.total_samples();
         Ok(Self {
-            file,
+            reader,
             format,
-            data_bytes,
+            total_frames,
             position: 0,
+            scratch: Vec::new(),
         })
     }
 
@@ -44,58 +67,49 @@ impl TranscriptWavReader {
         self.format
     }
 
-    #[allow(dead_code)] // Inspected by diagnostics / future FLAC path.
-    pub(crate) fn data_bytes(&self) -> u64 {
-        self.data_bytes
-    }
-
-    /// Frames remaining in the data chunk.
+    /// Frames remaining, when STREAMINFO records the total.
     pub(crate) fn frames_remaining(&self) -> Option<u64> {
-        let remaining = self.data_bytes.saturating_sub(self.position);
-        self.format.frames_from_bytes(remaining)
+        self.total_frames
+            .map(|total| total.saturating_sub(self.position))
     }
 
     /// Read up to `max_frames` interleaved i16 frames into `out`.
     ///
     /// `out` must hold at least `max_frames * channels` samples. Returns frames
-    /// read; `0` at EOF.
+    /// read; `0` at EOF. Short reads happen only at the end of the stream.
     pub(crate) fn read_i16_frames(
         &mut self,
         out: &mut [i16],
         max_frames: usize,
     ) -> Result<usize, AppError> {
         let channels = usize::from(self.format.channels());
-        if channels == 0 {
-            return Err(AppError::message("transcription", "wav has no channels"));
-        }
-        let capacity_frames = out.len() / channels;
-        let frames = max_frames.min(capacity_frames);
-        if frames == 0 {
+        let frames = max_frames.min(out.len() / channels);
+        let wanted = frames * channels;
+        if wanted == 0 {
             return Ok(0);
         }
-        let want = frames
-            .checked_mul(channels)
-            .and_then(|samples| samples.checked_mul(2))
-            .ok_or_else(|| AppError::message("transcription", "frame size overflow"))?
-            as u64;
-        let remaining = self.data_bytes.saturating_sub(self.position);
-        let take = want.min(remaining);
-        if take == 0 {
-            return Ok(0);
+        self.scratch.clear();
+        self.scratch.resize(wanted, 0);
+        let mut filled = 0;
+        while filled < wanted {
+            let read = self
+                .reader
+                .read(&mut self.scratch[filled..])
+                .map_err(|error| map_flac("transcription", error))?;
+            if read == 0 {
+                break;
+            }
+            filled += read;
         }
-        if !take.is_multiple_of(2) {
-            return Err(AppError::message("transcription", "truncated pcm length"));
+        let whole = filled - filled % channels;
+        for (slot, sample) in out.iter_mut().zip(&self.scratch[..whole]) {
+            *slot = i16::try_from(*sample).map_err(|_| {
+                AppError::message("transcription", "sample is outside the 16-bit range")
+            })?;
         }
-        let mut bytes = vec![0_u8; take as usize];
-        self.file
-            .read_exact(&mut bytes)
-            .map_err(|source| AppError::io("transcription", source))?;
-        let samples = take as usize / 2;
-        for (index, chunk) in bytes.as_chunks::<2>().0.iter().enumerate() {
-            out[index] = i16::from_le_bytes(*chunk);
-        }
-        self.position = self.position.saturating_add(take);
-        Ok(samples / channels)
+        let read_frames = whole / channels;
+        self.position = self.position.saturating_add(read_frames as u64);
+        Ok(read_frames)
     }
 }
 
@@ -104,27 +118,14 @@ fn refuse_unsupported_path(path: &Path) -> Result<(), AppError> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    if name.ends_with(".wav.partial") || name.ends_with(".partial") {
-        return Err(AppError::message(
-            "transcription",
-            "refusing to open .wav.partial; wait for finalize",
-        ));
-    }
     let lower = name.to_ascii_lowercase();
-    if lower.ends_with(".mp3") {
+    if lower.ends_with(".partial") {
         return Err(AppError::message(
             "transcription",
-            "unsupported container/codec: mp3 (out of v1)",
+            "refusing to open .flac.partial; wait for finalize",
         ));
     }
-    if lower.ends_with(".flac") {
-        // M8 will accept FLAC through flac-codec on this reader.
-        return Err(AppError::message(
-            "transcription",
-            "unsupported container/codec: flac (deferred to M8 / flac-codec)",
-        ));
-    }
-    if !lower.ends_with(".wav") {
+    if !lower.ends_with(".flac") {
         let ext = path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -137,61 +138,15 @@ fn refuse_unsupported_path(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn parse_wav_header(file: &mut File) -> Result<(AudioFormat, u64, u64), AppError> {
-    let mut header = [0_u8; WAV_HEADER_BYTES as usize];
-    file.read_exact(&mut header)
-        .map_err(|source| AppError::io("transcription", source))?;
-    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
-        return Err(AppError::message(
-            "transcription",
-            "unsupported container/codec: not RIFF WAVE",
-        ));
-    }
-    if &header[12..16] != b"fmt " {
-        return Err(AppError::message("transcription", "missing fmt chunk"));
-    }
-    let audio_format = u16::from_le_bytes([header[20], header[21]]);
-    if audio_format != 1 {
-        return Err(AppError::message(
-            "transcription",
-            format!("unsupported container/codec: WAV format tag {audio_format}"),
-        ));
-    }
-    let channels = u16::from_le_bytes([header[22], header[23]]);
-    let sample_rate = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
-    let bits = u16::from_le_bytes([header[34], header[35]]);
-    if bits != 16 {
-        return Err(AppError::message(
-            "transcription",
-            format!("unsupported container/codec: {bits}-bit PCM"),
-        ));
-    }
-    if &header[36..40] != b"data" {
-        return Err(AppError::message(
-            "transcription",
-            "unsupported container/codec: non-canonical WAV (expected 44-byte header)",
-        ));
-    }
-    let data_bytes = u32::from_le_bytes([header[40], header[41], header[42], header[43]]) as u64;
-    let format = AudioFormat::new(sample_rate, channels, SampleEncoding::I16).ok_or_else(|| {
-        AppError::message(
-            "transcription",
-            "unsupported container/codec: invalid pcm16 format",
-        )
-    })?;
-    Ok((format, WAV_HEADER_BYTES, data_bytes))
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::TranscriptWavReader;
+    use super::TranscriptFlacReader;
     use crate::common::error::AppError;
     use crate::domain::audio::CivilTime;
-    use crate::infrastructure::files::wav::{quantize_sample, WavWriter};
+    use crate::infrastructure::files::flac::{quantize_sample, FlacWriter};
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -203,13 +158,13 @@ mod tests {
     }
 
     #[test]
-    fn reads_finalized_wav_in_bounded_chunks() {
+    fn reads_finalized_flac_in_bounded_chunks() {
         // Arrange
         let dir = temp_dir("ok");
         let when = CivilTime::new(2026, 11, 5, 12, 0, 0).expect("time");
-        let mut writer = WavWriter::create(&dir, when).expect("create");
+        let mut writer = FlacWriter::create(&dir, when).expect("create");
         let mut frames = Vec::new();
-        for _ in 0..960 {
+        for _ in 0..9_600 {
             frames.push(0.25);
             frames.push(-0.25);
         }
@@ -217,40 +172,46 @@ mod tests {
         let path = writer.finalize().expect("finalize");
 
         // Act
-        let mut reader = TranscriptWavReader::open(&path).expect("open");
-        let mut buffer = vec![0_i16; 480 * 2];
-        let first = reader.read_i16_frames(&mut buffer, 480).expect("read1");
-        let second = reader.read_i16_frames(&mut buffer, 480).expect("read2");
-        let eof = reader.read_i16_frames(&mut buffer, 480).expect("eof");
+        let mut reader = TranscriptFlacReader::open(&path).expect("open");
+        let remaining = reader.frames_remaining();
+        let mut buffer = vec![0_i16; 4_800 * 2];
+        let first = reader.read_i16_frames(&mut buffer, 4_800).expect("read1");
+        let second = reader.read_i16_frames(&mut buffer, 4_800).expect("read2");
+        let eof = reader.read_i16_frames(&mut buffer, 4_800).expect("eof");
 
         // Assert
-        assert_eq!(first, 480);
-        assert_eq!(second, 480);
+        assert_eq!(remaining, Some(9_600));
+        assert_eq!(first, 4_800);
+        assert_eq!(second, 4_800);
         assert_eq!(eof, 0);
         assert_eq!(buffer[0], quantize_sample(0.25));
+        assert_eq!(buffer[1], quantize_sample(-0.25));
+        assert_eq!(reader.format().sample_rate(), 48_000);
+        assert_eq!(reader.format().channels(), 2);
+        assert_eq!(reader.frames_remaining(), Some(0));
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn refuses_partial_and_names_unsupported_codec() {
+    fn refuses_partial_and_non_flac_files() {
         // Arrange
         let dir = temp_dir("bad");
-        let partial = dir.join("clip.wav.partial");
-        fs::write(&partial, b"RIFF").expect("partial");
+        let partial = dir.join("clip.flac.partial");
+        fs::write(&partial, b"fLaC").expect("partial");
+        let wav = dir.join("clip.wav");
+        fs::write(&wav, b"RIFF").expect("wav");
         let mp3 = dir.join("clip.mp3");
         fs::write(&mp3, b"ID3").expect("mp3");
-        let flac = dir.join("clip.flac");
-        fs::write(&flac, b"fLaC").expect("flac");
 
         // Act
-        let partial_err = TranscriptWavReader::open(&partial).expect_err("partial");
-        let mp3_err = TranscriptWavReader::open(&mp3).expect_err("mp3");
-        let flac_err = TranscriptWavReader::open(&flac).expect_err("flac");
+        let partial_err = TranscriptFlacReader::open(&partial).err().expect("partial");
+        let wav_err = TranscriptFlacReader::open(&wav).err().expect("wav");
+        let mp3_err = TranscriptFlacReader::open(&mp3).err().expect("mp3");
 
         // Assert
         assert!(partial_err.to_string().contains("partial"));
+        assert!(wav_err.to_string().contains("wav"));
         assert!(mp3_err.to_string().contains("mp3"));
-        assert!(flac_err.to_string().contains("flac"));
         assert_eq!(
             AppError::message("transcription", "x").user_message(),
             "Could not prepare the transcript."
@@ -259,28 +220,16 @@ mod tests {
     }
 
     #[test]
-    fn refuses_non_pcm_wav_naming_format_tag() {
-        // Arrange — RIFF/WAVE with format tag 3 (IEEE float).
-        let dir = temp_dir("float");
-        let path = dir.join("float.wav");
-        let mut bytes = vec![0_u8; 44];
-        bytes[0..4].copy_from_slice(b"RIFF");
-        bytes[8..12].copy_from_slice(b"WAVE");
-        bytes[12..16].copy_from_slice(b"fmt ");
-        bytes[16..20].copy_from_slice(&16_u32.to_le_bytes());
-        bytes[20..22].copy_from_slice(&3_u16.to_le_bytes());
-        bytes[22..24].copy_from_slice(&1_u16.to_le_bytes());
-        bytes[24..28].copy_from_slice(&16_000_u32.to_le_bytes());
-        bytes[34..36].copy_from_slice(&32_u16.to_le_bytes());
-        bytes[36..40].copy_from_slice(b"data");
-        let mut file = fs::File::create(&path).expect("create");
-        file.write_all(&bytes).expect("write");
+    fn refuses_a_flac_name_that_is_not_flac_data() {
+        // Arrange
+        let dir = temp_dir("junk");
+        let path = dir.join("junk.flac");
+        fs::write(&path, b"RIFF....WAVE").expect("junk");
 
         // Act
-        let error = TranscriptWavReader::open(&path).expect_err("float");
+        let error = TranscriptFlacReader::open(&path).err().expect("junk");
 
         // Assert
-        assert!(error.to_string().contains("format tag 3"));
         assert_eq!(error.user_message(), "Could not prepare the transcript.");
         let _ = fs::remove_dir_all(dir);
     }
