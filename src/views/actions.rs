@@ -514,7 +514,6 @@ mod tests {
                         None,
                         TranscriptStatus::Ready,
                         SidecarState::Present,
-                        false,
                         Vec::new(),
                     ),
                     audio_path: PathBuf::from("meeting.wav"),

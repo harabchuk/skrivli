@@ -53,7 +53,6 @@ pub(crate) struct RecordingRow {
     pub(crate) meta: SharedString,
     pub(crate) detail_line: SharedString,
     pub(crate) badge: RowBadge,
-    recovered: bool,
 }
 
 impl RecordingRow {
@@ -68,14 +67,10 @@ impl RecordingRow {
             .map(format_duration_ms)
             .unwrap_or_else(|| "—".to_string());
         let size = format_size(info.size_bytes());
-        let notes = recording_notes(
-            info.recovered(),
-            info.sidecar(),
-            !info.problems().is_empty(),
-        )
-        .into_iter()
-        .map(SharedString::from)
-        .collect();
+        let notes = recording_notes(info.sidecar(), !info.problems().is_empty())
+            .into_iter()
+            .map(SharedString::from)
+            .collect();
         let meta = row_meta(day, started, &duration, &size);
         let detail_line = detail_line(day, started, &duration, &size, info.container());
         Self {
@@ -85,8 +80,7 @@ impl RecordingRow {
             day,
             meta: SharedString::from(meta),
             detail_line: SharedString::from(detail_line),
-            badge: RowBadge::from_status(info.transcript(), info.recovered()),
-            recovered: info.recovered(),
+            badge: RowBadge::from_status(info.transcript()),
         }
     }
 }
@@ -175,8 +169,6 @@ fn detail_line(
     format!("{when} · {duration} · {size} · {format}")
 }
 
-const NOTE_RECOVERED: &str =
-    "Recovered after an interruption. The end of this recording may be missing.";
 const NOTE_SIDECAR_MISSING: &str =
     "Recording details are missing. The name and times come from the audio file.";
 const NOTE_SIDECAR_MALFORMED: &str =
@@ -184,15 +176,8 @@ const NOTE_SIDECAR_MALFORMED: &str =
 const NOTE_PROBLEMS: &str = "Problems occurred while recording. Parts of the audio may be missing.";
 
 /// Notes shown under the title of the detail pane. Empty for a clean recording.
-fn recording_notes(
-    recovered: bool,
-    sidecar: SidecarState,
-    has_problems: bool,
-) -> Vec<&'static str> {
+fn recording_notes(sidecar: SidecarState, has_problems: bool) -> Vec<&'static str> {
     let mut notes = Vec::new();
-    if recovered {
-        notes.push(NOTE_RECOVERED);
-    }
     match sidecar {
         SidecarState::Present => {}
         SidecarState::Missing => notes.push(NOTE_SIDECAR_MISSING),
@@ -212,17 +197,14 @@ pub(crate) enum RowBadge {
     Progress(u8),
     Ready,
     Failed,
-    Recovered,
 }
 
 impl RowBadge {
-    /// An active or failed status wins over Recovered. Recovered wins over Ready or nothing.
-    pub(crate) fn from_status(status: TranscriptStatus, recovered: bool) -> Self {
+    pub(crate) fn from_status(status: TranscriptStatus) -> Self {
         match status {
             TranscriptStatus::Queued => Self::Queued,
             TranscriptStatus::Progress(percent) => Self::Progress(percent),
             TranscriptStatus::Failed => Self::Failed,
-            _ if recovered => Self::Recovered,
             TranscriptStatus::Ready => Self::Ready,
             TranscriptStatus::None => Self::None,
         }
@@ -277,7 +259,7 @@ pub(crate) fn set_row_status(
     let Some(row) = rows.iter_mut().find(|row| row.id == id) else {
         return false;
     };
-    row.badge = RowBadge::from_status(status, row.recovered);
+    row.badge = RowBadge::from_status(status);
     true
 }
 
@@ -365,7 +347,6 @@ fn row_badge(badge: RowBadge, cx: &App) -> Div {
         RowBadge::Progress(percent) => (SharedString::from(format!("{percent}%")), theme.primary),
         RowBadge::Ready => (SharedString::from("Transcript"), theme.success),
         RowBadge::Failed => (SharedString::from("Failed"), theme.danger),
-        RowBadge::Recovered => (SharedString::from("Recovered"), theme.warning),
     };
     div()
         .flex_none()
@@ -1207,7 +1188,6 @@ mod tests {
             None,
             TranscriptStatus::Ready,
             SidecarState::Present,
-            true,
             vec!["gap".into()],
         );
 
@@ -1216,8 +1196,8 @@ mod tests {
 
         // Assert
         assert_eq!(row.name.as_ref(), "clip");
-        assert_eq!(row.badge, RowBadge::Recovered);
-        assert_eq!(row.notes.len(), 2);
+        assert_eq!(row.badge, RowBadge::Ready);
+        assert_eq!(row.notes.len(), 1);
         assert_eq!(
             row.detail_line.as_ref(),
             "Jan 1, 00:00 · 01:05 · 2.0 KB · WAV"
@@ -1233,11 +1213,7 @@ mod tests {
         crate::domain::audio::CivilTime::new(2026, 11, 7, 12, 0, 0).expect("civil")
     }
 
-    fn info_at(
-        started: Option<u64>,
-        transcript: TranscriptStatus,
-        recovered: bool,
-    ) -> RecordingInfo {
+    fn info_at(started: Option<u64>, transcript: TranscriptStatus) -> RecordingInfo {
         RecordingInfo::new(
             RecordingId::from_raw(1),
             "clip",
@@ -1248,7 +1224,6 @@ mod tests {
             None,
             transcript,
             SidecarState::Present,
-            recovered,
             Vec::new(),
         )
     }
@@ -1312,21 +1287,9 @@ mod tests {
         use jiff::tz::TimeZone;
 
         // Arrange
-        let today_info = info_at(
-            Some(ms("2026-11-07T14:32:00Z")),
-            TranscriptStatus::None,
-            false,
-        );
-        let earlier_info = info_at(
-            Some(ms("2026-11-03T09:05:00Z")),
-            TranscriptStatus::None,
-            false,
-        );
-        let yesterday_info = info_at(
-            Some(ms("2026-11-06T23:59:00Z")),
-            TranscriptStatus::None,
-            false,
-        );
+        let today_info = info_at(Some(ms("2026-11-07T14:32:00Z")), TranscriptStatus::None);
+        let earlier_info = info_at(Some(ms("2026-11-03T09:05:00Z")), TranscriptStatus::None);
+        let yesterday_info = info_at(Some(ms("2026-11-06T23:59:00Z")), TranscriptStatus::None);
 
         // Act
         let today_row = RecordingRow::from_info_in(&today_info, &TimeZone::UTC, today_utc());
@@ -1360,11 +1323,7 @@ mod tests {
 
         // Arrange: 23:30 UTC on Nov 6 is 01:30 on Nov 7 at UTC+2.
         let zone = TimeZone::fixed(tz::offset(2));
-        let info = info_at(
-            Some(ms("2026-11-06T23:30:00Z")),
-            TranscriptStatus::None,
-            false,
-        );
+        let info = info_at(Some(ms("2026-11-06T23:30:00Z")), TranscriptStatus::None);
 
         // Act
         let row = RecordingRow::from_info_in(&info, &zone, today_utc());
@@ -1379,7 +1338,7 @@ mod tests {
         use jiff::tz::TimeZone;
 
         // Arrange
-        let info = info_at(None, TranscriptStatus::None, false);
+        let info = info_at(None, TranscriptStatus::None);
 
         // Act
         let row = RecordingRow::from_info_in(&info, &TimeZone::UTC, today_utc());
@@ -1391,67 +1350,58 @@ mod tests {
     }
 
     #[test]
-    fn notes_cover_recovered_sidecar_and_problems() {
-        use super::{recording_notes, NOTE_PROBLEMS, NOTE_RECOVERED};
+    fn notes_cover_sidecar_and_problems() {
+        use super::{recording_notes, NOTE_PROBLEMS};
 
         // Arrange
-        let clean = (false, SidecarState::Present, false);
+        let clean = (SidecarState::Present, false);
 
         // Act
-        let none = recording_notes(clean.0, clean.1, clean.2);
-        let recovered = recording_notes(true, SidecarState::Present, false);
-        let missing = recording_notes(false, SidecarState::Missing, false);
-        let malformed = recording_notes(false, SidecarState::Malformed, false);
-        let problems = recording_notes(false, SidecarState::Present, true);
-        let all = recording_notes(true, SidecarState::Missing, true);
+        let none = recording_notes(clean.0, clean.1);
+        let missing = recording_notes(SidecarState::Missing, false);
+        let malformed = recording_notes(SidecarState::Malformed, false);
+        let problems = recording_notes(SidecarState::Present, true);
+        let all = recording_notes(SidecarState::Missing, true);
 
         // Assert
         assert!(none.is_empty());
-        assert_eq!(recovered, [NOTE_RECOVERED]);
         assert_eq!(missing.len(), 1);
         assert_eq!(malformed.len(), 1);
         assert_ne!(missing, malformed);
         assert_eq!(problems, [NOTE_PROBLEMS]);
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 2);
     }
 
     #[test]
     fn row_carries_notes_from_the_recording() {
-        use super::NOTE_RECOVERED;
         use jiff::tz::TimeZone;
 
         // Arrange
-        let recovered = info_at(None, TranscriptStatus::None, true);
-        let clean = info_at(None, TranscriptStatus::None, false);
+        let clean = info_at(None, TranscriptStatus::None);
 
         // Act
-        let recovered_row = RecordingRow::from_info_in(&recovered, &TimeZone::UTC, today_utc());
         let clean_row = RecordingRow::from_info_in(&clean, &TimeZone::UTC, today_utc());
 
         // Assert
-        assert_eq!(recovered_row.notes, [SharedString::from(NOTE_RECOVERED)]);
         assert!(clean_row.notes.is_empty());
     }
 
     #[test]
-    fn badge_maps_status_and_recovered_flag() {
+    fn badge_maps_status() {
         // Arrange
         let cases = [
-            (TranscriptStatus::None, false, RowBadge::None),
-            (TranscriptStatus::None, true, RowBadge::Recovered),
-            (TranscriptStatus::Ready, false, RowBadge::Ready),
-            (TranscriptStatus::Ready, true, RowBadge::Recovered),
-            (TranscriptStatus::Queued, true, RowBadge::Queued),
-            (TranscriptStatus::Progress(42), true, RowBadge::Progress(42)),
-            (TranscriptStatus::Failed, true, RowBadge::Failed),
-            (TranscriptStatus::Failed, false, RowBadge::Failed),
+            (TranscriptStatus::None, RowBadge::None),
+            (TranscriptStatus::Ready, RowBadge::Ready),
+            (TranscriptStatus::Queued, RowBadge::Queued),
+            (TranscriptStatus::Progress(42), RowBadge::Progress(42)),
+            (TranscriptStatus::Failed, RowBadge::Failed),
         ];
 
         // Act
-        let actual = cases.map(|(status, recovered, _)| RowBadge::from_status(status, recovered));
+        let actual = cases.map(|(status, _)| RowBadge::from_status(status));
 
         // Assert
-        assert_eq!(actual, cases.map(|(_, _, badge)| badge));
+        assert_eq!(actual, cases.map(|(_, badge)| badge));
     }
 
     #[test]
@@ -1564,7 +1514,6 @@ mod tests {
             None,
             TranscriptStatus::None,
             SidecarState::Present,
-            false,
             Vec::new(),
         );
         RecordingRow::from_info_in(&info, &jiff::tz::TimeZone::UTC, today_utc())
@@ -1769,7 +1718,6 @@ mod tests {
             None,
             TranscriptStatus::None,
             SidecarState::Present,
-            false,
             Vec::new(),
         );
         RecordingRow::from_info_in(&info, &jiff::tz::TimeZone::UTC, today_utc())

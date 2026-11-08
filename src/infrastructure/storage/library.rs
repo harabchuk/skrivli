@@ -69,18 +69,10 @@ pub(crate) fn scan_library(directory: &Path) -> LibraryCatalog {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if name.ends_with(".wav.partial") {
+        // `.wav.partial` files are skipped here: the extension `partial` maps to no container.
+        let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+        let Some(container) = RecordingContainer::from_extension(&ext.to_ascii_lowercase()) else {
             continue;
-        }
-        let recovered = name.ends_with(".recovered.wav");
-        let container = if recovered {
-            RecordingContainer::Wav
-        } else {
-            let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
-            match RecordingContainer::from_extension(&ext.to_ascii_lowercase()) {
-                Some(container) => container,
-                None => continue,
-            }
         };
         let meta = item.metadata().ok();
         let size_bytes = meta.as_ref().map(|meta| meta.len()).unwrap_or(0);
@@ -105,7 +97,6 @@ pub(crate) fn scan_library(directory: &Path) -> LibraryCatalog {
                 stem,
                 container,
                 size_bytes,
-                recovered,
                 doc,
                 transcript_file,
                 sidecar_file,
@@ -116,7 +107,6 @@ pub(crate) fn scan_library(directory: &Path) -> LibraryCatalog {
                 container,
                 size_bytes,
                 mtime_ms,
-                recovered,
                 sidecar_state(&sidecar),
                 transcript_file,
                 sidecar_file,
@@ -285,13 +275,11 @@ pub(crate) fn colliding_ids(catalog: &LibraryCatalog) -> Vec<RecordingId> {
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn entry_from_sidecar(
     audio_path: PathBuf,
     stem: String,
     container: RecordingContainer,
     size_bytes: u64,
-    recovered: bool,
     doc: &LoadedSidecar,
     transcript_path: Option<PathBuf>,
     sidecar_path: Option<PathBuf>,
@@ -317,7 +305,6 @@ fn entry_from_sidecar(
             Some(doc.format),
             transcript,
             SidecarState::Present,
-            recovered,
             doc.problems.clone(),
         ),
         audio_path,
@@ -333,7 +320,6 @@ fn entry_without_sidecar(
     container: RecordingContainer,
     size_bytes: u64,
     mtime_ms: Option<u64>,
-    recovered: bool,
     sidecar: SidecarState,
     transcript_path: Option<PathBuf>,
     sidecar_path: Option<PathBuf>,
@@ -355,7 +341,6 @@ fn entry_without_sidecar(
             None,
             transcript,
             sidecar,
-            recovered,
             Vec::new(),
         ),
         audio_path,
@@ -366,8 +351,7 @@ fn entry_without_sidecar(
 
 fn display_stem(file_name: &str) -> String {
     file_name
-        .strip_suffix(".recovered.wav")
-        .or_else(|| file_name.strip_suffix(".wav"))
+        .strip_suffix(".wav")
         .or_else(|| file_name.strip_suffix(".m4a"))
         .unwrap_or(file_name)
         .to_string()
@@ -466,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_skips_partials_keeps_recovered_and_unpaired() {
+    fn scan_skips_partials_and_lists_old_recovered_as_plain_wav() {
         // Arrange
         let dir = temp_dir("scan");
         write_wav(&dir.join("keep.wav"), b"RIFF");
@@ -500,7 +484,7 @@ mod tests {
         assert!(catalog
             .entries
             .iter()
-            .any(|entry| entry.info.name() == "crash" && entry.info.recovered()));
+            .any(|entry| entry.info.name() == "crash.recovered"));
         assert!(!catalog
             .entries
             .iter()

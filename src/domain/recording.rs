@@ -151,7 +151,6 @@ pub(crate) struct RecordingInfo {
     format: Option<RecordingFormat>,
     transcript: TranscriptStatus,
     sidecar: SidecarState,
-    recovered: bool,
     problems: Vec<String>,
 }
 
@@ -167,7 +166,6 @@ impl RecordingInfo {
         format: Option<RecordingFormat>,
         transcript: TranscriptStatus,
         sidecar: SidecarState,
-        recovered: bool,
         problems: Vec<String>,
     ) -> Self {
         Self {
@@ -180,7 +178,6 @@ impl RecordingInfo {
             format,
             transcript,
             sidecar,
-            recovered,
             problems,
         }
     }
@@ -220,10 +217,6 @@ impl RecordingInfo {
 
     pub(crate) fn sidecar(&self) -> SidecarState {
         self.sidecar
-    }
-
-    pub(crate) fn recovered(&self) -> bool {
-        self.recovered
     }
 
     pub(crate) fn problems(&self) -> &[String] {
@@ -358,7 +351,6 @@ mod tests {
             Some(RecordingFormat::skrivli_default()),
             TranscriptStatus::None,
             SidecarState::Present,
-            false,
             Vec::new(),
         )
     }

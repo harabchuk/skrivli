@@ -152,8 +152,8 @@ Each phase leaves the tree building with `cargo fmt`, `cargo clippy --all-target
 
 **Red**
 
-- [ ] `infrastructure/storage/library.rs`: rename `scan_skips_partials_keeps_recovered_and_unpaired` to `scan_skips_partials_and_lists_old_recovered_as_plain_wav`. Assert that `crash.recovered.wav` is listed with `name() == "crash.recovered"` (not `"crash"`), and that `busy.wav.partial` is still skipped. It fails today because `display_stem` strips `.recovered.wav`.
-- [ ] `views/recordings.rs`:
+- [x] `infrastructure/storage/library.rs`: rename `scan_skips_partials_keeps_recovered_and_unpaired` to `scan_skips_partials_and_lists_old_recovered_as_plain_wav`. Assert that `crash.recovered.wav` is listed with `name() == "crash.recovered"` (not `"crash"`), and that `busy.wav.partial` is still skipped. It fails today because `display_stem` strips `.recovered.wav`.
+- [x] `views/recordings.rs`:
   - `badge_maps_status_and_recovered_flag` becomes `badge_maps_status` over `RowBadge::from_status(status)` for the five statuses. Drop the two `Recovered` cases.
   - `notes_cover_recovered_sidecar_and_problems` becomes `notes_cover_sidecar_and_problems`. Drop the recovered case and `NOTE_RECOVERED`.
   - Delete the row test that asserts `RowBadge::Recovered` (about line 1219), and the recovered half of the row-notes test (about lines 1420–1432).
@@ -161,13 +161,13 @@ Each phase leaves the tree building with `cargo fmt`, `cargo clippy --all-target
 
 **Green**
 
-- [ ] `infrastructure/storage/library.rs`:
+- [x] `infrastructure/storage/library.rs`:
   - remove the `let recovered = name.ends_with(".recovered.wav")` branch. Every file goes through `RecordingContainer::from_extension`,
   - remove the explicit `if name.ends_with(".wav.partial") { continue; }`. The extension `partial` already maps to `None` (see the `domain/recording.rs` test `from_extension("partial") == None`). Keep a one-line comment saying partials are skipped by extension,
   - remove the `recovered` parameter from `entry_from_sidecar` and `entry_without_sidecar`. If either drops to seven parameters or fewer, also remove its `#[allow(clippy::too_many_arguments)]`,
   - remove `.strip_suffix(".recovered.wav")` from `display_stem`.
-- [ ] `domain/recording.rs`: remove the `recovered` field, its constructor argument and `RecordingInfo::recovered()`. Fix every `RecordingInfo::new(…)` caller (library and test helpers). Re-check whether `#[allow(clippy::too_many_arguments)]` on `new` is still needed (it will still be, at ten arguments).
-- [ ] `views/recordings.rs`:
+- [x] `domain/recording.rs`: remove the `recovered` field, its constructor argument and `RecordingInfo::recovered()`. Fix every `RecordingInfo::new(…)` caller (library and test helpers). Re-check whether `#[allow(clippy::too_many_arguments)]` on `new` is still needed (it will still be, at ten arguments).
+- [x] `views/recordings.rs`:
   - remove the private `recovered` field from `RecordingRow`,
   - `RowBadge::from_status(status)` takes one argument. Delete the `Recovered` variant, its doc comment and its arm in `row_badge`,
   - `set_row_status` calls `RowBadge::from_status(status)`,
