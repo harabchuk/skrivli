@@ -286,6 +286,8 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 **Outcome:** `.cargo/config.toml` sets `crt-static` for `x86_64-pc-windows-msvc`. `dumpbin /dependents` on the release exe shows no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports. The remaining non-base DLLs are `icuuc.dll` (Windows 10 and later) and `mmdevapi.dll`. The whisper.cpp licence text in the ZIP is copied from the vendored source of `whisper-rs-sys` 0.15.0.
 
+**whisper.cpp must match:** `.cargo/config.toml` `[env]` sets `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` and `CMAKE_POLICY_DEFAULT_CMP0091=NEW` (whisper.cpp declares `cmake_minimum_required(3.5)`, so the policy is OFF otherwise). `whisper-rs-sys` forwards `CMAKE_*` env vars to CMake. Without both, a clean build compiles ggml with `/MD` and the link fails on `__imp_fgetc`, `__imp_realloc` and other CRT imports. A stale local `target/` can hide the failure; the build script does not rerun on env changes, so run `cargo clean -p whisper-rs-sys` after changing them.
+
 **Not verified:** a clean VM without Visual Studio (M9.2 stays open).
 
 ## D-25 — Release tools pinned (release plan R4, R6)
