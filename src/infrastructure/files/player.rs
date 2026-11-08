@@ -186,7 +186,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("dir");
         let when = CivilTime::new(2026, 11, 6, 9, 0, 0).expect("time");
-        let mut writer = FlacWriter::create(&dir, when).expect("create");
+        let mut writer = FlacWriter::create(
+            &dir,
+            when,
+            crate::infrastructure::files::flac::max_recording_frames(),
+        )
+        .expect("create");
         let mut samples = Vec::with_capacity(frames * 2);
         for index in 0..frames {
             let value = (index % 30_000) as f32 / 32_767.0;

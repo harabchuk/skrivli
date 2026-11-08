@@ -327,3 +327,7 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 **No backward compatibility:** old `.wav`, `.m4a`, `.wav.partial` and `.recovered.wav` files are not listed, played or transcribed. They are never touched or deleted.
 
 **Not verified on hardware:** seek accuracy and latency on a FLAC longer than one hour, and playback of a 12 h file. Unit and integration tests need no hardware.
+
+## D-30 — Maximum meeting duration is a user setting (2026-11-08)
+
+**Outcome:** the fixed 12 hour cap from D-29 becomes the **Maximum meeting duration** setting (Settings → Recording), default **3 hours**, choices 1, 2, 3, 4, 6, 8 and 12 hours. It protects against a forgotten recording writing a very long file. Stored as `max_meeting_hours` in settings JSON (no schema bump; missing or unlisted values load as 3). The value is read when a recording starts. 12 hours stays the hard ceiling because the 80,000-byte seek-table padding covers 12 h. The notice is now "Recording stopped because it reached the maximum meeting duration." (no hour count, so it stays a static string).

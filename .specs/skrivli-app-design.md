@@ -376,7 +376,7 @@ System loopback uses flexaudio’s classic silent-render keepalive so idle endpo
 ### 6.5 Audio files, metadata and crash safety
 
 - Name recordings `Skrivli_YYYY-MM-DD_HH-MM-SS.flac` in local time, with a collision suffix.
-- Write into `*.flac.partial` first, as **48 kHz, stereo, 16-bit FLAC** (compression level 5) with `flac-codec`'s `FlacSampleWriter`. Encoded blocks are flushed and `sync_all`ed about every 2 s of audio, so a crash leaves a partial whose STREAMINFO lacks the total sample count and MD5. Encoder options reserve an **80,000-byte PADDING block** so finalize can rewrite STREAMINFO and a seek table (one point per 10 s, 18 bytes each, enough for 12 h) in place without moving audio. Size is bounded by a **12 hour duration cap** (`MAX_RECORDING_SECONDS`): the writer accepts the frames that fit, returns `FlacWrite::SafeStop`, and the session finalizes and shows "Recording stopped because it reached the 12 hour limit."
+- Write into `*.flac.partial` first, as **48 kHz, stereo, 16-bit FLAC** (compression level 5) with `flac-codec`'s `FlacSampleWriter`. Encoded blocks are flushed and `sync_all`ed about every 2 s of audio, so a crash leaves a partial whose STREAMINFO lacks the total sample count and MD5. Encoder options reserve an **80,000-byte PADDING block** so finalize can rewrite STREAMINFO and a seek table (one point per 10 s, 18 bytes each, enough for 12 h) in place without moving audio. Length is bounded by the user's **Maximum meeting duration** (`MaxMeetingDuration`, settings field `max_meeting_hours`, choices 1/2/3/4/6/8/12 h, default 3 h, invalid values load as the default). It travels in `StartRequest::max_duration`; `writer_frame_cap` converts it to frames, clamped to the 12 h ceiling the padding covers (`MAX_RECORDING_SECONDS`). At the cap the writer accepts the frames that fit, returns `FlacWrite::SafeStop`, and the session finalizes and shows "Recording stopped because it reached the maximum meeting duration."
 - When stopping: drain queued samples, flush and close the writer, persist metadata, and finalize (STREAMINFO with sample count and MD5, seek table) and rename to final `.flac`. Use a unique temporary path within the destination directory to keep rename semantics reliable.
 - Check free space before start and periodically (~30 s). Below a safety threshold (initially 200 MB) stop gracefully, finalize what can be saved, and notify.
 - After a failure during a session (write error, folder not writable, low disk, worker panic), note the problem and always try to finalize (rename to `.flac` and write the sidecar). If finalize fails, leave the `.flac.partial` where it is and report the original failure. Nothing scans for or repairs partials on launch. **Do not promise that already-failed filesystem writes can be recovered.**
@@ -591,7 +591,7 @@ Put small tests beside Rust implementations with `#[cfg(test)] mod tests`; extra
 - Ring buffer: capacity, SPSC order, wrap-around, overflow policy and concurrent stress tests.
 - Pipeline and aligner: QPC alignment, silent intervals, overlapping and late packets, bounded wait, 100 ppm simulated drift, microphone and system gain, the soft limiter, mono downmix, and echo-reference order.
 - Resampler: the capture nudge is 48 kHz to 48 kHz and reads the aligner error directly. Transcription uses a separate 48 kHz to 16 kHz path: a 1 kHz sine retains pitch and amplitude, content above 8 kHz is attenuated, and stereo downmix is checked.
-- FLAC: PCM16 round trip, periodic flush, finalize (STREAMINFO, seek table, padding), 12 h cap boundary math, seekable playback source.
+- FLAC: PCM16 round trip, periodic flush, finalize (STREAMINFO, seek table, padding), duration cap boundary math, seekable playback source.
 - Transcript: time formatting beyond one hour, paragraph grouping, repeated-line suppression, overlap chunk stitching.
 - Library: audio/text/JSON pairing, sorting, stable selection keys, malformed metadata, partials skipped.
 - Services: invalid transitions, idempotent stop, cancellation, retry, startup failure rollback, single-job queue behavior.
@@ -645,7 +645,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | Silent loopback produces no packets | QPC timeline and silence insertion; investigate silent render keep-alive |
 | Drift between independent devices | Unit-test 100 ppm deviations; the pipeline reads aligner error and nudges each source's Rubato ratio |
 | Driver rejects requested format/conversion | Probe `IsFormatSupported`/mix format; test alternate converter path |
-| Very long session | 12 hour duration cap; FLAC has no 4 GB limit |
+| Very long session | User Maximum meeting duration (default 3 h, ceiling 12 h); FLAC has no 4 GB limit |
 | Speaker echo | Echo removal is always on while system audio is captured. There is no off switch. Double-talk can reduce the user's own voice while the far side is talking. The stored file is the processed mix, so a bad result cannot be recovered afterwards. |
 | Silence hallucination in Whisper | VAD when verified, conservative duplicate cleanup, progress/cancel |
 | whisper.cpp FFI/build mismatch | Pin tested native revision/binding; minimal isolated adapter; CI native-build test |
@@ -676,6 +676,6 @@ These are deliberate implementation choices to settle during M0–M3, not implic
 4. **Format conversion:** flexaudio converts the device rate to 48 kHz stereo `f32`. The pipeline resampler is 48 kHz to 48 kHz and reads the aligner's error directly (D-06).
 5. **Tray event bridge:** determine safe native HWND/message registration and shutdown interaction with the chosen GPUI Kit / GPUI Windows backend.
 6. **Model manifest:** pin actual model URLs, license terms, hashes and formats before exposing downloads.
-7. **Recording file maximum:** resolved (D-05, D-29): FLAC with a 12 hour duration cap.
+7. **Recording file maximum:** resolved (D-05, D-29): FLAC with a user Maximum meeting duration (D-30).
 
 The implementation should favor the smallest working architecture, document real deviations in `.specs/`, and keep `AGENTS.md` and this design synchronized as decisions are validated.

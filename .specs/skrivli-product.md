@@ -109,7 +109,7 @@ Users should trust that Skrivli tries to keep usable audio when things go wrong:
 - Low disk space is warned; recording stops in a controlled way before the disk is exhausted when the app can detect it.
 - If a device is unplugged or becomes unavailable mid-session, the other source can keep going; gaps are reflected as silence rather than a broken timeline.
 - Closing the window to the tray leaves recording running. Quitting while recording asks to stop and save.
-- A single recording stops by itself after 12 hours. The file is finalized and the app shows "Recording stopped because it reached the 12 hour limit."
+- A single recording stops by itself when it reaches the **Maximum meeting duration** set in Settings (default 3 hours). The file is finalized and the app shows "Recording stopped because it reached the maximum meeting duration."
 - Recordings are saved as `.flac` files (written as `.flac.partial` until you stop). Audio files in other formats in the folder are not listed, played or transcribed; they are left untouched on disk.
 - Windows logoff/shutdown triggers a best-effort save; there is no guarantee of unlimited time, but the app attempts to finalize what it can.
 
@@ -214,6 +214,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 - Microphone gain, set with the manual slider
 - Optional separate source files (mic / system) — available when enabled; off by default
 - Recordings are always saved as lossless FLAC (16-bit stereo 48 kHz). There is no format choice and no conversion step.
+- **Maximum meeting duration** (Settings → Recording): 1, 2, 3, 4, 6, 8 or 12 hours, default 3 hours. It stops a forgotten recording so it does not write a very long file. A change applies to the next recording.
 
 ### Transcription
 

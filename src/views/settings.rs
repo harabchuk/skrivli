@@ -1,12 +1,15 @@
 //! Settings: the transcription model and app behaviour. Rendering never touches a worker.
 
 use gpui_kit::component::button::Button;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{div, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window};
+use gpui_kit::{
+    div, Anchor, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window,
+};
 
-use crate::domain::recording::format_size;
+use crate::domain::recording::{format_size, MaxMeetingDuration};
 use crate::ui::components::dialog_style::DIALOG_WIDTH;
 use crate::ui::components::model_card::{model_tag, ModelCardTag};
 use crate::ui::components::settings_rows::{settings_row, settings_section};
@@ -56,10 +59,42 @@ pub(crate) fn settings_model_row(
     }
 }
 
+pub(crate) const MAX_DURATION_TITLE: &str = "Maximum meeting duration";
+pub(crate) const MAX_DURATION_DESCRIPTION: &str =
+    "Stops a forgotten recording so it does not write a very long file.";
+
+/// One entry of the Maximum meeting duration menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DurationChoice {
+    pub(crate) label: String,
+    pub(crate) duration: MaxMeetingDuration,
+    pub(crate) checked: bool,
+}
+
+pub(crate) fn duration_choices(selected: MaxMeetingDuration) -> Vec<DurationChoice> {
+    MaxMeetingDuration::CHOICES_HOURS
+        .iter()
+        .filter_map(|hours| MaxMeetingDuration::from_hours(*hours))
+        .map(|duration| DurationChoice {
+            label: duration.label(),
+            duration,
+            checked: duration == selected,
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SettingsView {
     pub(crate) close_to_tray: bool,
+    pub(crate) max_duration: MaxMeetingDuration,
     pub(crate) model: SettingsModelRow,
+}
+
+/// Settings dialog callbacks. Each runs on the GPUI thread and only updates the session.
+pub(crate) struct SettingsHandlers<T, D, M> {
+    pub(crate) on_close_to_tray: T,
+    pub(crate) on_max_duration: D,
+    pub(crate) on_change_model: M,
 }
 
 pub(crate) fn version_text() -> String {
@@ -70,9 +105,17 @@ pub(crate) fn open_settings(
     window: &mut Window,
     cx: &mut App,
     read: impl Fn(&App) -> SettingsView + 'static,
-    on_close_to_tray: impl Fn(&bool, &mut Window, &mut App) + Clone + 'static,
-    on_change_model: impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
+    handlers: SettingsHandlers<
+        impl Fn(&bool, &mut Window, &mut App) + Clone + 'static,
+        impl Fn(MaxMeetingDuration, &mut Window, &mut App) + Clone + 'static,
+        impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
+    >,
 ) {
+    let SettingsHandlers {
+        on_close_to_tray,
+        on_max_duration,
+        on_change_model,
+    } = handlers;
     window.open_dialog(cx, move |dialog, _, cx| {
         let view = read(cx);
         let model = view.model;
@@ -102,6 +145,16 @@ pub(crate) fn open_settings(
                     cx,
                 ))
                 .child(settings_section(
+                    "Recording",
+                    [settings_row(
+                        MAX_DURATION_TITLE,
+                        MAX_DURATION_DESCRIPTION,
+                        max_duration_menu(view.max_duration, on_max_duration.clone()),
+                        cx,
+                    )],
+                    cx,
+                ))
+                .child(settings_section(
                     "General",
                     [settings_row(
                         "Close to the notification area",
@@ -119,6 +172,30 @@ pub(crate) fn open_settings(
                 ),
         )
     });
+}
+
+fn max_duration_menu(
+    selected: MaxMeetingDuration,
+    on_pick: impl Fn(MaxMeetingDuration, &mut Window, &mut App) + Clone + 'static,
+) -> impl IntoElement {
+    let choices = duration_choices(selected);
+    Button::new("settings-max-duration")
+        .outline()
+        .small()
+        .label(SharedString::from(selected.label()))
+        .dropdown_caret(true)
+        .accessibility_label(MAX_DURATION_TITLE)
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
+            choices.iter().fold(menu, |menu, choice| {
+                let pick = on_pick.clone();
+                let duration = choice.duration;
+                menu.item(
+                    PopupMenuItem::new(SharedString::from(choice.label.clone()))
+                        .checked(choice.checked)
+                        .on_click(move |_event, window, cx| pick(duration, window, cx)),
+                )
+            })
+        })
 }
 
 fn close_to_tray_switch(
@@ -210,6 +287,29 @@ mod tests {
         assert_eq!(row.title, "No model installed");
         assert_eq!(row.button, "Choose model…");
         assert!(!row.in_use);
+    }
+
+    #[test]
+    fn duration_choices_list_every_option_and_check_the_selected_one() {
+        // Arrange
+        let selected = crate::domain::recording::MaxMeetingDuration::default();
+
+        // Act
+        let choices = super::duration_choices(selected);
+
+        // Assert
+        let labels: Vec<_> = choices.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["1 hour", "2 hours", "3 hours", "4 hours", "6 hours", "8 hours", "12 hours"]
+        );
+        let checked: Vec<_> = choices.iter().filter(|c| c.checked).collect();
+        assert_eq!(checked.len(), 1);
+        assert_eq!(checked[0].duration, selected);
+        assert_eq!(
+            super::MAX_DURATION_DESCRIPTION,
+            "Stops a forgotten recording so it does not write a very long file."
+        );
     }
 
     #[test]

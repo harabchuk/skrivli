@@ -19,6 +19,48 @@ pub(crate) enum RecordPhase {
 /// Longest recording Skrivli writes. Reaching it finalizes the file.
 pub(crate) const MAX_RECORDING_SECONDS: u64 = 12 * 60 * 60;
 
+/// User-chosen maximum meeting duration. Stops a forgotten recording before
+/// it writes a very long file. Only the hours in [`Self::CHOICES_HOURS`] are valid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MaxMeetingDuration {
+    hours: u32,
+}
+
+impl MaxMeetingDuration {
+    pub(crate) const CHOICES_HOURS: [u32; 7] = [1, 2, 3, 4, 6, 8, 12];
+    pub(crate) const DEFAULT_HOURS: u32 = 3;
+
+    pub(crate) fn from_hours(hours: u32) -> Option<Self> {
+        Self::CHOICES_HOURS
+            .contains(&hours)
+            .then_some(Self { hours })
+    }
+
+    pub(crate) fn hours(self) -> u32 {
+        self.hours
+    }
+
+    pub(crate) fn frames(self, sample_rate: u32) -> u64 {
+        u64::from(self.hours) * 3_600 * u64::from(sample_rate)
+    }
+
+    pub(crate) fn label(self) -> String {
+        if self.hours == 1 {
+            "1 hour".to_string()
+        } else {
+            format!("{} hours", self.hours)
+        }
+    }
+}
+
+impl Default for MaxMeetingDuration {
+    fn default() -> Self {
+        Self {
+            hours: Self::DEFAULT_HOURS,
+        }
+    }
+}
+
 /// On-disk audio container the library can list. FLAC is the only one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecordingContainer {
@@ -332,6 +374,7 @@ pub(crate) fn preserve_selection(
 
 #[cfg(test)]
 mod tests {
+    use super::MaxMeetingDuration;
     use super::{
         format_duration_ms, format_size, preserve_selection, recording_day, synthetic_recording_id,
         RecordingContainer, RecordingDay, RecordingFormat, RecordingInfo, SidecarState,
@@ -339,6 +382,47 @@ mod tests {
     };
     use crate::domain::audio::CivilTime;
     use crate::domain::ids::RecordingId;
+
+    #[test]
+    fn max_meeting_duration_defaults_to_three_hours() {
+        // Arrange
+
+        // Act
+        let cap = MaxMeetingDuration::default();
+
+        // Assert
+        assert_eq!(cap.hours(), 3);
+        assert_eq!(cap.label(), "3 hours");
+    }
+
+    #[test]
+    fn max_meeting_duration_accepts_only_the_offered_choices() {
+        // Arrange
+        let hours = [0, 1, 5, 12, 13];
+
+        // Act
+        let parsed: Vec<_> = hours
+            .into_iter()
+            .map(|h| MaxMeetingDuration::from_hours(h).map(MaxMeetingDuration::hours))
+            .collect();
+
+        // Assert
+        assert_eq!(parsed, vec![None, Some(1), None, Some(12), None]);
+        assert_eq!(MaxMeetingDuration::CHOICES_HOURS, [1, 2, 3, 4, 6, 8, 12]);
+    }
+
+    #[test]
+    fn max_meeting_duration_converts_to_frames_and_labels() {
+        // Arrange
+        let one = MaxMeetingDuration::from_hours(1).expect("one");
+
+        // Act
+        let frames = one.frames(48_000);
+
+        // Assert
+        assert_eq!(frames, 3_600 * 48_000);
+        assert_eq!(one.label(), "1 hour");
+    }
 
     fn row(id: u64, name: &str, started: Option<u64>) -> RecordingInfo {
         RecordingInfo::new(

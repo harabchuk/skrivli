@@ -4,7 +4,7 @@
 //! about every two seconds. Finalize writes STREAMINFO (sample count, MD5) and
 //! the seek table, then renames the file to `.flac`.
 //!
-//! A recording stops at [`MAX_RECORDING_SECONDS`]. Accepted frames are written
+//! A recording stops at the caller's frame cap, at most [`MAX_RECORDING_SECONDS`]. Accepted frames are written
 //! and [`FlacWrite::SafeStop`] tells the caller to finalize.
 //!
 //! Cleanup policy: never auto-delete unknown `*.flac.partial` files.
@@ -123,8 +123,13 @@ pub(crate) struct FlacWriter {
 }
 
 impl FlacWriter {
-    pub(crate) fn create(directory: &Path, when: CivilTime) -> Result<Self, AppError> {
-        Self::create_with_cap(directory, when, max_recording_frames())
+    /// `frame_cap` is clamped to [`max_recording_frames`], the ceiling the seek-table padding covers.
+    pub(crate) fn create(
+        directory: &Path,
+        when: CivilTime,
+        frame_cap: u64,
+    ) -> Result<Self, AppError> {
+        Self::create_with_cap(directory, when, frame_cap.min(max_recording_frames()))
     }
 
     fn create_with_cap(
@@ -372,7 +377,7 @@ mod tests {
     fn finalize_writes_streaminfo_and_round_trips_samples() {
         // Arrange
         let dir = temp_dir("final");
-        let mut writer = FlacWriter::create(&dir, stamp()).expect("create");
+        let mut writer = FlacWriter::create(&dir, stamp(), max_recording_frames()).expect("create");
         let samples = vec![0.5_f32, -0.5, 0.0, 0.0];
 
         // Act
@@ -407,7 +412,7 @@ mod tests {
     fn flush_pushes_encoded_blocks_into_the_partial() {
         // Arrange
         let dir = temp_dir("flush");
-        let mut writer = FlacWriter::create(&dir, stamp()).expect("create");
+        let mut writer = FlacWriter::create(&dir, stamp(), max_recording_frames()).expect("create");
         let chunk = vec![0.25_f32; 9_600];
         let before = fs::metadata(writer.partial_path()).expect("meta").len();
 
@@ -429,7 +434,7 @@ mod tests {
     fn collision_adds_a_numeric_suffix() {
         // Arrange
         let dir = temp_dir("name");
-        let first = FlacWriter::create(&dir, stamp()).expect("first");
+        let first = FlacWriter::create(&dir, stamp(), max_recording_frames()).expect("first");
         let first_name = first
             .final_path()
             .file_name()
@@ -438,7 +443,7 @@ mod tests {
             .into_owned();
 
         // Act
-        let second = FlacWriter::create(&dir, stamp()).expect("second");
+        let second = FlacWriter::create(&dir, stamp(), max_recording_frames()).expect("second");
         let second_name = second
             .final_path()
             .file_name()
@@ -493,7 +498,7 @@ mod tests {
     fn finalizing_an_empty_recording_leaves_a_valid_flac() {
         // Arrange
         let dir = temp_dir("empty");
-        let writer = FlacWriter::create(&dir, stamp()).expect("create");
+        let writer = FlacWriter::create(&dir, stamp(), max_recording_frames()).expect("create");
 
         // Act
         let path = writer.finalize().expect("finalize");
@@ -509,7 +514,7 @@ mod tests {
     fn dropping_an_unfinalized_writer_keeps_the_partial() {
         // Arrange
         let dir = temp_dir("drop");
-        let mut writer = FlacWriter::create(&dir, stamp()).expect("create");
+        let mut writer = FlacWriter::create(&dir, stamp(), max_recording_frames()).expect("create");
         writer.write_samples(&[0.2; 200]).expect("write");
         let partial = writer.partial_path().to_path_buf();
 

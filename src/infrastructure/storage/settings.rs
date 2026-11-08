@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::error::AppError;
 use crate::domain::audio::{EndpointChoice, EndpointId};
+use crate::domain::recording::MaxMeetingDuration;
 use crate::infrastructure::platform;
 
 pub(crate) use crate::domain::theme::ThemePreference;
@@ -29,6 +30,10 @@ fn default_auto_transcribe() -> bool {
 
 fn default_notify_on_transcript() -> bool {
     true
+}
+
+fn default_max_meeting_hours() -> u32 {
+    MaxMeetingDuration::DEFAULT_HOURS
 }
 
 /// Logical-pixel window placement. Zero or negative sizes are rejected.
@@ -123,6 +128,9 @@ pub(crate) struct Settings {
     /// Balloon when a transcript is ready. Default on. Older files omit the field.
     #[serde(default = "default_notify_on_transcript")]
     notify_on_transcript: bool,
+    /// Hours before a forgotten recording stops. Older files omit the field.
+    #[serde(default = "default_max_meeting_hours")]
+    max_meeting_hours: u32,
 }
 
 impl Settings {
@@ -147,6 +155,7 @@ impl Settings {
             selected_model: default_selected_model(),
             auto_transcribe: default_auto_transcribe(),
             notify_on_transcript: default_notify_on_transcript(),
+            max_meeting_hours: default_max_meeting_hours(),
         })
     }
 
@@ -248,6 +257,14 @@ impl Settings {
         self.notify_on_transcript = enabled;
     }
 
+    pub(crate) fn max_meeting_duration(&self) -> MaxMeetingDuration {
+        MaxMeetingDuration::from_hours(self.max_meeting_hours).unwrap_or_default()
+    }
+
+    pub(crate) fn set_max_meeting_duration(&mut self, duration: MaxMeetingDuration) {
+        self.max_meeting_hours = duration.hours();
+    }
+
     pub(crate) fn set_recordings_directory(&mut self, directory: PathBuf) -> Result<(), AppError> {
         if directory.as_os_str().is_empty() {
             return Err(AppError::message(
@@ -327,6 +344,7 @@ fn normalize(mut settings: Settings) -> Option<Settings> {
     if settings.selected_model.trim().is_empty() {
         settings.selected_model = default_selected_model();
     }
+    settings.max_meeting_hours = settings.max_meeting_duration().hours();
     settings.schema_version = SCHEMA_VERSION;
     Some(settings)
 }
@@ -545,6 +563,56 @@ mod tests {
         // Assert
         assert!((loaded.mic_gain() - 1.7).abs() < 0.001);
         assert_eq!(loaded.recordings_directory(), meetings.as_path());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn max_meeting_duration_defaults_to_three_hours_and_round_trips() {
+        // Arrange
+        let dir = temp_dir("max-duration");
+        let path = dir.join("settings.json");
+        let mut settings = sample(&dir);
+        let default_hours = settings.max_meeting_duration().hours();
+        let six = crate::domain::recording::MaxMeetingDuration::from_hours(6).expect("six");
+        settings.set_max_meeting_duration(six);
+
+        // Act
+        settings.save(&path).expect("save");
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert_eq!(default_hours, 3);
+        assert_eq!(loaded.max_meeting_duration(), six);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn missing_or_invalid_max_meeting_duration_loads_the_default() {
+        // Arrange
+        let dir = temp_dir("max-duration-legacy");
+        let meetings = dir.join("Meetings");
+        let escaped = meetings.display().to_string().replace('\\', "\\\\");
+        let old = dir.join("old.json");
+        let bad = dir.join("bad.json");
+        fs::write(
+            &old,
+            format!(r#"{{"schema_version":4,"recordings_directory":"{escaped}","close_to_tray":true,"start_hidden":false,"theme":"system"}}"#),
+        )
+        .expect("old");
+        fs::write(
+            &bad,
+            format!(r#"{{"schema_version":4,"recordings_directory":"{escaped}","close_to_tray":true,"start_hidden":false,"theme":"system","max_meeting_hours":5}}"#),
+        )
+        .expect("bad");
+
+        // Act
+        let from_old = Settings::load(&old, sample(&dir));
+        let from_bad = Settings::load(&bad, sample(&dir));
+
+        // Assert
+        assert_eq!(from_old.max_meeting_duration().hours(), 3);
+        assert_eq!(from_bad.max_meeting_duration().hours(), 3);
+        assert_eq!(from_bad.recordings_directory(), meetings.as_path());
         let _ = fs::remove_dir_all(dir);
     }
 

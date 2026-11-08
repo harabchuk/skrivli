@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 
 use crate::domain::audio::{AudioBlock, SessionOrigin, INTERNAL_SAMPLE_RATE};
 use crate::domain::ids::RecordingId;
+use crate::domain::recording::MaxMeetingDuration;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
-use crate::infrastructure::files::flac::{FlacWrite, FlacWriter};
+use crate::infrastructure::files::flac::{max_recording_frames, FlacWrite, FlacWriter};
 use crate::infrastructure::files::writable::ensure_writable;
 use crate::infrastructure::storage::sidecar::{write_sidecar, Sidecar};
 use crate::services::audio_pipeline::{AudioSource, EchoStats, Pipeline, PipelineSetup};
@@ -45,7 +46,8 @@ pub(crate) const NOTICE_FOLDER: &str = "The recordings folder is not writable.";
 pub(crate) const NOTICE_DISK: &str = "There is not enough free disk space to record.";
 pub(crate) const NOTICE_LOW_DISK: &str = "Recording stopped because free disk space is low.";
 pub(crate) const NOTICE_SAVE: &str = "Could not save the recording.";
-pub(crate) const NOTICE_LIMIT: &str = "Recording stopped because it reached the 12 hour limit.";
+pub(crate) const NOTICE_LIMIT: &str =
+    "Recording stopped because it reached the maximum meeting duration.";
 pub(crate) const NOTICE_FALLBACK: &str =
     "The selected microphone is unavailable. Using the Windows default.";
 pub(crate) const NOTICE_SYSTEM_FALLBACK: &str =
@@ -87,6 +89,15 @@ pub(crate) struct StartRequest {
     pub(crate) open_microphone: bool,
     /// Shown instead of the saved notice when a chosen device was substituted.
     pub(crate) degraded_notice: Option<&'static str>,
+    /// Stops a forgotten recording at this length.
+    pub(crate) max_duration: MaxMeetingDuration,
+}
+
+/// Frames the writer accepts for `duration`, never past the file format's ceiling.
+pub(crate) fn writer_frame_cap(duration: MaxMeetingDuration) -> u64 {
+    duration
+        .frames(INTERNAL_SAMPLE_RATE)
+        .min(max_recording_frames())
 }
 
 /// Outcome of turning settings and a device catalog into a start request.
@@ -101,6 +112,7 @@ pub(crate) fn build_start_request(
     microphone: &crate::infrastructure::storage::settings::StoredEndpoint,
     system_audio: &crate::infrastructure::storage::settings::StoredEndpoint,
     catalog: &crate::infrastructure::audio::devices::DeviceCatalog,
+    max_duration: MaxMeetingDuration,
 ) -> StartRequestBuild {
     use crate::domain::audio::{resolve_endpoint, EndpointChoice, EndpointFlow};
 
@@ -174,6 +186,7 @@ pub(crate) fn build_start_request(
         system_audio_id,
         open_microphone,
         degraded_notice: notice,
+        max_duration,
     })
 }
 
@@ -364,7 +377,11 @@ fn session_body(
     let _lease = LeaseGuard(lease);
     let started_ms = engine.clock.unix_millis();
     let when = engine.clock.local();
-    let mut flac = match FlacWriter::create(&request.directory, when) {
+    let mut flac = match FlacWriter::create(
+        &request.directory,
+        when,
+        writer_frame_cap(request.max_duration),
+    ) {
         Ok(flac) => flac,
         Err(error) => {
             tracing::error!(error = %error, "recording file was not created");
@@ -990,6 +1007,22 @@ mod tests {
     };
     use crate::domain::audio::AudioBlock;
     use crate::infrastructure::files::writable::ensure_writable;
+
+    #[test]
+    fn writer_cap_follows_the_chosen_meeting_duration() {
+        // Arrange
+        let two = crate::domain::recording::MaxMeetingDuration::from_hours(2).expect("two");
+
+        // Act
+        let frames = super::writer_frame_cap(two);
+
+        // Assert
+        assert_eq!(frames, 2 * 3_600 * 48_000);
+        assert_eq!(
+            super::NOTICE_LIMIT,
+            "Recording stopped because it reached the maximum meeting duration."
+        );
+    }
     use crate::services::audio_pipeline::PassThroughPipelineFactory;
 
     struct OneShot {
@@ -1088,6 +1121,7 @@ mod tests {
             system_audio_id: "system".to_string(),
             open_microphone: true,
             degraded_notice: None,
+            max_duration: crate::domain::recording::MaxMeetingDuration::default(),
         };
         let mut engine = super::RecordingEngine {
             mic: Box::new(port),
@@ -1175,6 +1209,7 @@ mod tests {
             system_audio_id: "unavailable".to_string(),
             open_microphone: true,
             degraded_notice: None,
+            max_duration: crate::domain::recording::MaxMeetingDuration::default(),
         };
         let mut engine = super::RecordingEngine {
             mic: Box::new(TailPort {
@@ -1265,6 +1300,7 @@ mod tests {
             &StoredEndpoint::Default,
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1296,6 +1332,7 @@ mod tests {
             &StoredEndpoint::explicit("gone"),
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1320,6 +1357,7 @@ mod tests {
             &StoredEndpoint::Default,
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1345,6 +1383,7 @@ mod tests {
             &StoredEndpoint::Default,
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1370,6 +1409,7 @@ mod tests {
             &StoredEndpoint::Default,
             &StoredEndpoint::Default,
             &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
         );
 
         // Assert
@@ -1395,6 +1435,7 @@ mod tests {
             system_audio_id: "unavailable".to_string(),
             open_microphone: true,
             degraded_notice: None,
+            max_duration: crate::domain::recording::MaxMeetingDuration::default(),
         };
         let mut engine = super::RecordingEngine {
             mic: Box::new(TailPort {

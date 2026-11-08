@@ -25,7 +25,8 @@ use crate::domain::audio::format_elapsed;
 use crate::domain::gain::{db_fs, format_gain};
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::{
-    settled_transcript_status, RecordPhase, RecordingContainer, TranscriptStatus,
+    settled_transcript_status, MaxMeetingDuration, RecordPhase, RecordingContainer,
+    TranscriptStatus,
 };
 use crate::domain::theme::ThemePreference;
 use crate::domain::transcript::{current_paragraph, parse_transcript, TranscriptParagraph};
@@ -69,7 +70,7 @@ use super::recordings::{
 };
 use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
-    settings_model_row, SettingsView,
+    settings_model_row, SettingsHandlers, SettingsView,
 };
 
 const BOUNDS_DEBOUNCE: Duration = Duration::from_millis(400);
@@ -335,6 +336,16 @@ impl MainWindow {
         cx.notify();
     }
 
+    pub(crate) fn set_max_meeting_duration(
+        &mut self,
+        duration: MaxMeetingDuration,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.set_max_meeting_duration(duration);
+        self.hooks.save_settings(self.settings.clone());
+        cx.notify();
+    }
+
     pub(crate) fn cycle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let system_is_dark = matches!(
             window.appearance(),
@@ -531,6 +542,12 @@ impl MainWindow {
                 let session = cx.entity();
                 let watched = session.clone();
                 let model_entity = session.clone();
+                let duration_entity = session.clone();
+                let on_max_duration =
+                    move |duration: MaxMeetingDuration, _: &mut Window, cx: &mut App| {
+                        duration_entity
+                            .update(cx, |view, cx| view.set_max_meeting_duration(duration, cx));
+                    };
                 let on_change = move |checked: &bool, _: &mut Window, cx: &mut App| {
                     session.update(cx, |view, cx| view.set_close_to_tray(*checked, cx));
                 };
@@ -540,7 +557,16 @@ impl MainWindow {
                     });
                 };
                 let read = move |cx: &App| watched.read_with(cx, |view, _| view.settings_view());
-                open_settings(window, cx, read, on_change, on_change_model);
+                open_settings(
+                    window,
+                    cx,
+                    read,
+                    SettingsHandlers {
+                        on_close_to_tray: on_change,
+                        on_max_duration,
+                        on_change_model,
+                    },
+                );
             }
             Effect::OpenModelDialog => self.open_model_prompt(window, cx),
             Effect::OpenAbout => open_about(window, cx),
@@ -1073,6 +1099,7 @@ impl MainWindow {
         });
         SettingsView {
             close_to_tray: self.close_to_tray(),
+            max_duration: self.settings.max_meeting_duration(),
             model: settings_model_row(&status, bytes),
         }
     }
@@ -1420,6 +1447,7 @@ impl MainWindow {
             self.settings.microphone(),
             self.settings.system_audio(),
             &self.catalog,
+            self.settings.max_meeting_duration(),
         ) {
             StartRequestBuild::Ready(request) => self.recording.start(request),
             StartRequestBuild::Refused { notice } => {

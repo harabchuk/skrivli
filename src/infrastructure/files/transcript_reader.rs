@@ -162,7 +162,12 @@ mod tests {
         // Arrange
         let dir = temp_dir("ok");
         let when = CivilTime::new(2026, 11, 5, 12, 0, 0).expect("time");
-        let mut writer = FlacWriter::create(&dir, when).expect("create");
+        let mut writer = FlacWriter::create(
+            &dir,
+            when,
+            crate::infrastructure::files::flac::max_recording_frames(),
+        )
+        .expect("create");
         let mut frames = Vec::new();
         for _ in 0..9_600 {
             frames.push(0.25);
