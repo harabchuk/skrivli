@@ -37,6 +37,12 @@ Skrivli is a Windows app that records and transcribes meetings entirely on your 
 
 ## For developers
 
+### Contribution
+
+PRs are welcome. Each PR should fix only one issue and contain human readable explanation of the issue and the way it has been fixed.
+
+For new features PRs please explain the problem and the goal from user perspective.
+
 ### Local build
 
 Target: `x86_64-pc-windows-msvc` on Windows 10 or 11.
