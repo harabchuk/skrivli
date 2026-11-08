@@ -7,8 +7,6 @@
 //!
 //! Cleanup policy: never auto-delete unknown `*.wav.partial` files. [`Self::abandon`]
 //! removes a partial only after a failed start before usable audio must be kept.
-//! Crash recovery renames safe partials to `*.recovered.wav` and leaves unsafe
-//! headers in place.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -136,6 +134,7 @@ impl WavWriter {
         &self.final_path
     }
 
+    #[cfg(test)]
     pub(crate) fn partial_path(&self) -> &Path {
         &self.partial
     }
@@ -219,15 +218,6 @@ impl WavWriter {
             .map_err(|source| AppError::io("save recording", source))?;
         self.finalized = true;
         Ok(self.final_path.clone())
-    }
-
-    /// Close the handle after a header repair, leaving the partial on disk.
-    pub(crate) fn release_partial(mut self) -> Result<PathBuf, AppError> {
-        if let Some(writer) = self.writer.take() {
-            let _ = writer.finalize();
-        }
-        self.finalized = true;
-        Ok(self.partial.clone())
     }
 
     pub(crate) fn abandon(mut self) -> Result<(), AppError> {
@@ -566,7 +556,7 @@ mod tests {
         let dir = temp_dir("recover");
         let writer = WavWriter::create(&dir, stamp()).expect("create");
         let partial = writer.partial_path().to_path_buf();
-        writer.release_partial().expect("release");
+        drop(writer);
         {
             use std::io::Write;
             let mut file = OpenOptions::new()

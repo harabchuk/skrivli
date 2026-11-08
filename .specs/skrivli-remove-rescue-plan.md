@@ -80,31 +80,31 @@ Each phase leaves the tree building with `cargo fmt`, `cargo clippy --all-target
 
 **Red**
 
-- [ ] In `tests/recording_flow.rs`, rename `folder_fault_rescues_readable_partial` to `folder_fault_finalizes_in_place_and_reports_folder`. Assert:
+- [x] In `tests/recording_flow.rs`, rename `folder_fault_rescues_readable_partial` to `folder_fault_finalizes_in_place_and_reports_folder`. Assert:
   - the notice contains "The recordings folder is not writable",
   - exactly one finalized `.wav` exists in the recordings folder,
   - no file name contains `partial` or `rescued`.
   
   Run it. It fails today because the code returns `NOTICE_RESCUED` and never finalizes.
-- [ ] In `mid_session_write_fault_preserves_usable_output`, replace the `has_artifact` check (which accepts partials and rescue copies) with: one finalized `.wav` exists, and no `partial` or `rescued` file exists. This should already pass, because the write-fault path finalizes when the folder is fine. Keep it as a guard.
-- [ ] In `mid_session_low_disk_stops_with_warning`, drop the "or a partial exists" fallback so the test needs a finalized `.wav`.
+- [x] In `mid_session_write_fault_preserves_usable_output`, replace the `has_artifact` check (which accepts partials and rescue copies) with: one finalized `.wav` exists, and no `partial` or `rescued` file exists. This should already pass, because the write-fault path finalizes when the folder is fine. Keep it as a guard.
+- [x] In `mid_session_low_disk_stops_with_warning`, drop the "or a partial exists" fallback so the test needs a finalized `.wav`.
 
 **Green**
 
-- [ ] `services/recording.rs`: replace `preserve_or_rescue` and `rescue_existing_partial` with one function, `keep_after_failure`:
+- [x] `services/recording.rs`: replace `preserve_or_rescue` and `rescue_existing_partial` with one function, `keep_after_failure`:
   - note `save_error`,
   - call `wav.finalize()`. On success, write the sidecar (ignore its error, as today). On failure, log it with `tracing::error!`,
   - return `Err(failure)` either way.
   
   Remove the `folder_ok` and `_directory` parameters it no longer needs.
-- [ ] `finish_session`: call `keep_after_failure` in both failure branches. When `failed` is `None` and the folder check fails, pass `NOTICE_FOLDER`.
-- [ ] Remove `use crate::infrastructure::files::rescue::rescue_partial;`.
-- [ ] Remove the constants `NOTICE_RESCUED` and `NOTICE_PARTIAL_KEPT`.
+- [x] `finish_session`: call `keep_after_failure` in both failure branches. When `failed` is `None` and the folder check fails, pass `NOTICE_FOLDER`.
+- [x] Remove `use crate::infrastructure::files::rescue::rescue_partial;`.
+- [x] Remove the constants `NOTICE_RESCUED` and `NOTICE_PARTIAL_KEPT`.
 
 **Refactor**
 
-- [ ] `infrastructure/files/wav.rs`: delete `WavWriter::release_partial`. It is now unused, because a failed `finalize` already leaves the partial on disk through `Drop`. Its only test caller is the recovery test, which goes in Phase 2.
-- [ ] Update the module doc on `wav.rs` (lines 8–11): keep "never auto-delete unknown `*.wav.partial` files" and the `abandon` sentence. Remove the "Crash recovery renames…" sentence.
+- [x] `infrastructure/files/wav.rs`: delete `WavWriter::release_partial`. It is now unused, because a failed `finalize` already leaves the partial on disk through `Drop`. Its only test caller is the recovery test, which goes in Phase 2.
+- [x] Update the module doc on `wav.rs` (lines 8–11): keep "never auto-delete unknown `*.wav.partial` files" and the `abandon` sentence. Remove the "Crash recovery renames…" sentence.
 
 **Done when:** a folder fault produces a normal `.wav` plus the folder notice, and `rescue_partial` has no callers.
 
