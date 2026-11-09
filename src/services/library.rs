@@ -10,8 +10,8 @@ use std::time::Duration;
 use crate::domain::ids::RecordingId;
 use crate::domain::recording::preserve_selection;
 use crate::infrastructure::storage::library::{
-    associated_paths, rename_recording, renamed_audio_path, scan_library, LibraryCatalog,
-    LibraryEntry, RenameResult,
+    associated_paths, recover_interrupted_transcriptions, rename_recording, renamed_audio_path,
+    scan_library, LibraryCatalog, LibraryEntry, RenameResult,
 };
 use crate::services::ports::{
     DirectoryWatch, JobIdentity, Trash, WatchEvent, DEFAULT_WATCH_DEBOUNCE,
@@ -93,6 +93,7 @@ fn library_loop(
     let mut selected = None;
     let mut catalog = LibraryCatalog::empty();
     let mut active = start_watch(watch.as_ref(), directory.clone());
+    recover_interrupted_transcriptions(&directory);
 
     publish(&catalog, selected, None, &on_change);
 
@@ -114,6 +115,7 @@ fn library_loop(
             }
             Ok(LibraryCommand::SetDirectory(next)) => {
                 directory = next;
+                recover_interrupted_transcriptions(&directory);
                 active.stop();
                 active = start_watch(watch.as_ref(), directory.clone());
                 rescan(&directory, &mut catalog, &mut selected, None, &on_change);

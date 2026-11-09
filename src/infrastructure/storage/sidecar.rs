@@ -310,7 +310,7 @@ pub(crate) fn update_transcription(
     write_sidecar_body(&path, &body)
 }
 
-/// On launch / library scan: in-progress jobs become Failed (retryable). Does not resume.
+/// When the library opens a directory: in-progress jobs become Failed (retryable). Does not resume.
 pub(crate) fn interrupt_in_progress_transcription(audio_path: &Path) -> bool {
     match load_sidecar(audio_path) {
         SidecarLoad::Loaded(doc) if transcript_is_in_progress(doc.transcript) => {
