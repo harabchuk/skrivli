@@ -241,8 +241,21 @@ pub mod testing {
         );
         if let Some(delay) = cancel_after {
             std::thread::sleep(delay);
-            if let Some(job) = host.snapshot().job_id {
-                host.cancel(job);
+            // The worker may not have picked the job up yet on a slow machine;
+            // wait for a job id (or a terminal phase) instead of skipping the cancel.
+            for _ in 0..200 {
+                let snapshot = host.snapshot();
+                if let Some(job) = snapshot.job_id {
+                    host.cancel(job);
+                    break;
+                }
+                if matches!(
+                    snapshot.phase,
+                    JobPhase::Done | JobPhase::Failed | JobPhase::Cancelled
+                ) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
         wait_terminal(&host);
