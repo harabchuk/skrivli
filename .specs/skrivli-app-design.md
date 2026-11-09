@@ -345,6 +345,7 @@ Prefer channels and typed events for worker-to-UI communication, with updates di
 - Enumerate active `eCapture` and `eRender` endpoints via Windows Core Audio; read stable endpoint IDs and display-friendly names.
 - Show **Microphone** (default: Windows default communications input) and **System audio** (default output endpoint) selectors.
 - Store explicit endpoint IDs in settings. If an ID disappears, fall back to the relevant Windows default and show a non-blocking notice.
+- Each selector also offers a last option, **Disabled**. It is stored as `StoredEndpoint::Disabled` (`{"mode":"disabled"}`) and maps to `EndpointChoice::Disabled`. `resolve_endpoint` returns `ResolveError::Disabled` for it, so callers can tell a source turned off on purpose from a missing device. `build_start_request` then leaves that source unopened with the sidecar id `disabled` and no degraded warning. When both sources are Disabled it refuses the start with "Turn on the microphone or system audio to record." The tray and hotkey go through the same check. `MonitorTargets` holds `Option<String>` per source, and `None` means the idle monitor never opens it; with both `None` the monitor releases the lease and waits for a change.
 - Register a Windows endpoint-notification callback. It should enqueue a lightweight event, not reinitialize streams inside the callback.
 - Do not allow a selection change during a recording; support mid-recording device loss via the recovery policy below.
 
