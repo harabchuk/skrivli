@@ -42,6 +42,23 @@ impl LibraryCatalog {
     }
 }
 
+/// Mark transcriptions left in progress by a previous run as Failed (retryable).
+///
+/// Run once when the library opens a directory, before any job can start there.
+/// Never call it from a rescan: it would rewrite the sidecar of a running job.
+pub(crate) fn recover_interrupted_transcriptions(directory: &Path) {
+    let Ok(read) = fs::read_dir(directory) else {
+        return;
+    };
+    for path in read.flatten().map(|item| item.path()) {
+        let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+        if path.is_file() && RecordingContainer::from_extension(&ext.to_ascii_lowercase()).is_some()
+        {
+            let _ = interrupt_in_progress_transcription(&path);
+        }
+    }
+}
+
 /// Scan `directory` for supported audio, join sidecars/transcripts, newest first.
 pub(crate) fn scan_library(directory: &Path) -> LibraryCatalog {
     if !directory.exists() {
@@ -85,7 +102,6 @@ pub(crate) fn scan_library(directory: &Path) -> LibraryCatalog {
                     .map(|d| d.as_millis() as u64)
             });
         let stem = display_stem(name);
-        let _ = interrupt_in_progress_transcription(&path);
         let sidecar = load_sidecar(&path);
         let transcript_file = transcript_path_for(&path)
             .ok()
@@ -378,7 +394,10 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::{associated_paths, colliding_ids, rename_recording, scan_library, LibraryCatalog};
+    use super::{
+        associated_paths, colliding_ids, recover_interrupted_transcriptions, rename_recording,
+        scan_library, LibraryCatalog,
+    };
     use crate::domain::ids::RecordingId;
     use crate::domain::recording::{SidecarState, TranscriptStatus};
     use crate::infrastructure::storage::sidecar::{
@@ -445,6 +464,59 @@ mod tests {
         assert_eq!(status("failed-without"), Some(TranscriptStatus::Failed));
         assert_eq!(status("cancel-with"), Some(TranscriptStatus::Ready));
         assert_eq!(status("cancel-without"), Some(TranscriptStatus::None));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn seed_in_progress(dir: &std::path::Path, name: &str, id: u64) -> std::path::PathBuf {
+        let audio_file = dir.join(format!("{name}.flac"));
+        write_flac(&audio_file, b"fLaC");
+        write_sidecar(
+            &audio_file,
+            &Sidecar {
+                id,
+                started_at_unix_ms: 100,
+                ended_at_unix_ms: 200,
+                duration_ms: 100,
+                microphone_id: "m".into(),
+                system_audio_id: "s".into(),
+                problems: Vec::new(),
+            },
+        )
+        .expect("side");
+        update_transcription(&audio_file, TranscriptionWrite::Progress(40), None).expect("status");
+        audio_file
+    }
+
+    #[test]
+    fn scan_leaves_running_transcription_sidecar_untouched() {
+        // Arrange
+        let dir = temp_dir("scan-running");
+        let audio_file = seed_in_progress(&dir, "live", 31);
+        let sidecar = dir.join("live.json");
+        let before = fs::read(&sidecar).expect("before");
+
+        // Act
+        let _ = scan_library(&dir);
+
+        // Assert
+        assert_eq!(fs::read(&sidecar).expect("after"), before);
+        assert!(audio_file.is_file());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn recovery_marks_interrupted_transcription_failed() {
+        // Arrange
+        let dir = temp_dir("recover");
+        seed_in_progress(&dir, "crashed", 32);
+
+        // Act
+        recover_interrupted_transcriptions(&dir);
+        let catalog = scan_library(&dir);
+
+        // Assert
+        let entry = catalog.find(RecordingId::from_raw(32)).expect("entry");
+        assert_eq!(entry.info.transcript(), TranscriptStatus::Failed);
         let _ = fs::remove_dir_all(dir);
     }
 

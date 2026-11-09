@@ -452,7 +452,9 @@ fn rename_before_write_retargets_transcript_beside_new_audio() {
 
     // Act
     session.rename(6, "notes");
+    // The group rename moves audio first, then the sidecar the write checks identity against.
     wait_for_file(&dir.join("notes.flac"));
+    wait_for_file(&dir.join("notes.json"));
     session.release();
     session.wait_terminal();
     let phase = session.phase();
