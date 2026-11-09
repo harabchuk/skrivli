@@ -81,6 +81,8 @@ pub(crate) enum StoredEndpoint {
     #[default]
     Default,
     Explicit(String),
+    /// The source is turned off on purpose: not monitored, not recorded.
+    Disabled,
 }
 
 impl StoredEndpoint {
@@ -98,6 +100,7 @@ impl From<&StoredEndpoint> for EndpointChoice {
     fn from(stored: &StoredEndpoint) -> Self {
         match stored {
             StoredEndpoint::Default => Self::Default,
+            StoredEndpoint::Disabled => Self::Disabled,
             StoredEndpoint::Explicit(id) => EndpointId::new(id)
                 .map(Self::Explicit)
                 .unwrap_or(Self::Default),
@@ -353,6 +356,7 @@ fn clean_endpoint(endpoint: StoredEndpoint) -> StoredEndpoint {
     match endpoint {
         StoredEndpoint::Explicit(id) => StoredEndpoint::explicit(id),
         StoredEndpoint::Default => StoredEndpoint::Default,
+        StoredEndpoint::Disabled => StoredEndpoint::Disabled,
     }
 }
 
@@ -542,6 +546,37 @@ mod tests {
         assert!(loaded.start_hidden);
         assert_eq!(loaded.theme, ThemePreference::Light);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn disabled_endpoint_round_trips() {
+        // Arrange
+        let dir = temp_dir("disabled-round-trip");
+        let path = dir.join("settings.json");
+        let mut settings = sample(&dir);
+        settings.set_microphone(StoredEndpoint::Disabled);
+        settings.set_system_audio(StoredEndpoint::Disabled);
+
+        // Act
+        settings.save(&path).expect("save");
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert_eq!(loaded.microphone(), &StoredEndpoint::Disabled);
+        assert_eq!(loaded.system_audio(), &StoredEndpoint::Disabled);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clean_endpoint_keeps_disabled() {
+        // Arrange
+        let endpoint = StoredEndpoint::Disabled;
+
+        // Act
+        let cleaned = super::clean_endpoint(endpoint);
+
+        // Assert
+        assert_eq!(cleaned, StoredEndpoint::Disabled);
     }
 
     #[test]

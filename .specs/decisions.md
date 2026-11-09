@@ -337,3 +337,7 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 ## D-31 — Maximum meeting duration is a user setting (2026-11-08)
 
 **Outcome:** the fixed 12 hour cap from D-29 becomes the **Maximum meeting duration** setting (Settings → Recording), default **3 hours**, choices 1, 2, 3, 4, 6, 8 and 12 hours. It protects against a forgotten recording writing a very long file. Stored as `max_meeting_hours` in settings JSON (no schema bump; missing or unlisted values load as 3). The value is read when a recording starts. 12 hours stays the hard ceiling because the 80,000-byte seek-table padding covers 12 h. The notice is now "Recording stopped because it reached the maximum meeting duration." (no hour count, so it stays a static string).
+
+## D-32 — Disabled audio sources are a stored state (2026-11-09)
+
+**Outcome:** turning off the microphone or system audio is `StoredEndpoint::Disabled` (`{"mode":"disabled"}`), not a magic device id. The settings schema version is unchanged (additive). An older build reading it falls back to defaults, which is accepted before v1. `EndpointChoice::Disabled` and `ResolveError::Disabled` keep "turned off" apart from "no device". An intentionally disabled source shows no degraded warning; the sidecar `microphone_id` or `system_audio_id` is `"disabled"`. The menu label is **Disabled**. Starting with both sources disabled is refused in `build_start_request`, so the Record button, the tray and the hotkey share one check.

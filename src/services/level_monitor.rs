@@ -20,8 +20,9 @@ use crate::services::recording::CapturePort;
 use super::lease::EndpointLease;
 
 struct TargetState {
-    mic: String,
-    system: String,
+    /// `None` means the source is turned off and is never opened.
+    mic: Option<String>,
+    system: Option<String>,
     generation: u64,
 }
 
@@ -33,14 +34,14 @@ impl MonitorTargets {
     pub(crate) fn new() -> Self {
         Self {
             inner: Mutex::new(TargetState {
-                mic: String::new(),
-                system: String::new(),
+                mic: Some(String::new()),
+                system: Some(String::new()),
                 generation: 1,
             }),
         }
     }
 
-    pub(crate) fn set(&self, mic: String, system: String) {
+    pub(crate) fn set(&self, mic: Option<String>, system: Option<String>) {
         let mut state = self
             .inner
             .lock()
@@ -53,7 +54,7 @@ impl MonitorTargets {
         state.generation = state.generation.saturating_add(1);
     }
 
-    fn snapshot(&self) -> (String, String, u64) {
+    fn snapshot(&self) -> (Option<String>, Option<String>, u64) {
         let state = self
             .inner
             .lock()
@@ -96,8 +97,16 @@ fn monitor_loop(
             continue;
         }
         let (mic_id, system_id, generation) = targets.snapshot();
-        let mut mic = mic_port.open(&mic_id, origin).ok();
-        let mut system = system_port.open(&system_id, origin).ok();
+        if mic_id.is_none() && system_id.is_none() {
+            // Both sources are off: nothing to open until the choice changes.
+            lease.end_monitor();
+            while !stop.load(Ordering::Acquire) && targets.snapshot().2 == generation {
+                thread::sleep(Duration::from_millis(50));
+            }
+            continue;
+        }
+        let mut mic = mic_id.and_then(|id| mic_port.open(&id, origin).ok());
+        let mut system = system_id.and_then(|id| system_port.open(&id, origin).ok());
         if mic.is_none() && system.is_none() {
             lease.end_monitor();
             thread::sleep(Duration::from_millis(200));
@@ -313,5 +322,55 @@ mod tests {
         // Assert
         assert_eq!(while_held, 0);
         assert_eq!(live.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn monitor_does_not_open_a_disabled_source() {
+        // Arrange
+        let live = Arc::new(AtomicUsize::new(0));
+        let mic_opened = Arc::new(AtomicUsize::new(0));
+        let system_opened = Arc::new(AtomicUsize::new(0));
+        let targets = Arc::new(MonitorTargets::new());
+        targets.set(None, Some(String::new()));
+        let lease = Arc::new(EndpointLease::new());
+        let stop = Arc::new(AtomicBool::new(false));
+        let handle = spawn_level_monitor(
+            Box::new(CountingPort {
+                live: Arc::clone(&live),
+                opened: Arc::clone(&mic_opened),
+            }),
+            Box::new(CountingPort {
+                live: Arc::clone(&live),
+                opened: Arc::clone(&system_opened),
+            }),
+            Arc::clone(&lease),
+            Arc::new(LevelSnapshot::new()),
+            Arc::new(GainControl::new(1.0)),
+            Arc::clone(&targets),
+            Arc::clone(&stop),
+        );
+        let started = std::time::Instant::now();
+        while system_opened.load(Ordering::Acquire) < 1
+            && started.elapsed() < Duration::from_secs(2)
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        // Act
+        targets.set(None, None);
+        thread::sleep(Duration::from_millis(150));
+        let opened_after_both_off = system_opened.load(Ordering::Acquire);
+        let live_after_both_off = live.load(Ordering::Acquire);
+        thread::sleep(Duration::from_millis(300));
+        let opened_later = system_opened.load(Ordering::Acquire);
+        stop.store(true, Ordering::Release);
+        lease.release_recording();
+        let _ = handle.join();
+
+        // Assert
+        assert_eq!(mic_opened.load(Ordering::Acquire), 0);
+        assert_eq!(opened_after_both_off, 1);
+        assert_eq!(live_after_both_off, 0);
+        assert_eq!(opened_later, 1);
     }
 }

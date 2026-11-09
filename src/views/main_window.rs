@@ -163,10 +163,16 @@ impl MainWindow {
     ) -> Self {
         let focus = cx.focus_handle().tab_stop(true);
         window.focus(&focus, cx);
-        let labels = vec![SharedString::from("Default communications")];
-        let choices = vec![StoredEndpoint::Default];
-        let system_labels = vec![SharedString::from("Default output device")];
-        let system_choices = vec![StoredEndpoint::Default];
+        let labels = vec![
+            SharedString::from("Default communications"),
+            SharedString::from(DISABLED_LABEL),
+        ];
+        let choices = vec![StoredEndpoint::Default, StoredEndpoint::Disabled];
+        let system_labels = vec![
+            SharedString::from("Default output device"),
+            SharedString::from(DISABLED_LABEL),
+        ];
+        let system_choices = vec![StoredEndpoint::Default, StoredEndpoint::Disabled];
         let gain_slider = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
@@ -1412,6 +1418,8 @@ impl MainWindow {
             labels.push(SharedString::from(label));
             choices.push(StoredEndpoint::explicit(device.id().as_str()));
         }
+        labels.push(SharedString::from(DISABLED_LABEL));
+        choices.push(StoredEndpoint::Disabled);
         if !choices.contains(self.settings.microphone()) {
             self.presentation.set_notice(Some(NOTICE_FALLBACK));
             self.settings.set_microphone(StoredEndpoint::Default);
@@ -1435,6 +1443,8 @@ impl MainWindow {
             system_labels.push(SharedString::from(label));
             system_choices.push(StoredEndpoint::explicit(device.id().as_str()));
         }
+        system_labels.push(SharedString::from(DISABLED_LABEL));
+        system_choices.push(StoredEndpoint::Disabled);
         if !system_choices.contains(self.settings.system_audio()) {
             self.presentation.set_notice(Some(NOTICE_SYSTEM_FALLBACK));
             self.settings.set_system_audio(StoredEndpoint::Default);
@@ -1546,10 +1556,15 @@ fn resolve_model_path(
     Ok((path, entry.id().to_string()))
 }
 
-fn endpoint_token(choice: &StoredEndpoint) -> String {
+/// Menu label for a source that is turned off.
+const DISABLED_LABEL: &str = "Disabled";
+
+/// The monitor target for a choice. `None` means the source is turned off.
+fn endpoint_token(choice: &StoredEndpoint) -> Option<String> {
     match choice {
-        StoredEndpoint::Default => String::new(),
-        StoredEndpoint::Explicit(id) => id.clone(),
+        StoredEndpoint::Default => Some(String::new()),
+        StoredEndpoint::Explicit(id) => Some(id.clone()),
+        StoredEndpoint::Disabled => None,
     }
 }
 

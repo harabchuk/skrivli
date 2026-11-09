@@ -192,6 +192,8 @@ pub(crate) enum EndpointChoice {
     #[default]
     Default,
     Explicit(EndpointId),
+    /// The user turned this source off; nothing is resolved or opened.
+    Disabled,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -218,6 +220,8 @@ impl ResolvedEndpoint {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ResolveError {
     NoneAvailable,
+    /// The source was turned off on purpose (not a missing device).
+    Disabled,
 }
 
 /// Pick an active endpoint. A missing or disabled explicit id falls back to
@@ -235,6 +239,7 @@ pub(crate) fn resolve_endpoint(
         .collect();
     let found = |id: &EndpointId| active.iter().copied().find(|device| device.id() == id);
     match choice {
+        EndpointChoice::Disabled => Err(ResolveError::Disabled),
         EndpointChoice::Explicit(id) => {
             if let Some(device) = found(id) {
                 return Ok(resolved(device, false));
@@ -484,6 +489,40 @@ mod tests {
         assert_eq!(empty, Err(ResolveError::NoneAvailable));
         assert!(CivilTime::new(2026, 11, 4, 13, 5, 6).is_some());
         assert!(CivilTime::new(2026, 13, 4, 0, 0, 0).is_none());
+    }
+
+    #[test]
+    fn disabled_choice_resolves_to_disabled_error() {
+        // Arrange
+        let devices = vec![
+            mic("default-mic", EndpointAvailability::Active),
+            EndpointDescriptor::new(
+                id("speakers"),
+                "Speakers",
+                EndpointFlow::Render,
+                EndpointAvailability::Active,
+            ),
+        ];
+        let mic_default = id("default-mic");
+        let speakers_default = id("speakers");
+
+        // Act
+        let capture = resolve_endpoint(
+            &EndpointChoice::Disabled,
+            EndpointFlow::Capture,
+            &devices,
+            Some(&mic_default),
+        );
+        let render = resolve_endpoint(
+            &EndpointChoice::Disabled,
+            EndpointFlow::Render,
+            &devices,
+            Some(&speakers_default),
+        );
+
+        // Assert
+        assert_eq!(capture, Err(ResolveError::Disabled));
+        assert_eq!(render, Err(ResolveError::Disabled));
     }
 
     #[test]

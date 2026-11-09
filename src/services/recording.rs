@@ -40,6 +40,7 @@ pub(crate) const NOTICE_SAVED: &str = "Recording saved.";
 pub(crate) const NOTICE_PRIVACY: &str =
     "Microphone access is turned off in Windows privacy settings.";
 pub(crate) const NOTICE_MIC: &str = "The microphone is not available.";
+pub(crate) const NOTICE_NO_SOURCES: &str = "Turn on the microphone or system audio to record.";
 pub(crate) const NOTICE_FORMAT: &str = "The microphone format is not supported.";
 pub(crate) const NOTICE_START: &str = "Could not start recording.";
 pub(crate) const NOTICE_FOLDER: &str = "The recordings folder is not writable.";
@@ -114,7 +115,7 @@ pub(crate) fn build_start_request(
     catalog: &crate::infrastructure::audio::devices::DeviceCatalog,
     max_duration: MaxMeetingDuration,
 ) -> StartRequestBuild {
-    use crate::domain::audio::{resolve_endpoint, EndpointChoice, EndpointFlow};
+    use crate::domain::audio::{resolve_endpoint, EndpointChoice, EndpointFlow, ResolveError};
 
     let mic_choice = EndpointChoice::from(microphone);
     let system_choice = EndpointChoice::from(system_audio);
@@ -131,6 +132,8 @@ pub(crate) fn build_start_request(
         catalog.default_render.as_ref(),
     );
 
+    let mic_disabled = matches!(mic, Err(ResolveError::Disabled));
+    let system_disabled = matches!(system, Err(ResolveError::Disabled));
     let (open_microphone, endpoint_id, microphone_id, mut notice) = match mic {
         Ok(resolved) => {
             tracing::debug!(endpoint = resolved.name(), "microphone resolved");
@@ -143,6 +146,7 @@ pub(crate) fn build_start_request(
             let notice = resolved.fell_back().then_some(NOTICE_FALLBACK);
             (true, id, label, notice)
         }
+        Err(ResolveError::Disabled) => (false, String::new(), "disabled".to_string(), None),
         Err(_) => (
             false,
             String::new(),
@@ -164,9 +168,10 @@ pub(crate) fn build_start_request(
             };
             (Some(id), label)
         }
+        Err(ResolveError::Disabled) => (None, "disabled".to_string()),
         Err(_) => {
             if notice.is_none() || !open_microphone {
-                notice = Some(if open_microphone {
+                notice = Some(if open_microphone || mic_disabled {
                     NOTICE_SYSTEM_MISSING
                 } else {
                     NOTICE_MIC
@@ -176,7 +181,14 @@ pub(crate) fn build_start_request(
         }
     };
     if !open_microphone && system_endpoint_id.is_none() {
-        return StartRequestBuild::Refused { notice: NOTICE_MIC };
+        let notice = if mic_disabled && system_disabled {
+            NOTICE_NO_SOURCES
+        } else if mic_disabled {
+            NOTICE_SYSTEM_MISSING
+        } else {
+            NOTICE_MIC
+        };
+        return StartRequestBuild::Refused { notice };
     }
     StartRequestBuild::Ready(StartRequest {
         directory,
@@ -1393,6 +1405,123 @@ mod tests {
         assert!(!request.open_microphone);
         assert_eq!(request.system_endpoint_id.as_deref(), Some("spk-a"));
         assert_eq!(request.degraded_notice, Some(NOTICE_MIC_MISSING));
+    }
+
+    #[test]
+    fn disabled_microphone_records_system_only_without_warning() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(
+            vec![capture("mic-a")],
+            vec![render("spk-a")],
+            Some("mic-a"),
+            Some("spk-a"),
+        );
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::Disabled,
+            &StoredEndpoint::Default,
+            &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
+        );
+
+        // Assert
+        let StartRequestBuild::Ready(request) = built else {
+            panic!("expected ready");
+        };
+        assert!(!request.open_microphone);
+        assert_eq!(request.system_endpoint_id.as_deref(), Some("spk-a"));
+        assert_eq!(request.degraded_notice, None);
+        assert_eq!(request.microphone_id, "disabled");
+    }
+
+    #[test]
+    fn disabled_system_records_microphone_only_without_warning() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(
+            vec![capture("mic-a")],
+            vec![render("spk-a")],
+            Some("mic-a"),
+            Some("spk-a"),
+        );
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::Default,
+            &StoredEndpoint::Disabled,
+            &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
+        );
+
+        // Assert
+        let StartRequestBuild::Ready(request) = built else {
+            panic!("expected ready");
+        };
+        assert!(request.open_microphone);
+        assert_eq!(request.system_endpoint_id, None);
+        assert_eq!(request.degraded_notice, None);
+        assert_eq!(request.system_audio_id, "disabled");
+    }
+
+    #[test]
+    fn both_disabled_is_refused() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild, NOTICE_NO_SOURCES};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(
+            vec![capture("mic-a")],
+            vec![render("spk-a")],
+            Some("mic-a"),
+            Some("spk-a"),
+        );
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::Disabled,
+            &StoredEndpoint::Disabled,
+            &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
+        );
+
+        // Assert
+        match built {
+            StartRequestBuild::Refused { notice } => assert_eq!(notice, NOTICE_NO_SOURCES),
+            StartRequestBuild::Ready(_) => panic!("expected refuse"),
+        }
+    }
+
+    #[test]
+    fn disabled_microphone_and_missing_system_is_refused_as_missing() {
+        // Arrange
+        use super::{build_start_request, StartRequestBuild, NOTICE_SYSTEM_MISSING};
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+
+        let catalog = catalog_with(Vec::new(), Vec::new(), None, None);
+
+        // Act
+        let built = build_start_request(
+            std::path::PathBuf::from("rec"),
+            &StoredEndpoint::Disabled,
+            &StoredEndpoint::Default,
+            &catalog,
+            crate::domain::recording::MaxMeetingDuration::default(),
+        );
+
+        // Assert
+        match built {
+            StartRequestBuild::Refused { notice } => assert_eq!(notice, NOTICE_SYSTEM_MISSING),
+            StartRequestBuild::Ready(_) => panic!("expected refuse"),
+        }
     }
 
     #[test]

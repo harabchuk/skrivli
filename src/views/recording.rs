@@ -41,7 +41,8 @@ const RECORD_DOT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBo
 
 pub(crate) type DevicePick = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
-/// The device list for one source. The first option is the Windows default.
+/// The device list for one source. The first option is the Windows default and
+/// the last is Disabled.
 pub(crate) struct DeviceChoice {
     options: Vec<SharedString>,
     selected: usize,
@@ -313,12 +314,17 @@ fn device_control(
                 .min_w(px(MENU_MIN_WIDTH))
                 .max_h(px(MENU_MAX_HEIGHT))
                 .scrollable(true);
+            let count = options.len();
             options
                 .iter()
                 .enumerate()
                 .fold(menu, |menu, (index, label)| {
                     let pick = on_pick.clone();
-                    let menu = if index == 1 { menu.separator() } else { menu };
+                    let menu = if separator_before(index, count) {
+                        menu.separator()
+                    } else {
+                        menu
+                    };
                     menu.item(
                         PopupMenuItem::new(label.clone())
                             .checked(index == selected)
@@ -425,6 +431,12 @@ pub(crate) fn banner_notice(notice: Option<&'static str>) -> Option<&'static str
     notice.filter(|notice| notice_tone(notice) == NoticeTone::Warning)
 }
 
+/// A separator sits after the Windows default and before the last option
+/// (Disabled), so Disabled stays apart from the device list.
+fn separator_before(index: usize, count: usize) -> bool {
+    index == 1 || (count > 2 && index + 1 == count)
+}
+
 /// An unknown choice shows the first option, the Windows default.
 fn selected_index<T: PartialEq>(choices: &[T], current: &T) -> usize {
     choices
@@ -519,5 +531,36 @@ mod tests {
 
         // Assert
         assert_eq!(index, 0);
+    }
+
+    #[test]
+    fn selected_index_finds_a_disabled_choice() {
+        // Arrange
+        use crate::infrastructure::storage::settings::StoredEndpoint;
+        let choices = [
+            StoredEndpoint::Default,
+            StoredEndpoint::explicit("usb"),
+            StoredEndpoint::Disabled,
+        ];
+
+        // Act
+        let index = selected_index(&choices, &StoredEndpoint::Disabled);
+
+        // Assert
+        assert_eq!(index, 2);
+    }
+
+    #[test]
+    fn separators_frame_the_device_list_and_disabled_option() {
+        // Arrange
+        let count = 4;
+
+        // Act
+        let marks: Vec<bool> = (0..count).map(|i| separator_before(i, count)).collect();
+        let only_two: Vec<bool> = (0..2).map(|i| separator_before(i, 2)).collect();
+
+        // Assert
+        assert_eq!(marks, [false, true, false, true]);
+        assert_eq!(only_two, [false, true]);
     }
 }

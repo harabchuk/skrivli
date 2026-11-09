@@ -83,11 +83,13 @@ After a model is installed, the record → save → transcribe → copy path wor
 
 If only one source is available (for example, no microphone permission or no playback device), recording can continue with that source and the UI makes the limitation clear.
 
+Either source can also be turned off on purpose by choosing **Disabled** in its Change menu. The recording then contains only the other source, the turned-off source's meter stays empty, and no warning is shown because nothing is missing. Echo removal is only active while system audio is on.
+
 ### Record tab
 
 Users can:
 
-- See the current microphone and system audio device by name, and use a small Change button on either to pick from the available Windows devices.
+- See the current microphone and system audio device by name, and use a small Change button on either to pick from the available Windows devices. The menu ends with **Disabled**, which turns that source off.
 - See live level meters for microphone and system audio (with clear numeric levels, not color alone). Peak hold is a tick on the meter, with its value in a tooltip on the level.
 - Adjust microphone gain with a manual slider.
 - Start and stop recording; see a clear recording indicator and elapsed timer.
@@ -100,6 +102,7 @@ Device choices are locked while a recording is active; a lock icon replaces Chan
 - Start and stop from the Record tab, the tray, or the global hotkey — all do the same thing.
 - After stop, the recording is saved as a playable file with a dated name (for example `Skrivli_YYYY-MM-DD_HH-MM-SS`).
 - Starting is refused or clearly blocked when the save location is not usable.
+- Starting is refused with "Turn on the microphone or system audio to record." when both sources are set to Disabled, from the Record tab, the tray, or the hotkey. No file is created.
 
 ### Durability (user-visible)
 
@@ -210,7 +213,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 ### Recording
 
 - Default save directory (folder picker); the choice is remembered
-- Default microphone and system audio devices
+- Default microphone and system audio devices; either can be set to Disabled, and the choice is remembered across restarts
 - Microphone gain, set with the manual slider
 - Optional separate source files (mic / system) — available when enabled; off by default
 - Recordings are always saved as lossless FLAC (16-bit stereo 48 kHz). There is no format choice and no conversion step.
