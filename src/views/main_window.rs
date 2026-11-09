@@ -946,7 +946,9 @@ impl MainWindow {
     }
 
     /// The scrolling paragraph list. GPUI's `list` measures every item, so paragraphs of
-    /// different lengths wrap without overlapping.
+    /// different lengths wrap without overlapping. Each list item is laid out as its own root,
+    /// so a row with an auto width would size to its text and never wrap; the row and the text
+    /// need `w_full` to take the list's width.
     fn transcript_list_element(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let paragraphs = self.transcript_paragraphs.clone();
         let current = self.current_paragraph;
@@ -979,6 +981,7 @@ impl MainWindow {
                         return div().into_any_element();
                     };
                     h_flex()
+                        .w_full()
                         .items_start()
                         .gap_3()
                         .px_2()
@@ -996,6 +999,7 @@ impl MainWindow {
                         .child(
                             div()
                                 .flex_1()
+                                .w_full()
                                 .min_w_0()
                                 .child(SharedString::from(paragraph.text().to_string())),
                         )

@@ -263,6 +263,8 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 **Why GPUI's `list`, not Kit's `List`:** Kit's `ListState` measures one item and gives every row that size (`gpui-component-0.9.0/src/list/list.rs`, `prepare_items_if_needed`), so paragraphs of different lengths would be cut off or overlap. GPUI's `list` (`gpui-pre-0.3.11/src/elements/list.rs`) measures each item and draws only those in view. It is re-exported by `gpui_kit` (`pub use ::gpui::*`), so no second GPUI version is pulled in. Import it as `ListState as ParagraphListState`.
 
+**List item width (issue #3):** GPUI `list` lays out each item as a root with the list's width as available space; item rows need `w_full()` for text to wrap. Without it the row sized to its text and the pane clipped the rest. Future lists (for example, the recordings list) can rely on this.
+
 **Not verified:** the running app (scroll feel, wrapping on resize, Copy with Unicode, PageUp and PageDown focus handling, the Spinner and Progress look).
 
 ## D-22 — Playback engine is Rodio 0.21.1 (Phase 5 of the Recordings UI plan)
