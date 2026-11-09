@@ -1,6 +1,6 @@
 [package]
 name = "skrivli"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Local Windows meeting recorder"
 publish = false
