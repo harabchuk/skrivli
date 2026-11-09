@@ -10,3 +10,4 @@
 *.user
 *.suo
 /releases/licenses/THIRD-PARTY.txt
+.claude/worktrees
