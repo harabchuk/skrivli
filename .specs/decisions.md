@@ -312,7 +312,11 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 **Outcome:** `build.rs` no longer sets a version. The release exe reports `ProductVersion` 0.1.0 and `FileVersionRaw` 0.1.0.0, matching `Cargo.toml`.
 
-## D-29 — WAV replaced by FLAC (2026-11-08)
+## D-29 — Release files live under `releases/`
+
+**Date:** 2026-11-08. **Outcome:** Release-only files moved into one folder: `releases/package.ps1` (was `scripts/`), `releases/release-notes-header.md` (was `.github/`), `releases/about.toml` and `releases/about.hbs` (was root; CI passes `-c releases/about.toml`), `releases/dist/` and `releases/licenses/` (were root). `release.toml` was folded into `Cargo.toml` as `[package.metadata.release]`, since cargo-release only reads config from the root. `.github/workflows/release.yml` stays where GitHub requires it. Paths inside the ZIP are unchanged. `scripts/build_run.bat` stays in `scripts/` (dev tool, not release).
+
+## D-30 — WAV replaced by FLAC (2026-11-08)
 
 **Outcome:** FLAC is the only format Skrivli saves, plays and transcribes: 16-bit stereo 48 kHz, compression level 5, `Skrivli_YYYY-MM-DD_HH-MM-SS[-N].flac`, written as `.flac.partial` and renamed on finalize. Implemented in `infrastructure/files/flac.rs` (`FlacWriter`), `player.rs` (`FlacSource`) and `transcript_reader.rs`.
 
@@ -328,6 +332,6 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 **Not verified on hardware:** seek accuracy and latency on a FLAC longer than one hour, and playback of a 12 h file. Unit and integration tests need no hardware.
 
-## D-30 — Maximum meeting duration is a user setting (2026-11-08)
+## D-31 — Maximum meeting duration is a user setting (2026-11-08)
 
 **Outcome:** the fixed 12 hour cap from D-29 becomes the **Maximum meeting duration** setting (Settings → Recording), default **3 hours**, choices 1, 2, 3, 4, 6, 8 and 12 hours. It protects against a forgotten recording writing a very long file. Stored as `max_meeting_hours` in settings JSON (no schema bump; missing or unlisted values load as 3). The value is read when a recording starts. 12 hours stays the hard ceiling because the 80,000-byte seek-table padding covers 12 h. The notice is now "Recording stopped because it reached the maximum meeting duration." (no hour count, so it stays a static string).

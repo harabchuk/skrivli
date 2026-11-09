@@ -1,6 +1,6 @@
 # Skrivli — Release pipeline plan
 
-**Status:** In progress: R1–R6 implemented; R6 fork check and R7 pending. `dist/` holds the README and PRIVACY sources for the ZIP; `about.toml` and `about.hbs` exist for `cargo about`.
+**Status:** In progress: R1–R6 implemented; R6 fork check and R7 pending. All release files live under `releases/`: `releases/dist/` holds the README and PRIVACY sources for the ZIP, `releases/licenses/` the bundled licence texts, and `releases/about.toml` / `releases/about.hbs` configure `cargo about`. cargo-release is configured in `Cargo.toml` (`[package.metadata.release]`).
 **Goal:** One command, `cargo release <major|minor|patch|X.Y.Z> --execute`, turns a clean `main` into a published GitHub release that holds the portable Windows ZIP described in M9.2 of `skrivli-implementation-plan.md`.
 **Related:** `.github/workflows/ci.yml` (existing checks), `build.rs` (VERSIONINFO), `src/views/settings.rs` (shows `CARGO_PKG_VERSION`), `.specs/decisions.md` (record outcomes there).
 
@@ -41,7 +41,7 @@ On the developer machine:
 
 1. The Rust toolchain from `rust-toolchain.toml` and `git`, signed in with push rights to `harabchuk/skrivli`.
 2. `cargo install cargo-release --locked --version <pinned>`. Pin the version in `decisions.md` (1.1.7 is current on 2026-11-08).
-3. Optional: PowerShell 7 (`pwsh`), to run `scripts/package.ps1` locally when testing packaging. The release itself does not need it on the developer machine.
+3. Optional: PowerShell 7 (`pwsh`), to run `releases/package.ps1` locally when testing packaging. The release itself does not need it on the developer machine.
 
 In the repository:
 
@@ -66,7 +66,7 @@ Check: an integration test in `tests/` cannot easily read the PE resource, so `r
 
 ### 4.2 Packaging script
 
-Add `scripts/package.ps1 -Version X.Y.Z`. It takes an existing `target\release\skrivli.exe` and:
+Add `releases/package.ps1 -Version X.Y.Z`. It takes an existing `target\release\skrivli.exe` and:
 
 1. runs the signing hook (section 9),
 2. puts the layout from 4.3 together under `target\dist\skrivli-X.Y.Z-windows-x64\`,
@@ -108,7 +108,7 @@ skrivli-X.Y.Z-windows-x64/
 
 ### 5.1 Configuration
 
-`release.toml` in the repository root:
+`[package.metadata.release]` in `Cargo.toml` (moved from `release.toml`; see `decisions.md`):
 
 ```toml
 allow-branch = ["main"]
@@ -179,13 +179,13 @@ jobs:
 1. Check out the tag with full history (`fetch-depth: 0`, for the notes).
 2. Fail unless the tag equals `v` + `[package] version` from `Cargo.toml`.
 3. `cargo build --release --locked`. Then check the exe: `VersionInfo.ProductVersion` is `X.Y.Z` and `VersionInfo.FileVersionRaw` is `X.Y.Z.0`.
-4. Generate `licenses/THIRD-PARTY.txt` with `cargo about`.
-5. `scripts/package.ps1 -Version X.Y.Z`.
-6. Build the notes file: `.github/release-notes-header.md` with the ZIP's SHA-256 filled in, then the commits since the previous tag. Find the previous tag with `git describe --tags --abbrev=0 vX.Y.Z^`, and list the commits with `git log --no-merges --pretty="- %s" <prev>..vX.Y.Z`. For the first release, with no previous tag, the list is replaced by "First public release."
+4. Generate `releases/licenses/THIRD-PARTY.txt` with `cargo about -c releases/about.toml`.
+5. `releases/package.ps1 -Version X.Y.Z`.
+6. Build the notes file: `releases/release-notes-header.md` with the ZIP's SHA-256 filled in, then the commits since the previous tag. Find the previous tag with `git describe --tags --abbrev=0 vX.Y.Z^`, and list the commits with `git log --no-merges --pretty="- %s" <prev>..vX.Y.Z`. For the first release, with no previous tag, the list is replaced by "First public release."
 7. `gh release create vX.Y.Z <zip> <zip.sha256> --title "Skrivli X.Y.Z" --notes-file <file> --latest --verify-tag`. If the release already exists because this is a re-run, run `gh release upload vX.Y.Z <zip> <zip.sha256> --clobber` instead. Then re-running the job is always safe.
 8. Upload the ZIP as a workflow artifact too (kept 7 days).
 
-The header in `.github/release-notes-header.md` covers:
+The header in `releases/release-notes-header.md` covers:
 
 - how to install (unzip anywhere, run `skrivli.exe`),
 - SmartScreen: "Windows may say it protected your PC. Choose More info → Run anyway. The app is not code-signed yet.",
@@ -229,7 +229,7 @@ Do them in this order. Each is one reviewable change. Write the failing check fi
 
 - [x] **R1 — Version source.** Remove the hardcoded versions from `build.rs`. Check: after `cargo build --release`, the exe's `ProductVersion` equals the `Cargo.toml` version and `FileVersionRaw` equals that version plus `.0`.
 - [x] **R2 — Licence and user files.** Add `LICENSE-MIT`, `LICENSE-APACHE`, the whisper.cpp licence, `README.txt` and `PRIVACY.txt` text for the ZIP. Decide on static CRT (`.cargo/config.toml`) and record it in `decisions.md`.
-- [x] **R3 — `scripts/package.ps1`.** Builds the ZIP and the SHA-256 and checks the contents. Check: the contents list matches 4.3 and has no `*.bin`/`*.pdb`. A missing file makes the script fail.
+- [x] **R3 — `releases/package.ps1`.** Builds the ZIP and the SHA-256 and checks the contents. Check: the contents list matches 4.3 and has no `*.bin`/`*.pdb`. A missing file makes the script fail.
 - [x] **R4 — `release.toml`.** Pin the `cargo-release` version in `decisions.md`. Check: `cargo release patch` (dry run) on a clean `main` exits 0, shows commit `Release v0.1.1`, tag `v0.1.1` and a push to `origin`, and leaves `git status` clean.
 - [x] **R5 — `ci.yml` changes.** `--locked`, `workflow_call`, push restricted to branches.
 - [ ] **R6 — `release.yml` and the notes header.** (Files written; the fork end-to-end check below is still open, so this stays unticked.) Check: on a fork, run `cargo release patch --execute`. A release appears with the ZIP, the `.sha256` and the notes. Run the job again and it still passes. Then delete the fork's release and tag.

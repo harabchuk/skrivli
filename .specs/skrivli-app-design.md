@@ -576,9 +576,9 @@ cargo build --release
 
 ### Build and release
 
-- Pushing a tag `vX.Y.Z` (made by `cargo release`) starts `.github/workflows/release.yml`. It runs `ci.yml` (`workflow_call`), builds on a Windows runner, runs `scripts/package.ps1` to produce the ZIP and its SHA-256, and publishes both with `gh release` immediately.
+- Pushing a tag `vX.Y.Z` (made by `cargo release`) starts `.github/workflows/release.yml`. It runs `ci.yml` (`workflow_call`), builds on a Windows runner, runs `releases/package.ps1` to produce the ZIP and its SHA-256, and publishes both with `gh release` immediately.
 - The version has one source, `Cargo.toml`. `build.rs` does not set it; the exe `VERSIONINFO` and the Settings footer (`CARGO_PKG_VERSION`) follow it.
-- The CRT is linked statically (`.cargo/config.toml`, `crt-static`). Third-party licence text is generated with `cargo about` (`about.toml`, `about.hbs`). Details: `skrivli-release-plan.md` and D-24 to D-28.
+- The CRT is linked statically (`.cargo/config.toml`, `crt-static`). Third-party licence text is generated with `cargo about` (`releases/about.toml`, `releases/about.hbs`). All release files live under `releases/`; cargo-release config is `[package.metadata.release]` in `Cargo.toml`. Details: `skrivli-release-plan.md` and D-24 to D-28.
 
 ---
 

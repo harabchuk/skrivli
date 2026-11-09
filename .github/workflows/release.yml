@@ -54,12 +54,12 @@ jobs:
         run: |
           cargo install cargo-about --locked --version 0.9.3 --features cli
           if ($LASTEXITCODE -ne 0) { throw 'cargo install cargo-about failed' }
-          cargo about generate --locked about.hbs -o licenses/THIRD-PARTY.txt
+          cargo about generate --locked -c releases/about.toml releases/about.hbs -o releases/licenses/THIRD-PARTY.txt
           if ($LASTEXITCODE -ne 0) { throw 'cargo about generate failed' }
 
       - name: Package
         shell: pwsh
-        run: ./scripts/package.ps1 -Version $env:VERSION
+        run: ./releases/package.ps1 -Version $env:VERSION
 
       - name: Build release notes
         shell: pwsh
@@ -67,7 +67,7 @@ jobs:
           $tag = '${{ github.ref_name }}'
           $zip = "target\dist\skrivli-$env:VERSION-windows-x64.zip"
           $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
-          $header = (Get-Content .github/release-notes-header.md -Raw).Replace('{{SHA256}}', $sha).Replace('{{VERSION}}', $env:VERSION)
+          $header = (Get-Content releases/release-notes-header.md -Raw).Replace('{{SHA256}}', $sha).Replace('{{VERSION}}', $env:VERSION)
           $prev = git describe --tags --abbrev=0 "$tag^" 2>$null
           if ($LASTEXITCODE -eq 0 -and $prev) {
             $commits = (git log --no-merges --pretty='- %s' "$prev..$tag") -join "`n"
