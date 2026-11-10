@@ -6,16 +6,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
 
 use crate::common::error::AppError;
 use crate::domain::ids::{JobId, RecordingId};
 use crate::domain::recording::TranscriptStatus;
-use crate::domain::transcript::{
-    format_transcript, plan_windows, stitch_segments, TranscriptSegment, WINDOW_DURATION,
-    WINDOW_OVERLAP,
-};
-use crate::infrastructure::ai::resample::pcm16_to_whisper_mono;
+use crate::domain::transcript::{format_transcript, TranscriptSegment};
+use crate::infrastructure::ai::resample::pcm16_to_16k_mono;
 use crate::infrastructure::files::transcript_reader::{TranscriptFlacReader, DEFAULT_CHUNK_FRAMES};
 use crate::infrastructure::storage::sidecar::{
     load_sidecar, transcript_path_for, update_transcription, write_transcript_text, SidecarLoad,
@@ -29,19 +25,16 @@ pub(crate) const NOTICE_CANCELLED: &str = "Transcription cancelled.";
 pub(crate) const NOTICE_MODEL: &str = "The transcription model file is missing or unsupported.";
 const DETAIL_IDENTITY: &str = "The recording changed before the transcript was saved.";
 
-/// Tunables for windowed decode. Production uses domain defaults; tests shrink them.
+/// Tunables for the streaming feed. Production uses the reader default; tests shrink it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TranscriptionConfig {
-    pub(crate) window: Duration,
-    pub(crate) overlap: Duration,
+    /// Frames read from the recording per feed. Cancel and progress are handled between feeds.
     pub(crate) read_frames: usize,
 }
 
 impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
-            window: WINDOW_DURATION,
-            overlap: WINDOW_OVERLAP,
             read_frames: DEFAULT_CHUNK_FRAMES,
         }
     }
@@ -1180,6 +1173,8 @@ fn is_model_error(error: &AppError) -> bool {
     )
 }
 
+/// Feeds the recording to the engine as one stream, one read-sized block at a time.
+/// Cancel is checked and progress reported between feeds.
 fn transcribe_file(
     inference: &mut dyn InferencePort,
     audio_path: &Path,
@@ -1190,28 +1185,16 @@ fn transcribe_file(
     let mut reader = TranscriptFlacReader::open(audio_path)?;
     let format = reader.format();
     let total_frames = reader.frames_remaining().unwrap_or(0);
-    let total_duration = if format.sample_rate() == 0 {
-        Duration::ZERO
-    } else {
-        Duration::from_secs_f64(total_frames as f64 / f64::from(format.sample_rate()))
-    };
-    let windows = plan_windows_with(config.window, config.overlap, total_duration);
-    if windows.is_empty() {
+    if total_frames == 0 {
         on_progress(100);
         return Ok(String::new());
     }
 
     let channels = usize::from(format.channels());
     let mut pcm = vec![0_i16; config.read_frames.saturating_mul(channels.max(1))];
-    let mut pending: Vec<f32> = Vec::new();
-    let mut window_results: Vec<(u64, Vec<TranscriptSegment>)> = Vec::new();
-    let window_samples = duration_to_whisper_samples(config.window);
-    let hop_samples =
-        duration_to_whisper_samples(config.window.saturating_sub(config.overlap)).max(1);
-    let overlap_ms = config.overlap.as_millis() as u64;
-    let total_windows = windows.len().max(1);
-    let mut next_offset_ms = 0_u64;
-    let mut completed_windows = 0_usize;
+    let mut stream = inference.begin_stream()?;
+    let mut segments: Vec<TranscriptSegment> = Vec::new();
+    let mut frames_fed = 0_u64;
 
     loop {
         if cancel.load(Ordering::Acquire) {
@@ -1222,89 +1205,24 @@ fn transcribe_file(
             break;
         }
         let samples = &pcm[..frames.saturating_mul(channels)];
-        let mono = pcm16_to_whisper_mono(samples, format.sample_rate(), format.channels())?;
-        pending.extend_from_slice(&mono);
-
-        while pending.len() >= window_samples {
-            if cancel.load(Ordering::Acquire) {
-                return Err(AppError::message("transcription cancelled", "cancel"));
-            }
-            let mut report = |local: u8| {
-                on_progress(overall_percent(completed_windows, total_windows, local));
-            };
-            let segments =
-                inference.transcribe_chunk(&pending[..window_samples], cancel, &mut report)?;
-            window_results.push((next_offset_ms, to_domain_segments(segments)));
-            pending.drain(..hop_samples.min(pending.len()));
-            next_offset_ms = next_offset_ms.saturating_add(samples_to_ms(hop_samples));
-            completed_windows = completed_windows.saturating_add(1);
+        let mono = pcm16_to_16k_mono(samples, format.sample_rate(), format.channels())?;
+        if !mono.is_empty() {
+            segments.extend(to_domain_segments(stream.feed(&mono)?));
         }
+        frames_fed = frames_fed.saturating_add(frames as u64);
+        on_progress(percent_fed(frames_fed, total_frames));
     }
 
-    if !pending.is_empty() {
-        if cancel.load(Ordering::Acquire) {
-            return Err(AppError::message("transcription cancelled", "cancel"));
-        }
-        let mut report = |local: u8| {
-            on_progress(overall_percent(completed_windows, total_windows, local));
-        };
-        let segments = inference.transcribe_chunk(&pending, cancel, &mut report)?;
-        window_results.push((next_offset_ms, to_domain_segments(segments)));
+    if cancel.load(Ordering::Acquire) {
+        return Err(AppError::message("transcription cancelled", "cancel"));
     }
-
-    let stitched = stitch_segments(&window_results, overlap_ms);
-    Ok(format_transcript(&stitched))
+    segments.extend(to_domain_segments(stream.finish()?));
+    Ok(format_transcript(&segments))
 }
 
-/// Overall percent from finished chunks and whisper's percent in the current one.
-/// Stays below 100 until the transcript is saved, even if the loop runs one chunk more
-/// than planned.
-fn overall_percent(completed: usize, planned: usize, local: u8) -> u8 {
-    let spanned = completed as u32 * 100 + u32::from(local);
-    (spanned / planned as u32).min(99) as u8
-}
-
-fn plan_windows_with(
-    window: Duration,
-    overlap: Duration,
-    total: Duration,
-) -> Vec<(Duration, Duration)> {
-    if total.is_zero() {
-        return Vec::new();
-    }
-    // Reuse domain planner when using production constants; otherwise replicate hop math.
-    if window == WINDOW_DURATION && overlap == WINDOW_OVERLAP {
-        return plan_windows(total)
-            .into_iter()
-            .map(|item| (item.offset(), item.end()))
-            .collect();
-    }
-    let hop = window.saturating_sub(overlap);
-    if hop.is_zero() {
-        return vec![(Duration::ZERO, total)];
-    }
-    let mut out = Vec::new();
-    let mut offset = Duration::ZERO;
-    loop {
-        let end = (offset + window).min(total);
-        out.push((offset, end));
-        if end >= total {
-            break;
-        }
-        offset = offset.saturating_add(hop);
-        if offset >= total {
-            break;
-        }
-    }
-    out
-}
-
-fn duration_to_whisper_samples(duration: Duration) -> usize {
-    ((duration.as_secs_f64() * 16_000.0).round() as usize).max(1)
-}
-
-fn samples_to_ms(samples: usize) -> u64 {
-    ((samples as u64).saturating_mul(1_000)) / 16_000
+/// Share of the recording fed so far. Stays below 100 until the transcript is saved.
+fn percent_fed(fed: u64, total: u64) -> u8 {
+    (fed.saturating_mul(100) / total.max(1)).min(99) as u8
 }
 
 fn to_domain_segments(segments: Vec<InferenceSegment>) -> Vec<TranscriptSegment> {
@@ -1357,8 +1275,8 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use super::{
-        overall_percent, transcribe_file, JobPhase, TranscriptionConfig, TranscriptionHost,
-        TranscriptionSnapshot, NOTICE_CANCELLED, NOTICE_DONE, NOTICE_FAILED, NOTICE_MODEL,
+        transcribe_file, JobPhase, TranscriptionConfig, TranscriptionHost, TranscriptionSnapshot,
+        NOTICE_CANCELLED, NOTICE_DONE, NOTICE_FAILED, NOTICE_MODEL,
     };
     use crate::common::error::AppError;
     use crate::domain::ids::RecordingId;
@@ -1366,7 +1284,9 @@ mod tests {
     use crate::infrastructure::storage::sidecar::{
         load_sidecar, write_sidecar, Sidecar, SidecarLoad, TranscriptionWrite,
     };
-    use crate::services::ports::{InferencePort, InferenceSegment, TranscriptNotifier};
+    use crate::services::ports::{
+        InferencePort, InferenceSegment, SpeechStream, TranscriptNotifier,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -1377,8 +1297,15 @@ mod tests {
         fail_load: bool,
         fail_chunk: bool,
         hold_ms: u64,
-        check_cancel_before_return: bool,
-        race_complete_then_cancel: Arc<AtomicBool>,
+        calls: Arc<Mutex<Vec<usize>>>,
+        segments: Vec<InferenceSegment>,
+    }
+
+    /// Returns the scripted segments on the first feed, like an engine that finishes a
+    /// sentence early. `hold_ms` slows every feed down.
+    struct FakeStream {
+        fail_chunk: bool,
+        hold_ms: u64,
         calls: Arc<Mutex<Vec<usize>>>,
         segments: Vec<InferenceSegment>,
     }
@@ -1393,45 +1320,30 @@ mod tests {
 
         fn unload(&mut self) {}
 
-        fn transcribe_chunk(
-            &mut self,
-            samples_f32_16k_mono: &[f32],
-            cancel: &Arc<AtomicBool>,
-            on_progress: &mut dyn FnMut(u8),
-        ) -> Result<Vec<InferenceSegment>, AppError> {
-            self.calls
-                .lock()
-                .expect("lock")
-                .push(samples_f32_16k_mono.len());
+        fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError> {
+            Ok(Box::new(FakeStream {
+                fail_chunk: self.fail_chunk,
+                hold_ms: self.hold_ms,
+                calls: Arc::clone(&self.calls),
+                segments: self.segments.clone(),
+            }))
+        }
+    }
+
+    impl SpeechStream for FakeStream {
+        fn feed(&mut self, samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
+            self.calls.lock().expect("lock").push(samples.len());
             if self.hold_ms > 0 {
-                let steps = (self.hold_ms / 20).max(1);
-                for _ in 0..steps {
-                    if cancel.load(Ordering::Acquire) {
-                        return Err(AppError::message("transcription cancelled", "cancel"));
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            }
-            if self.check_cancel_before_return && cancel.load(Ordering::Acquire) {
-                return Err(AppError::message("transcription cancelled", "cancel"));
-            }
-            if self.race_complete_then_cancel.swap(false, Ordering::AcqRel) {
-                // Simulate engine finishing just as cancel arrives.
-                on_progress(100);
-                if cancel.load(Ordering::Acquire) {
-                    return Err(AppError::message("transcription cancelled", "cancel"));
-                }
-                return Ok(self.segments.clone());
+                std::thread::sleep(Duration::from_millis(self.hold_ms));
             }
             if self.fail_chunk {
                 return Err(AppError::message("inference", "engine boom"));
             }
-            if cancel.load(Ordering::Acquire) {
-                return Err(AppError::message("transcription cancelled", "cancel"));
-            }
-            on_progress(50);
-            on_progress(100);
-            Ok(self.segments.clone())
+            Ok(std::mem::take(&mut self.segments))
+        }
+
+        fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError> {
+            Ok(Vec::new())
         }
     }
 
@@ -1481,17 +1393,19 @@ mod tests {
     }
 
     fn short_config() -> TranscriptionConfig {
-        TranscriptionConfig {
-            window: Duration::from_millis(200),
-            overlap: Duration::from_millis(40),
-            read_frames: 1_000,
-        }
+        TranscriptionConfig { read_frames: 1_000 }
     }
 
-    /// Records the highest percent the host had published when the first chunk ended.
+    /// Records the highest percent the host had published when the second feed arrived.
     struct LiveProgressInference {
         published: Arc<AtomicU8>,
-        seen_during_first_chunk: Arc<Mutex<Option<u8>>>,
+        seen_at_second_feed: Arc<Mutex<Option<u8>>>,
+    }
+
+    struct LiveProgressStream {
+        published: Arc<AtomicU8>,
+        seen_at_second_feed: Arc<Mutex<Option<u8>>>,
+        feeds: usize,
     }
 
     impl InferencePort for LiveProgressInference {
@@ -1501,35 +1415,44 @@ mod tests {
 
         fn unload(&mut self) {}
 
-        fn transcribe_chunk(
-            &mut self,
-            _samples_f32_16k_mono: &[f32],
-            _cancel: &Arc<AtomicBool>,
-            on_progress: &mut dyn FnMut(u8),
-        ) -> Result<Vec<InferenceSegment>, AppError> {
-            on_progress(50);
-            self.seen_during_first_chunk
-                .lock()
-                .expect("lock")
-                .get_or_insert(self.published.load(Ordering::Acquire));
+        fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError> {
+            Ok(Box::new(LiveProgressStream {
+                published: Arc::clone(&self.published),
+                seen_at_second_feed: Arc::clone(&self.seen_at_second_feed),
+                feeds: 0,
+            }))
+        }
+    }
+
+    impl SpeechStream for LiveProgressStream {
+        fn feed(&mut self, _samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
+            self.feeds += 1;
+            if self.feeds == 2 {
+                *self.seen_at_second_feed.lock().expect("lock") =
+                    Some(self.published.load(Ordering::Acquire));
+            }
+            Ok(Vec::new())
+        }
+
+        fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError> {
             Ok(Vec::new())
         }
     }
 
     #[test]
-    fn progress_is_published_while_a_chunk_is_decoding() {
+    fn progress_is_published_while_streaming() {
         // Arrange
         let dir = temp_dir("live-progress");
         let audio = dir.join("meeting.flac");
         write_pcm_flac(&audio, 48_000);
         seed_sidecar(&audio, 31);
-        let model = dir.join("ggml-base.bin");
-        fs::write(&model, b"ggml").expect("model");
+        let model = dir.join("model.gguf");
+        fs::write(&model, b"gguf").expect("model");
         let published = Arc::new(AtomicU8::new(0));
         let seen = Arc::new(Mutex::new(None));
         let fake = LiveProgressInference {
             published: Arc::clone(&published),
-            seen_during_first_chunk: Arc::clone(&seen),
+            seen_at_second_feed: Arc::clone(&seen),
         };
         let sink = Arc::clone(&published);
         let (host, handle) = TranscriptionHost::spawn_with_config(
@@ -1541,7 +1464,12 @@ mod tests {
         );
 
         // Act
-        host.enqueue(RecordingId::from_raw(31), audio, model, "base-q5_1");
+        host.enqueue(
+            RecordingId::from_raw(31),
+            audio,
+            model,
+            "nemotron-3.5-streaming-0.6b-q8_0",
+        );
         wait_until(&host, |snap| snap.phase == JobPhase::Done);
         host.shutdown();
         let _ = handle.join();
@@ -1552,9 +1480,38 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
-    /// Reports a fixed list of percents for every chunk.
+    /// What a scripted engine was fed.
+    #[derive(Default)]
+    struct FeedLog {
+        feeds: Vec<usize>,
+        finished: bool,
+    }
+
+    /// Engine that returns `per_feed[n]` for feed `n`, `tail` on finish, and can raise
+    /// the cancel flag after a number of feeds.
     struct ScriptedInference {
-        script: Vec<u8>,
+        per_feed: Vec<Vec<InferenceSegment>>,
+        tail: Vec<InferenceSegment>,
+        log: Arc<Mutex<FeedLog>>,
+        cancel_after_feeds: Option<(usize, Arc<AtomicBool>)>,
+    }
+
+    struct ScriptedStream {
+        per_feed: Vec<Vec<InferenceSegment>>,
+        tail: Vec<InferenceSegment>,
+        log: Arc<Mutex<FeedLog>>,
+        cancel_after_feeds: Option<(usize, Arc<AtomicBool>)>,
+    }
+
+    impl ScriptedInference {
+        fn new(per_feed: Vec<Vec<InferenceSegment>>, tail: Vec<InferenceSegment>) -> Self {
+            Self {
+                per_feed,
+                tail,
+                log: Arc::new(Mutex::new(FeedLog::default())),
+                cancel_after_feeds: None,
+            }
+        }
     }
 
     impl InferencePort for ScriptedInference {
@@ -1564,69 +1521,131 @@ mod tests {
 
         fn unload(&mut self) {}
 
-        fn transcribe_chunk(
-            &mut self,
-            _samples_f32_16k_mono: &[f32],
-            _cancel: &Arc<AtomicBool>,
-            on_progress: &mut dyn FnMut(u8),
-        ) -> Result<Vec<InferenceSegment>, AppError> {
-            self.script.iter().for_each(|percent| on_progress(*percent));
-            Ok(Vec::new())
+        fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError> {
+            Ok(Box::new(ScriptedStream {
+                per_feed: self.per_feed.clone(),
+                tail: self.tail.clone(),
+                log: Arc::clone(&self.log),
+                cancel_after_feeds: self.cancel_after_feeds.clone(),
+            }))
         }
     }
 
-    fn scripted_percents(label: &str, frames: usize, script: Vec<u8>) -> Vec<u8> {
+    impl SpeechStream for ScriptedStream {
+        fn feed(&mut self, samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
+            let mut log = self.log.lock().expect("lock");
+            let index = log.feeds.len();
+            log.feeds.push(samples.len());
+            if let Some((after, flag)) = &self.cancel_after_feeds {
+                if log.feeds.len() >= *after {
+                    flag.store(true, Ordering::Release);
+                }
+            }
+            Ok(self.per_feed.get(index).cloned().unwrap_or_default())
+        }
+
+        fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError> {
+            self.log.lock().expect("lock").finished = true;
+            Ok(self.tail)
+        }
+    }
+
+    fn segment(start_ms: u64, end_ms: u64, text: &str) -> InferenceSegment {
+        InferenceSegment {
+            start_ms,
+            end_ms,
+            text: text.into(),
+        }
+    }
+
+    /// Stream a 10,000-frame (10 feeds of 1,000 frames) recording through `engine`.
+    fn run_scripted(
+        label: &str,
+        engine: &mut ScriptedInference,
+        cancel: &Arc<AtomicBool>,
+    ) -> (Result<String, AppError>, Vec<u8>) {
         let dir = temp_dir(label);
         let audio = dir.join("clip.flac");
-        write_pcm_flac(&audio, frames);
+        write_pcm_flac(&audio, 10_000);
         let mut percents = Vec::new();
-        transcribe_file(
-            &mut ScriptedInference { script },
-            &audio,
-            &Arc::new(AtomicBool::new(false)),
-            short_config(),
-            &mut |percent| percents.push(percent),
-        )
-        .expect("transcribe");
+        let result = transcribe_file(engine, &audio, cancel, short_config(), &mut |percent| {
+            percents.push(percent)
+        });
         let _ = fs::remove_dir_all(dir);
-        percents
+        (result, percents)
     }
 
     #[test]
-    fn single_chunk_shows_the_engine_percent() {
+    fn streams_whole_file_in_read_sized_feeds_and_formats_segments() {
         // Arrange
-        let frames = 4_800;
+        let mut per_feed = vec![Vec::new(); 10];
+        per_feed[0] = vec![segment(0, 500, "first")];
+        per_feed[2] = vec![segment(2_000, 2_500, "second")];
+        let mut engine = ScriptedInference::new(per_feed, vec![segment(5_000, 5_500, "last")]);
+        let cancel = Arc::new(AtomicBool::new(false));
 
         // Act
-        let percents = scripted_percents("single-chunk", frames, vec![50]);
+        let (result, _) = run_scripted("stream-all", &mut engine, &cancel);
 
         // Assert
-        assert_eq!(percents, vec![50]);
+        let expected = crate::domain::transcript::format_transcript(&[
+            crate::domain::transcript::TranscriptSegment::new(0, 500, "first"),
+            crate::domain::transcript::TranscriptSegment::new(2_000, 2_500, "second"),
+            crate::domain::transcript::TranscriptSegment::new(5_000, 5_500, "last"),
+        ]);
+        assert_eq!(result.expect("transcript"), expected);
+        let log = engine.log.lock().expect("lock");
+        assert_eq!(log.feeds.len(), 10);
+        // 10,000 frames at 48 kHz are about 3,333 samples at 16 kHz, split over ten feeds.
+        let total: usize = log.feeds.iter().sum();
+        assert!((3_000..=3_700).contains(&total), "{:?}", log.feeds);
+        assert!(log.feeds.iter().all(|&len| (1..=400).contains(&len)));
+        assert!(log.finished);
     }
 
     #[test]
-    fn final_chunk_continues_from_its_share_of_the_job() {
+    fn cancel_between_feeds_stops_without_writing_transcript() {
         // Arrange
-        let frames = 14_400;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut engine = ScriptedInference::new(Vec::new(), vec![segment(0, 10, "never")]);
+        engine.cancel_after_feeds = Some((2, Arc::clone(&cancel)));
 
         // Act
-        let percents = scripted_percents("two-chunks", frames, vec![50]);
+        let (result, _) = run_scripted("cancel-feeds", &mut engine, &cancel);
 
         // Assert
-        assert_eq!(percents.last(), Some(&75));
+        let error = result.expect_err("cancelled");
+        assert!(super::is_cancel_error(&error));
+        let log = engine.log.lock().expect("lock");
+        assert_eq!(log.feeds.len(), 2);
+        assert!(!log.finished);
     }
 
     #[test]
-    fn overall_percent_holds_at_99_for_a_chunk_beyond_the_plan() {
+    fn progress_follows_samples_fed_and_holds_below_100() {
         // Arrange
-        let (completed, planned) = (1, 1);
+        let mut engine = ScriptedInference::new(Vec::new(), Vec::new());
+        let cancel = Arc::new(AtomicBool::new(false));
 
         // Act
-        let percent = overall_percent(completed, planned, 0);
+        let (result, percents) = run_scripted("progress", &mut engine, &cancel);
 
         // Assert
-        assert_eq!(percent, 99);
-        assert_eq!(overall_percent(0, 1, 100), 99);
+        result.expect("transcript");
+        assert_eq!(percents, vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 99]);
+    }
+
+    #[test]
+    fn finish_segments_are_kept() {
+        // Arrange
+        let mut engine = ScriptedInference::new(Vec::new(), vec![segment(100, 900, "only tail")]);
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        // Act
+        let (result, _) = run_scripted("finish-tail", &mut engine, &cancel);
+
+        // Assert
+        assert!(result.expect("transcript").contains("only tail"));
     }
 
     #[test]
@@ -1644,8 +1663,6 @@ mod tests {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 0,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::clone(&calls),
             segments: vec![InferenceSegment {
                 start_ms: 0,
@@ -1688,8 +1705,6 @@ mod tests {
             fail_load: false,
             fail_chunk: true,
             hold_ms: 0,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: Vec::new(),
         };
@@ -1732,8 +1747,6 @@ mod tests {
             fail_load: false,
             fail_chunk: true,
             hold_ms: 0,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: Vec::new(),
         };
@@ -1769,8 +1782,6 @@ mod tests {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 800,
-            check_cancel_before_return: true,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: vec![InferenceSegment {
                 start_ms: 0,
@@ -1810,8 +1821,6 @@ mod tests {
             fail_load: false,
             fail_chunk: true,
             hold_ms: 0,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: Vec::new(),
         };
@@ -1849,8 +1858,6 @@ mod tests {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 800,
-            check_cancel_before_return: true,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: vec![InferenceSegment {
                 start_ms: 0,
@@ -1894,13 +1901,10 @@ mod tests {
         seed_sidecar(&audio, 14);
         let model = dir.join("ggml-base.bin");
         fs::write(&model, b"ggml").expect("model");
-        let race = Arc::new(AtomicBool::new(true));
         let fake = FakeInference {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 50,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::clone(&race),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: vec![InferenceSegment {
                 start_ms: 0,
@@ -1950,8 +1954,6 @@ mod tests {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 0,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: Vec::new(),
         };
@@ -1972,21 +1974,19 @@ mod tests {
     }
 
     #[test]
-    fn long_input_stays_chunked_across_windows() {
-        // Arrange — ~0.5 s at 48 kHz with 200 ms windows → multiple infer calls.
+    fn long_input_is_fed_in_read_sized_blocks() {
+        // Arrange — 24,000 frames with 1,000-frame reads → many small feeds.
         let dir = temp_dir("chunk");
         let audio = dir.join("long.flac");
         write_pcm_flac(&audio, 24_000);
         seed_sidecar(&audio, 16);
-        let model = dir.join("ggml-base.bin");
-        fs::write(&model, b"ggml").expect("model");
+        let model = dir.join("model.gguf");
+        fs::write(&model, b"gguf").expect("model");
         let calls = Arc::new(Mutex::new(Vec::new()));
         let fake = FakeInference {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 0,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::clone(&calls),
             segments: vec![InferenceSegment {
                 start_ms: 0,
@@ -1998,23 +1998,16 @@ mod tests {
             TranscriptionHost::spawn_with_config(Box::new(fake), short_config(), Box::new(|_| {}));
 
         // Act
-        host.enqueue(RecordingId::from_raw(16), audio.clone(), model, "base-q5_1");
+        host.enqueue(RecordingId::from_raw(16), audio.clone(), model, "m");
         wait_until(&host, |snap| snap.phase == JobPhase::Done);
         host.shutdown();
         let _ = handle.join();
         let sizes = calls.lock().expect("lock").clone();
 
         // Assert
-        assert!(
-            sizes.len() >= 2,
-            "expected multiple windowed infer calls, got {sizes:?}"
-        );
+        assert!(sizes.len() >= 2, "expected multiple feeds, got {sizes:?}");
         let max = sizes.iter().copied().max().unwrap_or(0);
-        let window_cap = ((0.200_f64 * 16_000.0).round() as usize) + 64;
-        assert!(
-            max <= window_cap,
-            "infer chunk too large: max={max} cap={window_cap} sizes={sizes:?}"
-        );
+        assert!(max <= 400, "feed too large: max={max} sizes={sizes:?}");
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -2036,8 +2029,6 @@ mod tests {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 80,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: vec![InferenceSegment {
                 start_ms: 0,
@@ -2125,8 +2116,6 @@ mod tests {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 0,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: vec![InferenceSegment {
                 start_ms: 0,
@@ -2168,8 +2157,6 @@ mod tests {
             fail_load: false,
             fail_chunk: false,
             hold_ms: 0,
-            check_cancel_before_return: false,
-            race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
             calls: Arc::new(Mutex::new(Vec::new())),
             segments: vec![InferenceSegment {
                 start_ms: 0,

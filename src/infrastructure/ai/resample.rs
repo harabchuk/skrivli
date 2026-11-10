@@ -1,4 +1,4 @@
-//! Convert finalized PCM chunks to whisper.cpp input: 16 kHz mono `f32`.
+//! Convert finalized PCM chunks to speech engine input: 16 kHz mono `f32`.
 //!
 //! Explicit channel downmix plus Rubato FFT resampling with a Blackman–Harris
 //! anti-alias window. Leave [`crate::infrastructure::audio::resampler`] alone —
@@ -11,19 +11,19 @@ use rubato::{Fft, FixedSync, Resampler};
 
 use crate::common::error::AppError;
 
-/// Whisper.cpp expected sample rate.
-pub(crate) const WHISPER_SAMPLE_RATE: u32 = 16_000;
+/// Sample rate the speech engine expects.
+pub(crate) const SPEECH_SAMPLE_RATE: u32 = 16_000;
 /// FFT chunk size on the fixed input side.
 const FFT_CHUNK_FRAMES: usize = 1_024;
 
 /// Downmix interleaved PCM16 to mono `f32` in \[-1, 1\], then resample to 16 kHz.
-pub(crate) fn pcm16_to_whisper_mono(
+pub(crate) fn pcm16_to_16k_mono(
     interleaved: &[i16],
     sample_rate: u32,
     channels: u16,
 ) -> Result<Vec<f32>, AppError> {
     let mono = downmix_i16_to_mono_f32(interleaved, channels)?;
-    resample_mono_f32_to_whisper(&mono, sample_rate)
+    resample_mono_f32_to_16k(&mono, sample_rate)
 }
 
 /// Average channels into mono `f32`. `interleaved.len()` must be a multiple of `channels`.
@@ -59,8 +59,8 @@ pub(crate) fn downmix_i16_to_mono_f32(
     Ok(mono)
 }
 
-/// Anti-alias resample mono `f32` from `sample_rate` to [`WHISPER_SAMPLE_RATE`].
-pub(crate) fn resample_mono_f32_to_whisper(
+/// Anti-alias resample mono `f32` from `sample_rate` to [`SPEECH_SAMPLE_RATE`].
+pub(crate) fn resample_mono_f32_to_16k(
     mono: &[f32],
     sample_rate: u32,
 ) -> Result<Vec<f32>, AppError> {
@@ -70,13 +70,13 @@ pub(crate) fn resample_mono_f32_to_whisper(
     if mono.is_empty() {
         return Ok(Vec::new());
     }
-    if sample_rate == WHISPER_SAMPLE_RATE {
+    if sample_rate == SPEECH_SAMPLE_RATE {
         return Ok(mono.to_vec());
     }
 
     let mut resampler = Fft::<f32>::new(
         sample_rate as usize,
-        WHISPER_SAMPLE_RATE as usize,
+        SPEECH_SAMPLE_RATE as usize,
         FFT_CHUNK_FRAMES,
         1,
         FixedSync::Input,
@@ -99,8 +99,7 @@ fn i16_to_f32(sample: i16) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        downmix_i16_to_mono_f32, pcm16_to_whisper_mono, resample_mono_f32_to_whisper,
-        WHISPER_SAMPLE_RATE,
+        downmix_i16_to_mono_f32, pcm16_to_16k_mono, resample_mono_f32_to_16k, SPEECH_SAMPLE_RATE,
     };
     use std::f32::consts::PI;
 
@@ -159,10 +158,10 @@ mod tests {
         let input = sine_i16(48_000, 48_000, 1_000.0, 0.5);
 
         // Act
-        let output = pcm16_to_whisper_mono(&input, 48_000, 1).expect("resample");
+        let output = pcm16_to_16k_mono(&input, 48_000, 1).expect("resample");
 
         // Assert — about one second at 16 kHz (±2% for filter delay trim).
-        let expected = WHISPER_SAMPLE_RATE as usize;
+        let expected = SPEECH_SAMPLE_RATE as usize;
         let lo = expected * 98 / 100;
         let hi = expected * 102 / 100;
         assert!(
@@ -178,8 +177,8 @@ mod tests {
         let input = stereo_sine(48_000, 48_000, 1_000.0, 0.5);
 
         // Act
-        let output = pcm16_to_whisper_mono(&input, 48_000, 2).expect("resample");
-        let freq = estimate_peak_freq_hz(&output, WHISPER_SAMPLE_RATE);
+        let output = pcm16_to_16k_mono(&input, 48_000, 2).expect("resample");
+        let freq = estimate_peak_freq_hz(&output, SPEECH_SAMPLE_RATE);
         let level = rms(&output);
 
         // Assert
@@ -197,16 +196,12 @@ mod tests {
         let low = sine_i16(48_000, 48_000, 1_000.0, 0.8);
 
         // Act
-        let high_out = resample_mono_f32_to_whisper(
-            &downmix_i16_to_mono_f32(&high, 1).expect("downmix"),
-            48_000,
-        )
-        .expect("high");
-        let low_out = resample_mono_f32_to_whisper(
-            &downmix_i16_to_mono_f32(&low, 1).expect("downmix"),
-            48_000,
-        )
-        .expect("low");
+        let high_out =
+            resample_mono_f32_to_16k(&downmix_i16_to_mono_f32(&high, 1).expect("downmix"), 48_000)
+                .expect("high");
+        let low_out =
+            resample_mono_f32_to_16k(&downmix_i16_to_mono_f32(&low, 1).expect("downmix"), 48_000)
+                .expect("low");
 
         // Assert — anti-alias filter must crush energy above 8 kHz.
         let high_rms = rms(&high_out);

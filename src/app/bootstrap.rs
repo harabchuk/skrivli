@@ -16,7 +16,7 @@ use crate::common::logging;
 use crate::common::paths::AppPaths;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
 use crate::infrastructure::ai::fetch::UreqModelSource;
-use crate::infrastructure::ai::whisper::WhisperInference;
+use crate::infrastructure::ai::parakeet::ParakeetInference;
 use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCapture};
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::audio::sonora_steps::SonoraPipelineFactory;
@@ -243,7 +243,7 @@ fn spawn_workers(
     let notifier = platform::completion_notifier(notice_tx);
     let transcription_tx = tx.clone();
     let (transcription, transcription_thread) = TranscriptionHost::spawn_with_notifier(
-        Box::new(WhisperInference::new()),
+        Box::new(ParakeetInference::new()),
         crate::services::transcription::TranscriptionConfig::default(),
         notifier,
         Arc::new(AtomicBool::new(notify_on_transcript)),

@@ -142,7 +142,7 @@ pub(crate) trait DesktopShell: Send + Sync {
     fn set_window_visible(&self, visible: bool) -> bool;
     fn window_is_minimized(&self) -> bool;
     fn pick_recordings_folder(&self) -> Result<Option<PathBuf>, AppError>;
-    /// Native file dialog for a local GGML model. The speech-model prompt lists
+    /// Native file dialog for a local GGUF model. The speech-model prompt lists
     /// catalog variants instead; this stays for a later local-file picker.
     #[allow(dead_code)]
     fn pick_model_file(&self) -> Result<Option<PathBuf>, AppError>;
@@ -231,7 +231,8 @@ pub(crate) trait SingleInstance: Send + Sync {
     fn acquire(&self) -> Result<InstanceAcquire, AppError>;
 }
 
-/// One transcribed segment as plain values. No whisper.cpp types cross this boundary.
+/// One transcribed segment as plain values. No engine types cross this boundary.
+/// Times are milliseconds from the start of the stream that produced it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct InferenceSegment {
     pub(crate) start_ms: u64,
@@ -239,20 +240,27 @@ pub(crate) struct InferenceSegment {
     pub(crate) text: String,
 }
 
-/// Local speech inference. The real adapter lives in `infrastructure/ai/whisper.rs`.
-/// Progress is 0–100. Cancel is cooperative via `cancel`; implementations must not
+/// Local speech inference engine. The real adapter lives in `infrastructure/ai/parakeet.rs`.
+/// The engine loads one model, then opens streams over it. Implementations must not
 /// expose engine pointers or log transcript text / audio samples.
 pub(crate) trait InferencePort: Send {
     fn load(&mut self, model_path: &Path) -> Result<(), AppError>;
 
     fn unload(&mut self);
 
-    fn transcribe_chunk(
-        &mut self,
-        samples_f32_16k_mono: &[f32],
-        cancel: &Arc<AtomicBool>,
-        on_progress: &mut dyn FnMut(u8),
-    ) -> Result<Vec<InferenceSegment>, AppError>;
+    /// Open a recognition stream over the loaded model. The stream borrows the engine,
+    /// so only one stream exists at a time.
+    fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError>;
+}
+
+/// One recognition session fed with audio in order. Cancel and progress belong to the
+/// caller, which decides between feeds.
+pub(crate) trait SpeechStream {
+    /// Feed 16 kHz mono `f32` samples. Returns the segments finished by this audio, if any.
+    fn feed(&mut self, samples_f32_16k_mono: &[f32]) -> Result<Vec<InferenceSegment>, AppError>;
+
+    /// Flush the tail of the stream and return the remaining segments.
+    fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError>;
 }
 
 /// Byte source for a user-initiated model download.
@@ -280,16 +288,17 @@ pub(crate) trait PlaybackSession {
 
 #[cfg(test)]
 mod inference_port_tests {
-    use super::{InferencePort, InferenceSegment};
+    use super::{InferencePort, InferenceSegment, SpeechStream};
     use crate::common::error::AppError;
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
 
     struct FakeInference {
         loaded: bool,
         fail_load: bool,
-        segments: Vec<InferenceSegment>,
+    }
+
+    struct FakeStream {
+        fed: usize,
     }
 
     impl InferencePort for FakeInference {
@@ -305,77 +314,66 @@ mod inference_port_tests {
             self.loaded = false;
         }
 
-        fn transcribe_chunk(
-            &mut self,
-            samples_f32_16k_mono: &[f32],
-            cancel: &Arc<AtomicBool>,
-            on_progress: &mut dyn FnMut(u8),
-        ) -> Result<Vec<InferenceSegment>, AppError> {
+        fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError> {
             if !self.loaded {
                 return Err(AppError::message("inference", "model not loaded"));
             }
-            if cancel.load(Ordering::Acquire) {
-                return Err(AppError::message("transcription cancelled", "cancel"));
-            }
-            if samples_f32_16k_mono.is_empty() {
-                on_progress(100);
-                return Ok(Vec::new());
-            }
-            on_progress(50);
-            on_progress(100);
-            Ok(self.segments.clone())
+            Ok(Box::new(FakeStream { fed: 0 }))
+        }
+    }
+
+    impl SpeechStream for FakeStream {
+        fn feed(&mut self, samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
+            self.fed += samples.len();
+            Ok(vec![InferenceSegment {
+                start_ms: 0,
+                end_ms: 1_000,
+                text: "hello".into(),
+            }])
+        }
+
+        fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError> {
+            Ok(vec![InferenceSegment {
+                start_ms: 1_000,
+                end_ms: 2_000,
+                text: format!("tail after {}", self.fed),
+            }])
         }
     }
 
     #[test]
-    fn fake_port_reports_progress_and_segments() {
+    fn fake_port_streams_segments_and_flushes_the_tail() {
         // Arrange
         let mut fake = FakeInference {
             loaded: false,
             fail_load: false,
-            segments: vec![InferenceSegment {
-                start_ms: 0,
-                end_ms: 1_000,
-                text: "hello".into(),
-            }],
         };
-        let cancel = Arc::new(AtomicBool::new(false));
-        let mut percents = Vec::new();
+        fake.load(Path::new("model.gguf")).expect("load");
 
         // Act
-        fake.load(Path::new("ggml-base-q5_1.bin")).expect("load");
-        let segments = fake
-            .transcribe_chunk(&[0.0; 160], &cancel, &mut |p| percents.push(p))
-            .expect("transcribe");
+        let mut stream = fake.begin_stream().expect("stream");
+        let fed = stream.feed(&[0.0; 160]).expect("feed");
+        let tail = stream.finish().expect("finish");
 
         // Assert
-        assert_eq!(percents, vec![50, 100]);
-        assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0].text, "hello");
+        assert_eq!(fed[0].text, "hello");
+        assert_eq!(tail[0].text, "tail after 160");
         fake.unload();
         assert!(!fake.loaded);
     }
 
     #[test]
-    fn fake_port_honors_cancel_flag() {
+    fn fake_port_refuses_a_stream_before_load() {
         // Arrange
         let mut fake = FakeInference {
-            loaded: true,
+            loaded: false,
             fail_load: false,
-            segments: Vec::new(),
         };
-        let cancel = Arc::new(AtomicBool::new(true));
-        let mut saw_progress = false;
 
         // Act
-        let error = fake
-            .transcribe_chunk(&[0.0], &cancel, &mut |_| {
-                saw_progress = true;
-            })
-            .expect_err("cancelled");
+        let error = fake.begin_stream().err().expect("unloaded");
 
         // Assert
-        assert_eq!(error.user_message(), "Transcription was cancelled.");
-        assert!(!saw_progress);
+        assert_eq!(error.user_message(), "Could not run speech recognition.");
     }
 }
