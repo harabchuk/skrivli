@@ -151,7 +151,6 @@ pub(crate) struct TranscriptParagraph {
 }
 
 impl TranscriptParagraph {
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn start_ms(&self) -> Option<u64> {
         self.start_ms
     }

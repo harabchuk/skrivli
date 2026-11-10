@@ -140,6 +140,7 @@ Skrivli does not silently delete usable partial recordings. Leftover unfinished 
 - A warning note appears under the title when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
 - The player card has a round Play/Pause button, the current time, a seek bar and the total time. Play starts from the seek bar position, Pause keeps the position, and Play again resumes. Dragging the seek bar moves nothing until it is released. When a recording ends the player returns to the start. Every recording in the list can be played.
 - While a recording plays or is paused, the transcript paragraph being spoken is highlighted and the list scrolls to it when it changes. If you scroll the transcript yourself, it is not scrolled again for 5 seconds.
+- Clicking a transcript paragraph that has a timestamp moves playback to the start of that paragraph, the same as dropping the seek slider there. While playing it keeps playing; while paused it stays paused; while stopped nothing starts, the slider and time move to that point, and Play begins from there. Text before the first timestamp is not clickable.
 - Changing selection, renaming or deleting stops playback.
 - Users can also open the recordings folder (list header icon button) and refresh the list (list header icon button).
 - Rename keeps related files together (audio, transcript, and metadata) when possible; partial failures are reported.
