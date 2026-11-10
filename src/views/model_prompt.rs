@@ -422,7 +422,7 @@ mod tests {
     fn every_manifest_entry_name_marks_its_language() {
         // Arrange
         let manifest = ModelManifest::load_bundled().expect("manifest");
-        let marks = ["(Multilingual)", "(European)"];
+        let marks = ["(Multilingual)", "(European)", "(English)"];
 
         // Act
         let missing: Vec<&str> = manifest
