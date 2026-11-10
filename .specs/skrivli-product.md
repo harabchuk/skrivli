@@ -49,7 +49,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 - Resizable main window with two tabs: **Record** and **Recordings**.
 - Remembers size and position across launches (restored safely on the available display).
 - The status bar is shared by both tabs and reads the same on each: recording state, elapsed time, notices (including "Saved." after a recording), transcription progress, and the selected model. Warnings also appear as a banner on the Record tab.
-- A Settings gear on the tab bar opens Settings; Settings shows the transcription model in use (with its description and size) and a Change model button that opens the model dialog on top (Choose model when none is installed), the close-to-tray switch with a one-line explanation, and the app version in its footer. Opening the recordings folder and Exit remain available from the Recordings tab and the tray.
+- A Settings gear on the tab bar opens Settings; Settings shows the transcription model in use (with its description and size) and a Change model button that opens the model dialog on top (Choose model when none is installed), the close-to-tray switch with a one-line explanation, and the app version in its footer, followed by a "© 2026 Alexis Harabchuk" link that opens https://github.com/harabchuk/skrivli in the default browser. Opening the recordings folder and Exit remain available from the Recordings tab and the tray.
 - A theme button next to Settings cycles theme preference. Order is System → opposite of Windows → the other palette → System (light OS: System, Dark, Light; dark OS: System, Light, Dark). The icon and tooltip name the current choice; the preference is remembered across launches.
 
 ### System tray
@@ -137,7 +137,7 @@ Skrivli does not silently delete usable partial recordings. Leftover unfinished 
 
 - Selecting a recording shows a title row with its name in large text and a detail line below it (`Today, 14:32 · 12:41 · 38.0 MB · FLAC`), then a player card.
 - A pencil icon next to the name (dimmed until the title row is hovered) renames the recording. A trash icon and a `⋯` menu sit at the right of the title row. Delete asks for confirmation. The `⋯` menu has **Transcribe again…** (enabled only when the recording has a transcript and no job is queued or running) and **Show in folder**, which opens the recordings folder in Explorer. Every icon button has a tooltip and an accessibility label.
-- A warning note appears under the title when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
+- A warning note appears under the title when its details file is missing or unreadable, or when a problem was logged while recording that may have left audio missing (a lost device, a full disk or safe stop, a stalled capture, or a failed save). Routine timeline events such as small gaps, clock drift or buffer overruns, and processing fallbacks or device switches that keep the audio, show no note; they stay in the details file and the log. A clean recording shows no note.
 - The player card has a round Play/Pause button, the current time, a seek bar and the total time. Play starts from the seek bar position, Pause keeps the position, and Play again resumes. Dragging the seek bar moves nothing until it is released. When a recording ends the player returns to the start. Every recording in the list can be played.
 - While a recording plays or is paused, the transcript paragraph being spoken is highlighted and the list scrolls to it when it changes. If you scroll the transcript yourself, it is not scrolled again for 5 seconds.
 - Clicking a transcript paragraph that has a timestamp moves playback to the start of that paragraph, the same as dropping the seek slider there. While playing it keeps playing; while paused it stays paused; while stopped nothing starts, the slider and time move to that point, and Play begins from there. Text before the first timestamp is not clickable.
@@ -153,7 +153,7 @@ Skrivli does not silently delete usable partial recordings. Leftover unfinished 
 | (no badge) | No transcript yet |
 | Queued | Waiting to run |
 | *n*% | In progress |
-| Transcript (green) | Transcript available |
+| Book icon (green) | Transcript available; the tooltip says "Transcript" |
 | Failed | Last attempt failed and there is no transcript; audio is still intact. A failed or cancelled attempt on a recording that already has a transcript shows the transcript again, with no badge change |
 
 ---
@@ -187,7 +187,7 @@ Transcription runs **after** a recording is finished. It does not produce live c
 
 ### What the transcript area shows
 
-Under the player the Recordings detail pane shows exactly one of these states:
+Under the player the Recordings detail pane shows exactly one of these states. The No transcript, Queued and Running states are centred in the pane, horizontally and vertically.
 
 | State | What the user sees |
 | --- | --- |
@@ -266,7 +266,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 - Transcription models are separate: size and network use are disclosed when the user chooses to download.
 - Privacy notes and licensing notices ship with the package.
 - Releases are downloaded from the GitHub Releases page of `harabchuk/skrivli`. Each release has the portable ZIP and a SHA-256 checksum file for it. The executable is not code-signed, so Windows SmartScreen may warn on first launch; the README in the ZIP explains this.
-- Settings shows the app version in its footer, matching the version of the release.
+- Settings shows the app version in its footer, matching the version of the release, next to a copyright link to the project page.
 
 ### Happy-path acceptance (clean PC)
 

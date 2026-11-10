@@ -1,13 +1,12 @@
 //! Settings: the transcription model and app behaviour. Rendering never touches a worker.
 
 use gpui_kit::component::button::Button;
+use gpui_kit::component::link::Link;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{
-    div, Anchor, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window,
-};
+use gpui_kit::{Anchor, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window};
 
 use crate::domain::recording::{format_size, MaxMeetingDuration};
 use crate::ui::components::dialog_style::DIALOG_WIDTH;
@@ -97,6 +96,13 @@ pub(crate) struct SettingsHandlers<T, D, M> {
     pub(crate) on_change_model: M,
 }
 
+/// Where the copyright line in Settings links to.
+pub(crate) const REPO_URL: &str = "https://github.com/harabchuk/skrivli";
+
+pub(crate) fn copyright_text() -> &'static str {
+    "© 2026 Alexis Harabchuk"
+}
+
 pub(crate) fn version_text() -> String {
     format!("Skrivli {}", env!("CARGO_PKG_VERSION"))
 }
@@ -165,10 +171,16 @@ pub(crate) fn open_settings(
                     cx,
                 ))
                 .child(
-                    div()
+                    h_flex()
+                        .gap_2()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(version_text()),
+                        .child(version_text())
+                        .child(
+                            Link::new("settings-copyright")
+                                .href(REPO_URL)
+                                .child(copyright_text()),
+                        ),
                 ),
         )
     });
@@ -250,7 +262,7 @@ pub(crate) fn open_exit_while_recording(
 
 #[cfg(test)]
 mod tests {
-    use super::{settings_model_row, version_text, SettingsModelRow};
+    use super::{copyright_text, settings_model_row, version_text, SettingsModelRow, REPO_URL};
     use crate::views::state::ModelStatus;
 
     #[test]
@@ -322,5 +334,17 @@ mod tests {
 
         // Assert
         assert!(text.starts_with("Skrivli "));
+    }
+
+    #[test]
+    fn copyright_links_to_the_repository() {
+        // Arrange
+
+        // Act
+        let text = copyright_text();
+
+        // Assert
+        assert_eq!(text, "© 2026 Alexis Harabchuk");
+        assert_eq!(REPO_URL, "https://github.com/harabchuk/skrivli");
     }
 }

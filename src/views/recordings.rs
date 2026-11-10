@@ -10,6 +10,7 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::slider::{Slider, SliderState};
 use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
     h_flex, v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _,
 };
@@ -65,7 +66,7 @@ impl RecordingRow {
             .map(format_duration_ms)
             .unwrap_or_else(|| "—".to_string());
         let size = format_size(info.size_bytes());
-        let notes = recording_notes(info.sidecar(), !info.problems().is_empty())
+        let notes = recording_notes(info.sidecar(), info.problems())
             .into_iter()
             .map(SharedString::from)
             .collect();
@@ -174,17 +175,45 @@ const NOTE_SIDECAR_MALFORMED: &str =
 const NOTE_PROBLEMS: &str = "Problems occurred while recording. Parts of the audio may be missing.";
 
 /// Notes shown under the title of the detail pane. Empty for a clean recording.
-fn recording_notes(sidecar: SidecarState, has_problems: bool) -> Vec<&'static str> {
+fn recording_notes(sidecar: SidecarState, problems: &[String]) -> Vec<&'static str> {
     let mut notes = Vec::new();
     match sidecar {
         SidecarState::Present => {}
         SidecarState::Missing => notes.push(NOTE_SIDECAR_MISSING),
         SidecarState::Malformed => notes.push(NOTE_SIDECAR_MALFORMED),
     }
-    if has_problems {
+    if problems.iter().any(|code| is_serious_problem(code)) {
         notes.push(NOTE_PROBLEMS);
     }
     notes
+}
+
+/// Whether a recorded problem code may mean audio is really missing. Routine timeline
+/// events (gaps, drift, overruns) and fallbacks that keep the audio are not shown.
+fn is_serious_problem(code: &str) -> bool {
+    matches!(
+        code,
+        "capture"
+            | "loopback"
+            | "disk"
+            | "safe_stop"
+            | "stall"
+            | "save_error"
+            | "worker"
+            | "worker_panic"
+    )
+}
+
+/// Whether a pane sits in the middle of the transcript area.
+fn pane_is_centered(pane: &TranscriptPane) -> bool {
+    match pane {
+        TranscriptPane::NoTranscript | TranscriptPane::Queued | TranscriptPane::Running { .. } => {
+            true
+        }
+        TranscriptPane::Failed { .. }
+        | TranscriptPane::Ready
+        | TranscriptPane::Unreadable { .. } => false,
+    }
 }
 
 /// What the right edge of a list row shows.
@@ -337,13 +366,24 @@ pub(crate) fn recording_list_row(
         .child(row_badge(row.badge, cx))
 }
 
-fn row_badge(badge: RowBadge, cx: &App) -> Div {
+fn row_badge(badge: RowBadge, cx: &App) -> AnyElement {
     let theme = cx.theme();
+    if badge == RowBadge::Ready {
+        return div()
+            .id("transcript-badge")
+            .flex_none()
+            .flex()
+            .items_center()
+            .text_color(theme.success)
+            .tooltip(|window, cx| Tooltip::new("Transcript").build(window, cx))
+            .child(Icon::new(IconName::BookOpen).xsmall())
+            .into_any_element();
+    }
     let (text, color) = match badge {
-        RowBadge::None => return div(),
+        RowBadge::None => return div().into_any_element(),
         RowBadge::Queued => (SharedString::from("Queued"), theme.muted_foreground),
         RowBadge::Progress(percent) => (SharedString::from(format!("{percent}%")), theme.primary),
-        RowBadge::Ready => (SharedString::from("Transcript"), theme.success),
+        RowBadge::Ready => return div().into_any_element(),
         RowBadge::Failed => (SharedString::from("Failed"), theme.danger),
     };
     div()
@@ -357,6 +397,7 @@ fn row_badge(badge: RowBadge, cx: &App) -> Div {
             el.child(Spinner::new().xsmall().color(color))
         })
         .child(text)
+        .into_any_element()
 }
 
 /// A click handler shared between buttons and menu items.
@@ -577,8 +618,19 @@ fn pane_frame() -> Div {
     v_flex().gap_3().py_5().items_start()
 }
 
-fn no_transcript_pane(actions: &RecordingsActions, cx: &App) -> Div {
-    pane_frame()
+/// Frame for the empty and progress states: centred in the transcript area.
+fn centered_pane_frame() -> Div {
+    v_flex()
+        .flex_1()
+        .min_h_0()
+        .gap_3()
+        .items_center()
+        .justify_center()
+        .text_center()
+}
+
+fn no_transcript_pane(frame: Div, actions: &RecordingsActions, cx: &App) -> Div {
+    frame
         .child(pane_text(
             "No transcript yet",
             Some("Runs on this PC. Your audio never leaves it.".into()),
@@ -592,8 +644,8 @@ fn no_transcript_pane(actions: &RecordingsActions, cx: &App) -> Div {
         )
 }
 
-fn queued_pane(actions: &RecordingsActions, cx: &App) -> Div {
-    pane_frame()
+fn queued_pane(frame: Div, actions: &RecordingsActions, cx: &App) -> Div {
+    frame
         .child(pane_text(
             "Queued",
             Some("Starts when the current transcription finishes.".into()),
@@ -602,8 +654,8 @@ fn queued_pane(actions: &RecordingsActions, cx: &App) -> Div {
         .children(cancel_button(actions))
 }
 
-fn running_pane(percent: u8, actions: &RecordingsActions, cx: &App) -> Div {
-    pane_frame()
+fn running_pane(frame: Div, percent: u8, actions: &RecordingsActions, cx: &App) -> Div {
+    frame
         .child(pane_text(
             "Transcribing",
             Some(format!("{percent}%").into()),
@@ -669,10 +721,15 @@ fn transcript_pane_view(
     actions: &RecordingsActions,
     cx: &App,
 ) -> Div {
+    let frame = if pane_is_centered(&pane) {
+        centered_pane_frame()
+    } else {
+        pane_frame()
+    };
     match pane {
-        TranscriptPane::NoTranscript => no_transcript_pane(actions, cx),
-        TranscriptPane::Queued => queued_pane(actions, cx),
-        TranscriptPane::Running { percent } => running_pane(percent, actions, cx),
+        TranscriptPane::NoTranscript => no_transcript_pane(frame, actions, cx),
+        TranscriptPane::Queued => queued_pane(frame, actions, cx),
+        TranscriptPane::Running { percent } => running_pane(frame, percent, actions, cx),
         TranscriptPane::Failed { reason } => failed_pane(reason, actions, cx),
         TranscriptPane::Ready => ready_pane(list, actions),
         TranscriptPane::Unreadable { reason } => unreadable_pane(reason, cx),
@@ -1186,7 +1243,7 @@ mod tests {
             None,
             TranscriptStatus::Ready,
             SidecarState::Present,
-            vec!["gap".into()],
+            vec!["disk".into()],
         );
 
         // Act
@@ -1352,14 +1409,14 @@ mod tests {
         use super::{recording_notes, NOTE_PROBLEMS};
 
         // Arrange
-        let clean = (SidecarState::Present, false);
+        let serious = vec!["capture".to_string()];
 
         // Act
-        let none = recording_notes(clean.0, clean.1);
-        let missing = recording_notes(SidecarState::Missing, false);
-        let malformed = recording_notes(SidecarState::Malformed, false);
-        let problems = recording_notes(SidecarState::Present, true);
-        let all = recording_notes(SidecarState::Missing, true);
+        let none = recording_notes(SidecarState::Present, &[]);
+        let missing = recording_notes(SidecarState::Missing, &[]);
+        let malformed = recording_notes(SidecarState::Malformed, &[]);
+        let problems = recording_notes(SidecarState::Present, &serious);
+        let all = recording_notes(SidecarState::Missing, &serious);
 
         // Assert
         assert!(none.is_empty());
@@ -1368,6 +1425,66 @@ mod tests {
         assert_ne!(missing, malformed);
         assert_eq!(problems, [NOTE_PROBLEMS]);
         assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn recording_notes_ignore_routine_problem_codes() {
+        use super::{recording_notes, NOTE_PROBLEMS};
+
+        // Arrange
+        let codes = |list: &[&str]| list.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        let routine = codes(&[
+            "gap",
+            "drift",
+            "discontinuity",
+            "overrun",
+            "audio_processing",
+            "source_change",
+        ]);
+        let serious = [
+            "capture",
+            "loopback",
+            "disk",
+            "safe_stop",
+            "stall",
+            "save_error",
+            "worker",
+            "worker_panic",
+        ];
+        let mixed = codes(&["gap", "disk", "drift"]);
+
+        // Act
+        let routine_notes = recording_notes(SidecarState::Present, &routine);
+        let mixed_notes = recording_notes(SidecarState::Present, &mixed);
+
+        // Assert
+        assert!(routine_notes.is_empty());
+        assert_eq!(mixed_notes, [NOTE_PROBLEMS]);
+        for code in serious {
+            let notes = recording_notes(SidecarState::Present, &codes(&[code]));
+            assert_eq!(notes, [NOTE_PROBLEMS], "{code}");
+        }
+    }
+
+    #[test]
+    fn centered_panes_are_the_empty_and_progress_states() {
+        use super::{pane_is_centered, TranscriptPane};
+
+        // Arrange
+        let centered = [
+            TranscriptPane::NoTranscript,
+            TranscriptPane::Queued,
+            TranscriptPane::Running { percent: 5 },
+        ];
+        let left = [
+            TranscriptPane::Ready,
+            TranscriptPane::Failed { reason: None },
+            TranscriptPane::Unreadable { reason: "x".into() },
+        ];
+
+        // Act / Assert
+        assert!(centered.iter().all(pane_is_centered));
+        assert!(!left.iter().any(pane_is_centered));
     }
 
     #[test]
