@@ -113,6 +113,7 @@ pub(crate) struct MainWindow {
     library_scroll: VirtualListScrollHandle,
     levels: Arc<LevelSnapshot>,
     gain_control: Arc<GainControl>,
+    system_gain_control: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
     catalog: DeviceCatalog,
     mic_labels: Vec<SharedString>,
@@ -121,6 +122,8 @@ pub(crate) struct MainWindow {
     system_choices: Vec<StoredEndpoint>,
     gain_slider: Entity<SliderState>,
     _gain_sub: Subscription,
+    system_gain_slider: Entity<SliderState>,
+    _system_gain_sub: Subscription,
     seek_slider: Entity<SliderState>,
     _seek_sub: Subscription,
     /// Position under the thumb while the user drags it. Playback updates are ignored.
@@ -158,6 +161,7 @@ impl MainWindow {
         models_dir: PathBuf,
         levels: Arc<LevelSnapshot>,
         gain_control: Arc<GainControl>,
+        system_gain_control: Arc<GainControl>,
         targets: Arc<MonitorTargets>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -187,6 +191,21 @@ impl MainWindow {
             |this, _slider, event: &SliderEvent, _window, cx| {
                 let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
                 this.set_slider_gain(value.start(), cx);
+            },
+        );
+        let system_gain_slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(4.0)
+                .step(0.1)
+                .default_value(settings.system_gain())
+        });
+        let system_gain_sub = cx.subscribe_in(
+            &system_gain_slider,
+            window,
+            |this, _slider, event: &SliderEvent, _window, cx| {
+                let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
+                this.set_system_slider_gain(value.start(), cx);
             },
         );
         let seek_slider = cx.new(|_| {
@@ -306,6 +325,7 @@ impl MainWindow {
             library_scroll: VirtualListScrollHandle::new(),
             levels,
             gain_control,
+            system_gain_control,
             targets,
             catalog: DeviceCatalog::empty(),
             mic_labels: labels,
@@ -314,6 +334,8 @@ impl MainWindow {
             system_choices,
             gain_slider,
             _gain_sub: gain_sub,
+            system_gain_slider,
+            _system_gain_sub: system_gain_sub,
             seek_slider,
             _seek_sub: seek_sub,
             seek_drag: None,
@@ -687,6 +709,14 @@ impl MainWindow {
     fn set_slider_gain(&mut self, gain: f32, cx: &mut Context<Self>) {
         self.gain_control.set_slider(gain);
         self.settings.set_mic_gain(self.gain_control.slider());
+        self.hooks.save_settings(self.settings.clone());
+        cx.notify();
+    }
+
+    fn set_system_slider_gain(&mut self, gain: f32, cx: &mut Context<Self>) {
+        self.system_gain_control.set_slider(gain);
+        self.settings
+            .set_system_gain(self.system_gain_control.slider());
         self.hooks.save_settings(self.settings.clone());
         cx.notify();
     }
@@ -1655,6 +1685,8 @@ impl Render for MainWindow {
                     ),
                     gain: &self.gain_slider,
                     gain_label: SharedString::from(format_gain(self.settings.mic_gain())),
+                    system_gain: &self.system_gain_slider,
+                    system_gain_label: SharedString::from(format_gain(self.settings.system_gain())),
                     locked,
                     phase,
                     elapsed: SharedString::from(elapsed),
