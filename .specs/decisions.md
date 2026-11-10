@@ -350,6 +350,8 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 ## D-33 — parakeet.cpp pin and streaming Nemotron (2026-11-10)
 
+> Superseded in part by D-34: the engine is no longer driven as a stream. The pin, build, CPU requirement, model digest and segment rules still hold. The streaming calls, the 2 s feed gathering (`MIN_FEED_SAMPLES`) and the "cancel within a couple of seconds" figure are gone.
+
 **Outcome:** Whisper is replaced by **parakeet.cpp v0.6.1** (MIT, tag `v0.6.1`, commit `5c9b0fbbd8e611d88e47d7e1ebae9bca9b447e8f`) running **`nvidia/nemotron-3.5-asr-streaming-0.6b` at Q8_0**. It replaces D-07, the D-08 table and the D-18 window size. The Nemotron model is multilingual (40 locales, automatic language ID) and licensed OpenMDW-1.1. TDT and other chunk-based Parakeet models are out of scope.
 
 **Header checked at the tag (`include/parakeet_capi.h`, ABI version 10):**
@@ -371,3 +373,25 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 **Not verified:** a Swedish recording and a recording of an hour or more (memory over time). `dumpbin /dependents` on the release exe shows no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports. Streaming quality when the 1 s FLAC blocks are resampled one by one (existing behaviour, edge effects every second) was not compared with a single resample.
 
 **Settings and old files:** `selected_model` defaults to the Nemotron id. A stored Whisper id stays in `settings.json`, matches no installed file, and shows "No model installed". Old `ggml-*.bin` files are neither listed nor deleted.
+
+## D-34 — Offline pieces cut at pauses (2026-11-10)
+
+**Outcome:** the recording is no longer fed to the engine as one stream. After recording it is cut at pauses into pieces of about 8 to 30 s, and each piece is transcribed offline with `parakeet_capi_transcribe_pcm_batch_json` (one clip, 16 kHz, decoder 0 = the model's own decoder). This supersedes the streaming parts of D-33.
+
+**Findings (a real 2:20 Swedish recording with two speakers, Nemotron 3.5 Q8_0):**
+- Streaming over one long stream dropped four whole phrases of 1.7 to 5 s, mostly at male to female handovers. Examples: "Problemet är inte att tolka runorna" at about 41 s and "Ok, låt oss backa bandet till vikingatiden" at about 19 s. The audio was clear. Skrivli does no speaker recognition, so the speakers are not the cause in themselves.
+- Offline (full-context) transcription of the same audio recovered them, and so did a fresh short stream over a window around the gap.
+- State carried over a long stream is the trigger: a stream that had run for about 20 s still dropped the phrase, one with about 5 s of history did not. Resetting the RNN-T decoder on language tags made it worse, which points at the streaming encoder's attention cache rather than the decoder.
+- parakeet.cpp checked streaming Nemotron against NeMo only on short single-speaker clips (`docs/parity.md`), so long multi-speaker input is outside its parity evidence.
+
+**Cut rules (`domain/cut_plan.rs`, relative to the start of the open piece):** `MIN_PIECE` 8 s (earlier pauses are ignored); from `PREFERRED_PIECE` 20 s the middle of the first pause of at least `MIN_PAUSE` 300 ms (once it has ended) is a cut; at `MAX_PIECE` 30 s the middle of the longest pause after 8 s is cut, or the frame with the lowest speech score when there is no silence at all. A recording shorter than 8 s is one piece. The planner holds only the frames of the open piece.
+
+**Energy detector (`infrastructure/audio/energy_pause.rs`):** 20 ms frames (320 samples), RMS in dBFS, noise floor = 10th percentile of frame loudness over the last 10 s (500 frames), a frame is silent below floor + 8 dB or below -50 dBFS, speech score = dB above floor / 30 clamped to 0..1. Detection runs on the transcription worker on the same 16 kHz mono audio the engine gets, so its times match the engine's word times. A Silero detector (already in parakeet.cpp) can replace it behind the `PauseDetector` port.
+
+**Cancel-latency trade-off:** the engine has no abort callback, so cancel is checked between pieces. A piece of 30 s or less takes about 8 s on the reference laptop (about 3.6x real time), so the worst-case cancel is about 8 s instead of about 1 s. The product spec says "within about 10 seconds". Progress is reported per piece (samples transcribed over total samples, held below 100 until saved), so it moves in steps of up to 30 s of audio.
+
+**Adapter:** pieces under 100 ms (1,600 samples) return no segments without an engine call. The streaming FFI declarations, `ParakeetStream`, `FeedBuffer` and `MIN_FEED_SAMPLES` are removed. Words are grouped by a fresh `Segmenter` per piece (sentence end or 60 words), language tags stripped, and times are shifted by the piece start in the service.
+
+**Result with pieces (Nemotron 3.5 Q8_0, same recording, release build, energy detector):** both example phrases are present. 7 pieces, 11.9 s for 2:20 of audio, about 11.7x real time on the reference laptop.
+
+**Model results:** (to be filled in by the model-list change: speed and quality of each model on the same recording.)

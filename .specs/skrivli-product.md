@@ -170,7 +170,7 @@ Transcription runs **after** a recording is finished. It does not produce live c
 - After installation, transcription works fully offline.
 - One model is offered: **Nemotron Streaming (Multilingual)**, NVIDIA's Nemotron 3.5 ASR streaming 0.6B at Q8_0, a download of about 984 MB (938.1 MB as the app shows it). It covers 40 languages, including English and Swedish, and adds punctuation and capitalization itself. The language is detected automatically, so there is no language setting; a language choice is a possible later addition.
 - Whisper models are no longer offered. Models downloaded before this change stay on disk, are not listed, and are never deleted. A user who had a Whisper model selected sees "No model installed · Choose…" and picks the new model the next time they press Transcribe.
-- The recording is fed to the model as a continuous stream after recording stops, so long recordings are not cut into windows. Transcription still starts only after the recording is finished, and cancel takes effect within a couple of seconds.
+- After recording stops, the recording is cut at pauses in the speech into short pieces of about 8 to 30 seconds, and each piece is transcribed on its own. This recovers phrases that one long continuous pass can drop, for example right after one speaker hands over to another. Transcription still starts only after the recording is finished, and cancel takes effect within about 10 seconds (the piece being transcribed finishes first).
 
 ### Creating a transcript
 

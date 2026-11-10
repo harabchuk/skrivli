@@ -5,7 +5,7 @@
 **UI:** **GPUI Kit** (`gpui-kit`) on GPUI, with its styled component library; pin a Windows-tested version  
 **Status:** Greenfield application design and phased implementation plan.
 
-Skrivli records microphone and system playback audio concurrently, aligns and mixes the sources into a local audio file, and optionally transcribes a completed recording with an offline streaming speech model. It operates from a desktop window and Windows notification area (system tray).
+Skrivli records microphone and system playback audio concurrently, aligns and mixes the sources into a local audio file, and optionally transcribes a completed recording with an offline speech model, one short piece at a time. It operates from a desktop window and Windows notification area (system tray).
 
 This document defines a new Windows-first application built from scratch with Rust and **GPUI Kit**. **`AGENTS.md` is authoritative for source placement, layering and coding conventions.** Use **GPUI Kit as the primary application UI framework**, including its bundled, compatible GPUI runtime and styled components; verify the pinned Kit version on Windows before committing to window/tray integration APIs.
 
@@ -56,7 +56,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | Device format conversion | flexaudio normalizer to 48 kHz stereo `f32`. The pipeline's Rubato nudge runs on the session thread | Internal 48 kHz stereo `f32`; device ids from `flexaudio::devices()` |
 | Audio pipeline | `Pipeline` on the session thread, bounded SPSC buffers | Align, mono microphone downmix, echo cancellation, sonora microphone gain, fixed system gain, sum, soft limit, peak taps |
 | Recording | `flac-codec` 1.3 `FlacSampleWriter`, PCM16 stereo 48 kHz, level 5 | Streamed straight to `.flac.partial`; renamed to `.flac` on finalize. FLAC is the only container |
-| Transcription | parakeet.cpp v0.6.1 (submodule, C API declared by hand, built by `build.rs`) | Local CPU streaming inference; static `/MT` build, no GPU backends (D-33) |
+| Transcription | parakeet.cpp v0.6.1 (submodule, C API declared by hand, built by `build.rs`) | Local CPU inference of short pieces (offline `transcribe_pcm_batch_json`, D-34); static `/MT` build, no GPU backends (D-33) |
 | Default model | Nemotron 3.5 ASR Streaming 0.6B, Q8_0 GGUF, verified against the manifest hash | Model isn't shipped; download only after user confirmation |
 | Persistent settings | `serde` + `serde_json` under `%APPDATA%\Skrivli\settings.json` | Atomic replacement and validation |
 | Recordings/metadata | Filesystem + JSON sidecars | Avoid DB for v1 |
@@ -112,7 +112,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
  │ infrastructure/                                                      │
  │  audio: flexaudio mic + loopback → SPSC → Pipeline → peak snapshots │
  │  files: FLAC writer / Rodio output / writability probe │
- │  ai: decode → 16 kHz mono → parakeet.cpp stream → transcript                  │
+ │  ai: decode → 16 kHz mono → pause detector → cut planner → parakeet.cpp piece │
  │  storage: settings / library / sidecars (no OS APIs)                 │
  │  platform/: shell, tray, trash, watch, replace, clocks, disk, wake   │
  └───────────────────────────────────────────────────────────────────────┘
@@ -405,27 +405,27 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 
 - The engine is parakeet.cpp **v0.6.1**, vendored as the git submodule `third_party/parakeet.cpp` and built by `build.rs` through the `cmake` crate as static, CPU-only libraries (`parakeet`, `ggml`, `ggml-base`, `ggml-cpu`) with the static MSVC runtime. The exact flags, ABI version and pin are in D-33. Licences for parakeet.cpp and ggml ship in `releases/licenses/parakeet.cpp-MIT.txt`.
 - The flat C API (`include/parakeet_capi.h`) is declared by hand in a private `ffi` module of `infrastructure/ai/parakeet.rs`. That is the only module that holds engine pointers. There is no `-sys` crate and no bindgen, so a build needs no libclang. `load` checks `parakeet_capi_abi_version()` against the header version the declarations were written for.
-- Ownership. `ParakeetInference` owns the `parakeet_ctx*` and frees it in `Drop`. `ParakeetStream` borrows the engine (`&mut`), owns the `parakeet_stream*` and frees it in `Drop`. Every returned `char*` is copied and then released with `parakeet_capi_free_string`. Errors come from `parakeet_capi_last_error` / `parakeet_capi_load_error` into `AppError` with the `load model` and `inference` contexts. `ParakeetInference` is `Send` (the header documents a context as usable from several threads) and not `Sync`; it moves to the transcription worker.
-- The port is `InferencePort` (`load`, `unload`, `begin_stream`) plus `SpeechStream` (`feed`, `finish`) in `services/ports.rs`. A stream takes 16 kHz mono `f32` and returns finished `InferenceSegment`s with times in ms from the start of the stream. Another engine implements the same two traits; the service does not change.
-- Language is detected automatically by the model. Segments are built from the engine's word times: words are grouped until a sentence end (`. ? !`), an end-of-utterance event, or 60 words, and stray language tags such as `<en-US>` are removed. If a model returned text without word times, the segment spans the audio since the previous boundary.
-- Build CPU inference only. The engine has no abort or progress callback, so the service owns both between feeds.
+- Ownership. `ParakeetInference` owns the `parakeet_ctx*` and frees it in `Drop`. There is no stream object: each `transcribe` call is one self-contained engine call. Every returned `char*` is copied and then released with `parakeet_capi_free_string`. Errors come from `parakeet_capi_last_error` / `parakeet_capi_load_error` into `AppError` with the `load model` and `inference` contexts. `ParakeetInference` is `Send` (the header documents a context as usable from several threads) and not `Sync`; it moves to the transcription worker.
+- The port is `InferencePort` (`load`, `unload`, `transcribe(&mut self, samples_16k_mono: &[f32]) -> Result<Vec<InferenceSegment>, AppError>`) in `services/ports.rs`. `transcribe` takes one piece of 16 kHz mono `f32` (up to about 30 s) and returns `InferenceSegment`s with times in ms from the start of that piece. An empty or sub-100 ms piece returns no segments without calling the engine. Another engine implements the same trait; the service does not change. The adapter calls `parakeet_capi_transcribe_pcm_batch_json` with one clip, 16 kHz and decoder 0 (the model's own decoder); the result is a JSON array with one `{"text","words":[{"w","start","end","conf"}],"tokens"}` object.
+- Language is detected automatically by the model. Segments are built from the engine's word times: words are grouped until a sentence end (`. ? !`), or 60 words, and stray language tags such as `<en-US>` are removed. A fresh `Segmenter` is used per piece. If a model returned text without word times, the segment spans the whole piece.
+- Build CPU inference only. The engine has no abort or progress callback, so the service owns both between pieces.
 - Load the selected model once per job; unload when the job ends.
 - Nothing in the adapter logs transcript text or samples. Engine chatter goes to the process stderr, not into `tracing`.
 
-### 7.2 Input normalization and streaming
+### 7.2 Input normalization and pieces
 
 - Decode finalized `.flac` files with `flac-codec` in bounded chunks (`transcript_reader.rs`); refuse `.partial` and any non-FLAC file, naming the format. Other formats are not supported.
 - Convert each decoded block to **16 kHz mono `f32`** with explicit downmix and anti-alias resampling (`resample.rs`).
-- `transcribe_file` opens one `SpeechStream` per job and feeds it every block in order (about one second of 48 kHz stereo per read), then calls `finish`. There are no windows, overlap or de-duplication. A two-hour file is never held in memory.
-- Between feeds the service checks the cancel flag and reports progress as frames fed divided by total frames, held below 100 until the transcript is saved. The adapter gathers feeds into blocks of at least 2 s before calling the engine, because the engine drops and repeats words when fed shorter blocks (D-33). Cancel therefore takes effect within a couple of seconds.
+- Pipeline: `FLAC → 16 kHz mono → PauseDetector → CutPlanner → InferencePort::transcribe(piece) → add piece offset → format_transcript`. `transcribe_file` reads about one second of 48 kHz stereo per block, resamples it, pushes it to a `PauseDetector` (one per job, from the injected `PauseDetectorFactory`) and feeds the frames to a `CutPlanner`. It keeps only the samples of the open piece, so a two-hour file is never held in memory. Cuts are in ms and convert exactly to samples (16 per ms). Every sample lands in exactly one piece, in order, including audio after the last detector frame. There is no overlap or de-duplication.
+- For each cut and for the final piece the service checks cancel, calls `transcribe`, shifts the segment times by the piece start, and reports progress as samples transcribed over total samples, held below 100 until the transcript is saved. Cancel is also checked between read blocks. A piece of 30 s or less takes about 8 s on the reference laptop, so cancel takes effect within about 10 s (D-34).
 - Transcription runs after recording only. Feeding a growing file while recording is future work (section 14).
 - Keep audio source immutable during transcription. A failed job must never alter the recorded file.
 
-### 7.2a Pause detection and cut planning (wiring in progress)
+### 7.2a Pause detection and cut planning
 
-Status: the port, the planner and the energy detector exist and are unit tested; `transcribe_file` does not use them yet. Until it does, 7.2 describes the running behaviour.
+The port, the planner and the energy detector are wired into `transcribe_file` (7.2). `TranscriptionHost::spawn*` takes a `Box<dyn PauseDetectorFactory>` next to the inference port, and `app/bootstrap.rs` passes `EnergyPauseDetectorFactory`.
 
-- Planned flow: decoded audio, 16 kHz mono, `PauseDetector`, `CutPlanner`, one piece of at most 30 s, offline transcription of that piece, segment times shifted by the piece start. Detection runs on the transcription worker on the same audio the engine gets, so its times match the engine's. It is not part of the recording pipeline.
+- Flow: decoded audio, 16 kHz mono, `PauseDetector`, `CutPlanner`, one piece of at most 30 s, offline transcription of that piece, segment times shifted by the piece start. Detection runs on the transcription worker on the same audio the engine gets, so its times match the engine's. It is not part of the recording pipeline.
 - Port (`services/ports.rs`): `PauseDetector` (`push(&[f32]) -> Vec<VoiceFrame>`, `finish()`) and `PauseDetectorFactory` (`begin()` returns one detector per job, so a model-based detector can load once). `VoiceFrame` holds start and end in ms, `silent`, and `speech_score` from 0 to 1. It is defined in `domain/cut_plan.rs` and re-exported by the ports, because the domain planner reads it and the domain must not depend on services.
 - `domain/cut_plan.rs`: pure, incremental `CutPlanner`. Pauses before 8 s into a piece are ignored; from 20 s, the middle of the first pause of at least 300 ms is a cut; at 30 s the middle of the longest pause is cut, or the quietest frame when there is none. It keeps only the frames of the open piece.
 - `infrastructure/audio/energy_pause.rs`: 20 ms frames, RMS in dBFS, noise floor as the 10th percentile over the last 10 s, silent below floor + 8 dB or below -50 dBFS, score = dB above floor / 30 clamped. A Silero-based detector can replace it behind the same port.
@@ -671,7 +671,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 ## 14. Future work
 
 - Differentiate local microphone from remote participant speech using separate stems and/or diarization.
-- Live transcription by feeding the stream while recording, now that the engine API streams (see D-33).
+- Live transcription while recording. The streaming engine API exists (D-33) but dropped phrases on long streams (D-34), so this needs a separate design.
 - Local summaries and action items (e.g. llama.cpp), without cloud dependency by default.
 - Full-text transcript search across the recording library.
 - Optional ggml GPU acceleration on supported Windows systems, with a validated distribution path.
