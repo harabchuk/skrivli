@@ -95,7 +95,7 @@ Users can:
 - Start and stop recording; see a clear recording indicator and elapsed timer.
 - Read inline warnings for missing devices, permission problems, or storage issues.
 
-Device choices are locked while a recording is active; a lock icon replaces Change. The gain slider can stay adjustable during capture and is disabled while saving. Recordings save to the configured directory (default: a Skrivli folder under Documents when writable); the save location is chosen in Settings.
+Device choices are locked while a recording is active; a lock icon replaces Change. The gain slider can stay adjustable during capture and is disabled while saving. Recordings save to the configured directory (default for new installs: `%LOCALAPPDATA%\Skrivli\recordings`; installs from before that change keep their existing folder). The save location cannot be changed in the app yet.
 
 ### Starting and stopping
 
