@@ -23,12 +23,13 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, PostQuitMessage,
-    RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer, ShowWindow,
-    TrackPopupMenuEx, TranslateMessage, IDI_APPLICATION, MF_GRAYED, MF_STRING, SW_HIDE,
-    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE,
-    WM_CONTEXTMENU, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_QUERYENDSESSION,
-    WM_RBUTTONUP, WM_TIMER, WM_USER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
+    DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, KillTimer, LoadIconW,
+    LoadImageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
+    SetTimer, ShowWindow, TrackPopupMenuEx, TranslateMessage, HICON, IDI_APPLICATION, IMAGE_ICON,
+    LR_SHARED, MF_GRAYED, MF_STRING, SM_CXSMICON, SM_CYSMICON, SW_HIDE, TPM_NONOTIFY,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_CONTEXTMENU,
+    WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_QUERYENDSESSION, WM_RBUTTONUP,
+    WM_TIMER, WM_USER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 use crate::common::error::AppError;
@@ -38,6 +39,8 @@ use crate::services::ports::{HostCommand, Tray};
 const BALLOON_TITLE: &str = "Transcript ready";
 const BALLOON_BODY: &str = "A recording has a transcript.";
 
+/// Resource id `winresource` gives the embedded `resources/skrivli.ico`.
+const APP_ICON_RESOURCE: u16 = 1;
 /// Stable notify-icon GUID. Do not change it across builds.
 const TRAY_GUID: GUID = GUID::from_u128(0x7c3e_8a21_4b6d_4e91_9f2a_1d5c_8b0e_6a44);
 const TRAY_CALLBACK: u32 = WM_USER + 20;
@@ -207,6 +210,32 @@ fn remove_icon(hwnd: HWND) {
     let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &data) };
 }
 
+/// The embedded app icon (resource id 1) at the shell's small-icon size, so the
+/// tray matches the taskbar. Falls back to the stock icon so the tray is never blank.
+fn app_small_icon() -> Option<HICON> {
+    // SAFETY: the module handle is the running exe, and `LR_SHARED` icons are owned by
+    // the system and must not be destroyed.
+    let embedded = unsafe {
+        let module: HINSTANCE = GetModuleHandleW(None).ok()?.into();
+        LoadImageW(
+            module,
+            PCWSTR(APP_ICON_RESOURCE as usize as *const u16),
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON),
+            GetSystemMetrics(SM_CYSMICON),
+            LR_SHARED,
+        )
+    };
+    match embedded {
+        Ok(handle) => Some(HICON(handle.0)),
+        Err(error) => {
+            tracing::warn!(error = %error, "app icon was not loaded; using the stock icon");
+            // SAFETY: a stock icon handle is shared and needs no cleanup.
+            unsafe { LoadIconW(None, IDI_APPLICATION) }.ok()
+        }
+    }
+}
+
 fn icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
     let mut data = NOTIFYICONDATAW {
         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -217,7 +246,7 @@ fn icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
         guidItem: TRAY_GUID,
         ..Default::default()
     };
-    if let Ok(icon) = unsafe { LoadIconW(None, IDI_APPLICATION) } {
+    if let Some(icon) = app_small_icon() {
         data.hIcon = icon;
     }
     write_wide(&mut data.szTip, TOOLTIP);
