@@ -1,10 +1,5 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
 
-# Rust links the static CRT (+crt-static); build whisper.cpp/ggml with the
-# matching static MSVC runtime (/MT) or linking fails on __imp_* CRT symbols.
-# whisper-rs-sys forwards CMAKE_* env vars to its CMake build; CMP0091 must be
-# forced NEW because whisper.cpp declares cmake_minimum_required(3.5).
-[env]
-CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
-CMAKE_POLICY_DEFAULT_CMP0091 = "NEW"
+# parakeet.cpp/ggml are built from build.rs (cmake crate) with the matching static
+# MSVC runtime (/MT); see build.rs for the CMake flags.
