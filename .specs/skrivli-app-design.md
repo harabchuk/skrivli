@@ -564,7 +564,7 @@ Privacy by default: no accounts, telemetry, network transcription or automatic m
 - Build target: `x86_64-pc-windows-msvc` on a supported Windows 10/11 development machine. Verify the selected GPUI Kit distribution’s minimum Windows and compiler requirements on target machines.
 - Install the Rust toolchain and the required MSVC/Windows SDK build tools for Windows linking and any native dependencies.
 - Cargo owns application dependency graph. Pin the exact GPUI Kit version (and its compatible GPUI runtime); the speech engine is pinned by the `third_party/parakeet.cpp` submodule tag; commit `Cargo.lock` for the app.
-- `build.rs` builds the parakeet.cpp submodule with the `cmake` crate. Build hosts need CMake and Git, and a clone needs `--recurse-submodules`; CI checks out submodules. Keep C++ build flags scoped to the native library, and force `/O2` because the cmake crate would otherwise build the engine unoptimised in a dev profile.
+- `build.rs` builds the parakeet.cpp submodule with the `cmake` crate. Build hosts need CMake and Git, and a clone needs `--recurse-submodules`; The CI and release workflows must check out submodules (`submodules: recursive` on `actions/checkout`); that edit is still to be made in `.github/workflows/ci.yml` and `release.yml`. Keep C++ build flags scoped to the native library, and force `/O2` because the cmake crate would otherwise build the engine unoptimised in a dev profile.
 - Use `build.rs` and an appropriate resource compiler for Windows manifest, icon and version info; keep source resources in `resources/`.
 - Recommended local commands:
 
