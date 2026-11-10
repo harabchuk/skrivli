@@ -32,7 +32,7 @@ fn main() {
     }
 }
 
-/// Builds parakeet.cpp (pinned submodule, see .specs/decisions.md D-12) as static,
+/// Builds parakeet.cpp (pinned submodule, see .specs/decisions.md D-33) as static,
 /// CPU-only libraries that use the static MSVC runtime, matching `+crt-static`.
 fn build_parakeet() {
     let mut config = cmake::Config::new("third_party/parakeet.cpp");
