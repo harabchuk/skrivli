@@ -434,6 +434,28 @@ mod tests {
     }
 
     #[test]
+    fn stored_recordings_folder_survives_a_new_default() {
+        // Arrange
+        let dir = temp_dir("stored-folder");
+        let path = dir.join("settings.json");
+        let mut old = sample(&dir);
+        old.recordings_directory = dir.join("Documents").join("Skrivli");
+        old.save(&path).expect("save");
+        let new_default = Settings::defaults(dir.join("Local").join("Skrivli").join("recordings"))
+            .expect("defaults");
+
+        // Act
+        let loaded = Settings::load(&path, new_default);
+
+        // Assert
+        assert_eq!(
+            loaded.recordings_directory,
+            dir.join("Documents").join("Skrivli")
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn round_trip_preserves_fields() {
         // Arrange
         let dir = temp_dir("round");
