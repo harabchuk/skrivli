@@ -55,6 +55,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 ### System tray
 
 - Skrivli can stay available from the notification area.
+- Skrivli uses its own colorful feather icon on the taskbar, the window and the notification area.
 - Closing or minimizing the window can hide the app to the tray instead of quitting (configurable; first use explains this).
 - Tray actions: show/hide the window, start/stop recording, open recordings folder, Settings, Exit.
 - While recording, the tray indicates that capture is active and can show elapsed time.

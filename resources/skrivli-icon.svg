@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs><linearGradient id="vane" gradientUnits="userSpaceOnUse" x1="52" y1="204" x2="230" y2="26"><stop offset="0.0" stop-color="#14B8A6"/><stop offset="0.5" stop-color="#7B5CF0"/><stop offset="1.0" stop-color="#FF6B5B"/></linearGradient></defs>
+  <path fill="url(#vane)" d="M52 204 Q50 74 230 26 Q182 206 52 204Z"/>
+  <polygon fill="#1E2140" points="218.9,46.9 209.1,37.1 55.1,191.1 18.0,238.0 64.9,200.9"/>
+</svg>
