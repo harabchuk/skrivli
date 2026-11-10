@@ -63,10 +63,10 @@ use super::recording::{banner_notice, record_tab, DeviceChoice, RecordView};
 use super::recordings::{
     can_transcribe_again, default_selection, failure_reason, is_narrow, item_index_of,
     library_header, library_items, may_auto_scroll, open_delete_dialog, open_rename_dialog,
-    open_transcribe_again_dialog, play_action, recording_list_row, recordings_tab,
+    open_transcribe_again_dialog, paragraph_seek, play_action, recording_list_row, recordings_tab,
     rows_from_catalog, seek_hold_active, seek_position_ms, seek_value, set_row_status,
     shortcut_for, shown_position_ms, step_selection, transcript_pane, ClickAction, LibraryItem,
-    PlayAction, PlayerCard, RecordingRow, RecordingsActions, RecordingsView, Shortcut,
+    PlayAction, PlayerCard, RecordingRow, RecordingsActions, RecordingsView, SeekTarget, Shortcut,
     ShortcutContext, TranscriptPane, SEEK_STEPS,
 };
 use super::settings::{
@@ -113,6 +113,7 @@ pub(crate) struct MainWindow {
     library_scroll: VirtualListScrollHandle,
     levels: Arc<LevelSnapshot>,
     gain_control: Arc<GainControl>,
+    system_gain_control: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
     catalog: DeviceCatalog,
     mic_labels: Vec<SharedString>,
@@ -121,6 +122,8 @@ pub(crate) struct MainWindow {
     system_choices: Vec<StoredEndpoint>,
     gain_slider: Entity<SliderState>,
     _gain_sub: Subscription,
+    system_gain_slider: Entity<SliderState>,
+    _system_gain_sub: Subscription,
     seek_slider: Entity<SliderState>,
     _seek_sub: Subscription,
     /// Position under the thumb while the user drags it. Playback updates are ignored.
@@ -158,6 +161,7 @@ impl MainWindow {
         models_dir: PathBuf,
         levels: Arc<LevelSnapshot>,
         gain_control: Arc<GainControl>,
+        system_gain_control: Arc<GainControl>,
         targets: Arc<MonitorTargets>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -189,6 +193,21 @@ impl MainWindow {
                 this.set_slider_gain(value.start(), cx);
             },
         );
+        let system_gain_slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(4.0)
+                .step(0.1)
+                .default_value(settings.system_gain())
+        });
+        let system_gain_sub = cx.subscribe_in(
+            &system_gain_slider,
+            window,
+            |this, _slider, event: &SliderEvent, _window, cx| {
+                let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
+                this.set_system_slider_gain(value.start(), cx);
+            },
+        );
         let seek_slider = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
@@ -208,11 +227,10 @@ impl MainWindow {
                 SliderEvent::Release(value) => {
                     let position_ms = seek_position_ms(value.start(), this.selected_duration_ms());
                     this.seek_drag = None;
-                    if this.snapshot_is_selected() {
-                        this.seek_hold = Some((position_ms, Instant::now()));
-                        this.player.seek(position_ms);
-                    } else {
-                        this.idle_position_ms = position_ms;
+                    if let Some(target) =
+                        paragraph_seek(Some(position_ms), this.snapshot_is_selected())
+                    {
+                        this.apply_seek(target);
                     }
                     cx.notify();
                 }
@@ -306,6 +324,7 @@ impl MainWindow {
             library_scroll: VirtualListScrollHandle::new(),
             levels,
             gain_control,
+            system_gain_control,
             targets,
             catalog: DeviceCatalog::empty(),
             mic_labels: labels,
@@ -314,6 +333,8 @@ impl MainWindow {
             system_choices,
             gain_slider,
             _gain_sub: gain_sub,
+            system_gain_slider,
+            _system_gain_sub: system_gain_sub,
             seek_slider,
             _seek_sub: seek_sub,
             seek_drag: None,
@@ -691,6 +712,14 @@ impl MainWindow {
         cx.notify();
     }
 
+    fn set_system_slider_gain(&mut self, gain: f32, cx: &mut Context<Self>) {
+        self.system_gain_control.set_slider(gain);
+        self.settings
+            .set_system_gain(self.system_gain_control.slider());
+        self.hooks.save_settings(self.settings.clone());
+        cx.notify();
+    }
+
     fn sample_meters(&mut self) -> bool {
         let mic = self.mic_meter.update(self.levels.take_mic());
         let system = self.system_meter.update(self.levels.take_system());
@@ -956,12 +985,24 @@ impl MainWindow {
     /// different lengths wrap without overlapping. Each list item is laid out as its own root,
     /// so a row with an auto width would size to its text and never wrap; the row and the text
     /// need `w_full` to take the list's width.
+    /// Moves the player (or the idle start position) to a seek target.
+    fn apply_seek(&mut self, target: SeekTarget) {
+        match target {
+            SeekTarget::Player(ms) => {
+                self.seek_hold = Some((ms, Instant::now()));
+                self.player.seek(ms);
+            }
+            SeekTarget::Idle(ms) => self.idle_position_ms = ms,
+        }
+    }
+
     fn transcript_list_element(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let paragraphs = self.transcript_paragraphs.clone();
         let current = self.current_paragraph;
         let state = self.transcript_list.clone();
         let key_state = state.clone();
         let focus = self.transcript_focus.clone();
+        let view = cx.entity();
         div()
             .id("transcript-list")
             .relative()
@@ -988,7 +1029,10 @@ impl MainWindow {
                     let Some(paragraph) = paragraphs.get(index) else {
                         return div().into_any_element();
                     };
+                    let start_ms = paragraph.start_ms();
+                    let view = view.clone();
                     h_flex()
+                        .id(("transcript-paragraph", index))
                         .w_full()
                         .items_start()
                         .gap_3()
@@ -997,6 +1041,22 @@ impl MainWindow {
                         .py_1()
                         .rounded(px(8.))
                         .when(current == Some(index), |row| row.bg(cx.theme().accent))
+                        .when(start_ms.is_some(), |row| {
+                            row.cursor_pointer()
+                                .when(current != Some(index), |row| {
+                                    row.hover(|style| style.bg(cx.theme().accent.opacity(0.4)))
+                                })
+                                .on_click(move |_event, _window, cx| {
+                                    view.update(cx, |this, cx| {
+                                        if let Some(target) =
+                                            paragraph_seek(start_ms, this.snapshot_is_selected())
+                                        {
+                                            this.apply_seek(target);
+                                            cx.notify();
+                                        }
+                                    });
+                                })
+                        })
                         .child(
                             div()
                                 .flex_none()
@@ -1655,6 +1715,8 @@ impl Render for MainWindow {
                     ),
                     gain: &self.gain_slider,
                     gain_label: SharedString::from(format_gain(self.settings.mic_gain())),
+                    system_gain: &self.system_gain_slider,
+                    system_gain_label: SharedString::from(format_gain(self.settings.system_gain())),
                     locked,
                     phase,
                     elapsed: SharedString::from(elapsed),

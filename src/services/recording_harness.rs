@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::common::error::AppError;
 use crate::domain::audio::{AudioBlock, CivilTime, SessionOrigin};
+use crate::domain::gain::SYSTEM_GAIN_DEFAULT;
 use crate::domain::recording::RecordPhase;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::services::audio_pipeline::PassThroughPipelineFactory;
@@ -256,7 +257,8 @@ impl RecordingHarness {
                 }),
                 performance: Box::new(FixedCounter),
                 levels: Arc::new(LevelSnapshot::new()),
-                gain: Arc::new(GainControl::new(1.0)),
+                mic_gain: Arc::new(GainControl::new(1.0)),
+                system_gain: Arc::new(GainControl::new(SYSTEM_GAIN_DEFAULT)),
                 pipeline: Box::new(PassThroughPipelineFactory),
                 lease: Arc::new(EndpointLease::new()),
                 space_check_every: Duration::ZERO,

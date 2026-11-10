@@ -203,7 +203,7 @@ Join steps at the change were 0.00348, 0.00012, 0.00488, and 0.00205. The larges
 **Production decisions**
 
 - Pin stays `sonora = "=0.2.0"`.
-- Two instances, in this order when system audio is on: `SonoraEchoCanceller`, then `SonoraMicGain`, then the microphone peak tap. When system audio is off, there is no canceller. System chain: `FixedGain(0.8)`, then the system peak tap. Mix chain: `SoftLimiter`, then the mixed peak tap.
+- Two instances, in this order when system audio is on: `SonoraEchoCanceller`, then `SonoraMicGain`, then the microphone peak tap. When system audio is off, there is no canceller. System chain: `FixedGain(0.8)` (superseded by D-35: a user slider), then the system peak tap. Mix chain: `SoftLimiter`, then the mixed peak tap.
 - Echo removal is always on while system audio is captured. There is no off switch. The stored file is the processed mix.
 - Automatic gain is removed. `Agc`, the Auto checkbox, and the `agc_enabled` field are gone. An old settings file that still contains `agc_enabled` loads, and the stored `mic_gain` applies. The settings schema version is unchanged (4).
 - The microphone is downmixed to mono (`(L + R) / 2`) before the microphone chain and copied to both WAV channels. A true stereo microphone loses its stereo image. A signal on one side only is about 6 dB down.
@@ -401,3 +401,7 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 ## Default recordings folder (issue #18)
 
 The default recordings folder is now `%LOCALAPPDATA%\Skrivli\recordings`, next to `models` and `logs`. Existing installs are not migrated: their `settings.json` keeps the stored `recordings_directory` (for example `Documents\Skrivli`) and nothing is moved. The `home` base (`%USERPROFILE%`) was removed from `AppPaths` because nothing else used it.
+
+## D-35 — System audio gain is a user slider (2026-11-10)
+
+**Outcome:** the fixed `SYSTEM_GAIN` of 0.8 became a slider on the System audio row of the Record tab, like the microphone one. `SYSTEM_GAIN_DEFAULT` stays 0.8, so existing recordings sound as before. The shown value is the real multiplier. Range 0.0 to 4.0, step 0.1 (the same `clamp_slider_gain`). It is stored as `system_gain` in settings (`#[serde(default)]`, no schema bump) and applies live during recording and to the idle meter. The step is `RampedGain`, a plain multiply with a linear ramp across one frame when the value changed, not sonora, so dragging does not click. The echo canceller still takes its reference from the system frame before this gain, so the slider changes the mix and the meter, not echo removal. This supersedes the "System chain: `FixedGain(0.8)`" line in D-13. `FixedGain` is now test-only.

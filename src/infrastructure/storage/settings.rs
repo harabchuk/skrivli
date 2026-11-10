@@ -20,6 +20,19 @@ fn default_mic_gain() -> f32 {
     1.0
 }
 
+fn default_system_gain() -> f32 {
+    crate::domain::gain::SYSTEM_GAIN_DEFAULT
+}
+
+/// Clamps to the slider range; a non-finite value falls back to the default.
+fn clean_system_gain(gain: f32) -> f32 {
+    if gain.is_finite() {
+        crate::domain::gain::clamp_slider_gain(gain)
+    } else {
+        default_system_gain()
+    }
+}
+
 fn default_selected_model() -> String {
     DEFAULT_MODEL_ID.to_string()
 }
@@ -124,6 +137,8 @@ pub(crate) struct Settings {
     system_audio: StoredEndpoint,
     #[serde(default = "default_mic_gain")]
     mic_gain: f32,
+    #[serde(default = "default_system_gain")]
+    system_gain: f32,
     #[serde(default = "default_selected_model")]
     selected_model: String,
     #[serde(default = "default_auto_transcribe")]
@@ -155,6 +170,7 @@ impl Settings {
             microphone: StoredEndpoint::Default,
             system_audio: StoredEndpoint::Default,
             mic_gain: default_mic_gain(),
+            system_gain: default_system_gain(),
             selected_model: default_selected_model(),
             auto_transcribe: default_auto_transcribe(),
             notify_on_transcript: default_notify_on_transcript(),
@@ -224,6 +240,14 @@ impl Settings {
 
     pub(crate) fn set_mic_gain(&mut self, gain: f32) {
         self.mic_gain = crate::domain::gain::clamp_slider_gain(gain);
+    }
+
+    pub(crate) fn system_gain(&self) -> f32 {
+        self.system_gain
+    }
+
+    pub(crate) fn set_system_gain(&mut self, gain: f32) {
+        self.system_gain = clean_system_gain(gain);
     }
 
     #[allow(dead_code)] // Settings UI / M6.3 auto-transcribe.
@@ -344,6 +368,7 @@ fn normalize(mut settings: Settings) -> Option<Settings> {
     settings.microphone = clean_endpoint(settings.microphone);
     settings.system_audio = clean_endpoint(settings.system_audio);
     settings.mic_gain = crate::domain::gain::clamp_slider_gain(settings.mic_gain);
+    settings.system_gain = clean_system_gain(settings.system_gain);
     if settings.selected_model.trim().is_empty() {
         settings.selected_model = default_selected_model();
     }
@@ -620,6 +645,49 @@ mod tests {
         // Assert
         assert!((loaded.mic_gain() - 1.7).abs() < 0.001);
         assert_eq!(loaded.recordings_directory(), meetings.as_path());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn system_gain_defaults_when_missing() {
+        // Arrange
+        let dir = temp_dir("system-gain-missing");
+        let path = dir.join("settings.json");
+        let meetings = dir.join("Meetings");
+        let body = format!(
+            r#"{{"schema_version":4,"recordings_directory":"{}","close_to_tray":true,"start_hidden":false,"theme":"system","mic_gain":1.7}}"#,
+            meetings.display().to_string().replace('\\', "\\\\")
+        );
+        fs::write(&path, body).expect("write");
+
+        // Act
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert!((loaded.system_gain() - 0.8).abs() < 0.001);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn system_gain_round_trips_and_clamps() {
+        // Arrange
+        let dir = temp_dir("system-gain-round-trip");
+        let path = dir.join("settings.json");
+        let mut settings = sample(&dir);
+        settings.set_system_gain(1.7);
+
+        // Act
+        settings.save(&path).expect("save");
+        let loaded = Settings::load(&path, sample(&dir));
+        let mut hot = loaded.clone();
+        hot.set_system_gain(9.0);
+        let mut broken = loaded.clone();
+        broken.set_system_gain(f32::NAN);
+
+        // Assert
+        assert!((loaded.system_gain() - 1.7).abs() < 0.001);
+        assert!((hot.system_gain() - 4.0).abs() < 0.001);
+        assert!((broken.system_gain() - 0.8).abs() < 0.001);
         let _ = fs::remove_dir_all(dir);
     }
 

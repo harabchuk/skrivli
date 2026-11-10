@@ -9,11 +9,14 @@ use crate::domain::gain::{soft_limit, LIMIT_KNEE};
 use crate::infrastructure::audio::levels::GainControl;
 use crate::services::ports::{AudioMixer, AudioProcessor, AudioTap, ProcessContext, ProcessError};
 
+/// A constant multiply for chain tests.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FixedGain {
     gain: f32,
 }
 
+#[cfg(test)]
 impl FixedGain {
     pub(crate) fn new(gain: f32) -> Result<Self, ProcessError> {
         if !gain.is_finite() {
@@ -23,6 +26,7 @@ impl FixedGain {
     }
 }
 
+#[cfg(test)]
 impl AudioProcessor for FixedGain {
     fn name(&self) -> &'static str {
         "fixed-gain"
@@ -70,6 +74,57 @@ impl AudioProcessor for LinearGain {
         for sample in frame.samples_mut() {
             *sample *= slider;
         }
+        Ok(())
+    }
+}
+
+/// Multiplies by [`GainControl::slider`], ramping linearly across one frame
+/// when the value changed since the previous frame, so a drag does not click.
+///
+/// The ramp runs per sample frame, so both channels of a stereo frame get the
+/// same gain. Steady state is an exact multiply. Used for the system chain in
+/// the harness and in production; the microphone uses sonora's own ramp.
+pub(crate) struct RampedGain {
+    gain: Arc<GainControl>,
+    applied: f32,
+}
+
+impl RampedGain {
+    pub(crate) fn new(gain: Arc<GainControl>) -> Self {
+        let applied = gain.slider();
+        Self { gain, applied }
+    }
+}
+
+impl AudioProcessor for RampedGain {
+    fn name(&self) -> &'static str {
+        "ramped-gain"
+    }
+
+    fn process(
+        &mut self,
+        frame: &mut AudioFrame,
+        _context: &ProcessContext<'_>,
+    ) -> Result<(), ProcessError> {
+        let target = self.gain.slider();
+        let channels = match frame.layout() {
+            ChannelLayout::Mono => 1,
+            ChannelLayout::Stereo => 2,
+        };
+        if target == self.applied {
+            for sample in frame.samples_mut() {
+                *sample *= target;
+            }
+            return Ok(());
+        }
+        let frames = frame.valid_frames().max(1);
+        let step = (target - self.applied) / frames as f32;
+        let start = self.applied;
+        for (index, sample) in frame.samples_mut().iter_mut().enumerate() {
+            let position = ((index / channels) + 1).min(frames) as f32;
+            *sample *= start + step * position;
+        }
+        self.applied = target;
         Ok(())
     }
 }
@@ -295,7 +350,7 @@ mod tests {
 
     use super::{AudioLevelStats, ChannelTap, StatsTap};
     use crate::domain::audio_frame::{AudioFrame, ChannelLayout, FRAME_LEN};
-    use crate::domain::gain::{soft_limit, LIMIT_KNEE, SYSTEM_GAIN};
+    use crate::domain::gain::{soft_limit, LIMIT_KNEE, SYSTEM_GAIN_DEFAULT};
     use crate::infrastructure::audio::levels::GainControl;
     use crate::services::audio_pipeline::{Chain, FixedGain, SoftLimiter, SumMixer};
     use crate::services::ports::{AudioMixer, AudioProcessor, AudioTap, ProcessContext};
@@ -314,6 +369,63 @@ mod tests {
 
         // Assert
         assert!(frame.samples().iter().all(|sample| *sample == 0.5));
+    }
+
+    #[test]
+    fn ramped_gain_applies_slider_value_exactly_when_steady() {
+        // Arrange
+        let gain = Arc::new(GainControl::new(0.8));
+        let mut step = super::RampedGain::new(Arc::clone(&gain));
+        let mut frame = frame(ChannelLayout::Mono, vec![0.5; FRAME_LEN]);
+
+        // Act
+        step.process(&mut frame, &context()).expect("process");
+
+        // Assert
+        assert!(frame.samples().iter().all(|sample| *sample == 0.5 * 0.8));
+    }
+
+    #[test]
+    fn ramped_gain_moves_linearly_across_one_frame_after_a_change() {
+        // Arrange
+        let gain = Arc::new(GainControl::new(1.0));
+        let mut step = super::RampedGain::new(Arc::clone(&gain));
+        let mut ramp = frame(ChannelLayout::Mono, vec![1.0; FRAME_LEN]);
+        let mut steady = frame(ChannelLayout::Mono, vec![1.0; FRAME_LEN]);
+        gain.set_slider(3.0);
+
+        // Act
+        step.process(&mut ramp, &context()).expect("ramp");
+        step.process(&mut steady, &context()).expect("steady");
+
+        // Assert
+        let per_sample = (3.0 - 1.0) / FRAME_LEN as f32;
+        let samples = ramp.samples();
+        assert!(samples[0] > 1.0 && samples[0] <= 1.0 + per_sample * 1.01);
+        assert!((samples[FRAME_LEN - 1] - 3.0).abs() < 0.0001);
+        assert!(samples
+            .windows(2)
+            .all(|pair| (pair[1] - pair[0] - per_sample).abs() < 0.0001));
+        assert!(steady.samples().iter().all(|sample| *sample == 3.0));
+    }
+
+    #[test]
+    fn ramped_gain_ramps_both_stereo_channels_together() {
+        // Arrange
+        let gain = Arc::new(GainControl::new(0.0));
+        let mut step = super::RampedGain::new(Arc::clone(&gain));
+        let mut stereo = frame(ChannelLayout::Stereo, vec![1.0; FRAME_LEN * 2]);
+        gain.set_slider(2.0);
+
+        // Act
+        step.process(&mut stereo, &context()).expect("process");
+
+        // Assert
+        assert!(stereo
+            .samples()
+            .chunks(2)
+            .all(|pair| (pair[0] - pair[1]).abs() < 0.0001));
+        assert!((stereo.samples()[FRAME_LEN * 2 - 1] - 2.0).abs() < 0.0001);
     }
 
     fn context() -> ProcessContext<'static> {
@@ -361,7 +473,7 @@ mod tests {
     #[test]
     fn soft_limiter_matches_soft_limit_on_a_hot_sample() {
         // Arrange
-        let hot = 1.0 + SYSTEM_GAIN;
+        let hot = 1.0 + SYSTEM_GAIN_DEFAULT;
         let mut samples = vec![0.25; FRAME_LEN];
         samples[0] = hot;
         samples[1] = -hot;

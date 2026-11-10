@@ -106,7 +106,8 @@ pub(crate) fn run() -> i32 {
     let writer = SettingsWriter::spawn(settings_path, &shutdown);
     let recording_flag = Arc::new(AtomicBool::new(false));
     let levels = Arc::new(LevelSnapshot::new());
-    let gain = Arc::new(GainControl::new(settings.mic_gain()));
+    let mic_gain = Arc::new(GainControl::new(settings.mic_gain()));
+    let system_gain = Arc::new(GainControl::new(settings.system_gain()));
     let lease = Arc::new(EndpointLease::new());
     let targets = Arc::new(MonitorTargets::new());
     let workers = spawn_workers(
@@ -115,7 +116,8 @@ pub(crate) fn run() -> i32 {
         &shutdown,
         Arc::clone(&recording_flag),
         Arc::clone(&levels),
-        Arc::clone(&gain),
+        Arc::clone(&mic_gain),
+        Arc::clone(&system_gain),
         Arc::clone(&lease),
         Arc::clone(&targets),
         paths.models_dir(),
@@ -140,7 +142,8 @@ pub(crate) fn run() -> i32 {
         shutdown.clone(),
         workers,
         levels,
-        gain,
+        mic_gain,
+        system_gain,
         targets,
         Arc::clone(&host.shell),
     );
@@ -166,7 +169,8 @@ fn spawn_workers(
     shutdown: &ShutdownController,
     recording_flag: Arc<AtomicBool>,
     levels: Arc<LevelSnapshot>,
-    gain: Arc<GainControl>,
+    mic_gain: Arc<GainControl>,
+    system_gain: Arc<GainControl>,
     lease: Arc<EndpointLease>,
     targets: Arc<MonitorTargets>,
     models_dir: std::path::PathBuf,
@@ -183,7 +187,8 @@ fn spawn_workers(
             space: platform::disk(),
             performance: Box::new(CloneCounter(Arc::clone(&performance))),
             levels: Arc::clone(&levels),
-            gain: Arc::clone(&gain),
+            mic_gain: Arc::clone(&mic_gain),
+            system_gain: Arc::clone(&system_gain),
             pipeline: Box::new(SonoraPipelineFactory),
             lease: Arc::clone(&lease),
             space_check_every: crate::services::recording::SPACE_CHECK_INTERVAL,
@@ -206,7 +211,8 @@ fn spawn_workers(
         Box::new(FlexSystemCapture::new(performance)),
         lease,
         levels,
-        gain,
+        mic_gain,
+        system_gain,
         targets,
         monitor_stop,
     ));
@@ -357,7 +363,8 @@ fn open_shell(
     shutdown: ShutdownController,
     workers: ShellWorkers,
     levels: Arc<LevelSnapshot>,
-    gain: Arc<GainControl>,
+    mic_gain: Arc<GainControl>,
+    system_gain: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
     shell: Arc<dyn crate::services::ports::DesktopShell>,
 ) {
@@ -381,7 +388,8 @@ fn open_shell(
             let window_model_host = workers.model_host;
             let window_models_dir = workers.models_dir;
             let window_levels = levels;
-            let window_gain = gain;
+            let window_mic_gain = mic_gain;
+            let window_system_gain = system_gain;
             let window_targets = targets;
             let window_shell = shell;
             let hooks = ShellHooks::new(
@@ -413,7 +421,8 @@ fn open_shell(
                         window_model_host,
                         window_models_dir,
                         window_levels,
-                        window_gain,
+                        window_mic_gain,
+                        window_system_gain,
                         window_targets,
                         window,
                         cx,

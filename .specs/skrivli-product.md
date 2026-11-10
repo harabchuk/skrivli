@@ -79,7 +79,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 
 - **Microphone** — your voice (defaults to the Windows communications microphone). The microphone is recorded as mono: both channels of the file carry the same microphone signal. A true stereo microphone loses its stereo image. A signal that is only on one side is about 6 dB quieter.
 - **System audio** — what plays through the selected output device (meetings, browser, apps). When system audio is captured, speaker echo is removed from the microphone automatically. That removal is always on. There is no setting to turn it off.
-- Both sources are combined into **one** continuous recording. Quiet periods on either side do not shrink or skip the timeline; silence is preserved so timing stays natural. The saved file is that mix, with the microphone gain applied.
+- Both sources are combined into **one** continuous recording. Quiet periods on either side do not shrink or skip the timeline; silence is preserved so timing stays natural. The saved file is that mix, with the microphone and system audio gains applied.
 
 If only one source is available (for example, no microphone permission or no playback device), recording can continue with that source and the UI makes the limitation clear.
 
@@ -91,11 +91,11 @@ Users can:
 
 - See the current microphone and system audio device by name, and use a small Change button on either to pick from the available Windows devices. The menu ends with **Disabled**, which turns that source off.
 - See live level meters for microphone and system audio (with clear numeric levels, not color alone). Peak hold is a tick on the meter, with its value in a tooltip on the level.
-- Adjust microphone gain with a manual slider.
+- Adjust microphone gain and system audio gain with a manual slider on each row. The system slider starts at 0.8×, and it makes the other side of a call louder or quieter in the saved recording.
 - Start and stop recording; see a clear recording indicator and elapsed timer.
 - Read inline warnings for missing devices, permission problems, or storage issues.
 
-Device choices are locked while a recording is active; a lock icon replaces Change. The gain slider can stay adjustable during capture and is disabled while saving. Recordings save to the configured directory (default for new installs: `%LOCALAPPDATA%\Skrivli\recordings`; installs from before that change keep their existing folder). The save location cannot be changed in the app yet.
+Device choices are locked while a recording is active; a lock icon replaces Change. The gain sliders can stay adjustable during capture and are disabled while saving. Recordings save to the configured directory (default: a Skrivli folder under Documents when writable); the save location is chosen in Settings.
 
 ### Starting and stopping
 
@@ -140,6 +140,7 @@ Skrivli does not silently delete usable partial recordings. Leftover unfinished 
 - A warning note appears under the title when its details file is missing or unreadable, or when problems were logged while recording. A clean recording shows no note.
 - The player card has a round Play/Pause button, the current time, a seek bar and the total time. Play starts from the seek bar position, Pause keeps the position, and Play again resumes. Dragging the seek bar moves nothing until it is released. When a recording ends the player returns to the start. Every recording in the list can be played.
 - While a recording plays or is paused, the transcript paragraph being spoken is highlighted and the list scrolls to it when it changes. If you scroll the transcript yourself, it is not scrolled again for 5 seconds.
+- Clicking a transcript paragraph that has a timestamp moves playback to the start of that paragraph, the same as dropping the seek slider there. While playing it keeps playing; while paused it stays paused; while stopped nothing starts, the slider and time move to that point, and Play begins from there. Text before the first timestamp is not clickable.
 - Changing selection, renaming or deleting stops playback.
 - Users can also open the recordings folder (list header icon button) and refresh the list (list header icon button).
 - Rename keeps related files together (audio, transcript, and metadata) when possible; partial failures are reported.
@@ -218,7 +219,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 
 - Default save directory (folder picker); the choice is remembered
 - Default microphone and system audio devices; either can be set to Disabled, and the choice is remembered across restarts
-- Microphone gain, set with the manual slider
+- Microphone gain and system audio gain, each set with its manual slider
 - Optional separate source files (mic / system) — available when enabled; off by default
 - Recordings are always saved as lossless FLAC (16-bit stereo 48 kHz). There is no format choice and no conversion step.
 - **Maximum meeting duration** (Settings → Recording): 1, 2, 3, 4, 6, 8 or 12 hours, default 3 hours. It stops a forgotten recording so it does not write a very long file. A change applies to the next recording.

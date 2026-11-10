@@ -1138,6 +1138,26 @@ pub(crate) fn seek_hold_active(
         && snapshot_position_ms.abs_diff(target_ms) > SEEK_HOLD_TOLERANCE_MS
 }
 
+/// Where a seek request lands, depending on whether the selected recording is live.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SeekTarget {
+    /// Move the running or paused player.
+    Player(u64),
+    /// Move the idle position that the next Play starts from.
+    Idle(u64),
+}
+
+/// Seek target for a click on a transcript paragraph; none without a timestamp.
+pub(crate) fn paragraph_seek(start_ms: Option<u64>, selected_is_live: bool) -> Option<SeekTarget> {
+    start_ms.map(|ms| {
+        if selected_is_live {
+            SeekTarget::Player(ms)
+        } else {
+            SeekTarget::Idle(ms)
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1885,5 +1905,41 @@ mod tests {
         assert!(lagging);
         assert!(!caught_up);
         assert!(!timed_out);
+    }
+
+    #[test]
+    fn paragraph_click_seeks_player_when_selected_recording_is_live() {
+        // Arrange
+        let start = Some(12_000);
+
+        // Act
+        let target = super::paragraph_seek(start, true);
+
+        // Assert
+        assert_eq!(target, Some(super::SeekTarget::Player(12_000)));
+    }
+
+    #[test]
+    fn paragraph_click_moves_idle_position_when_stopped() {
+        // Arrange
+        let start = Some(12_000);
+
+        // Act
+        let target = super::paragraph_seek(start, false);
+
+        // Assert
+        assert_eq!(target, Some(super::SeekTarget::Idle(12_000)));
+    }
+
+    #[test]
+    fn paragraph_click_without_timestamp_does_nothing() {
+        // Arrange
+        let start = None;
+
+        // Act
+        let target = super::paragraph_seek(start, true);
+
+        // Assert
+        assert_eq!(target, None);
     }
 }
