@@ -31,7 +31,7 @@ Skrivli is distributed as a portable Windows application in a ZIP archive.
 - **Tray mode.** Hide the window to the tray and the recording keeps running.
 - **Reliable saving.** If something fails during a recording, the audio captured so far is saved. You get a warning when disk space runs low, and a recording is still saved if one device drops.
 - **Recordings library** grouped by Today, Yesterday and Earlier. It updates live when files change, and has playback with a seek bar, rename, delete to the Recycle Bin, and Show in folder.
-- **Offline transcription** with whisper.cpp. Choose multilingual, English or Swedish (KB-Whisper) models, downloaded only when you ask. Transcripts have `[HH:MM:SS]` timestamps, are saved as `.txt` files next to the audio, can be copied with one click, and highlight the current paragraph during playback.
+- **Offline transcription** with parakeet.cpp and NVIDIA's Nemotron streaming model (40 languages, including English and Swedish, with automatic language detection). The model is a one-time download of about 940 MB, only when you ask. Transcripts have `[HH:MM:SS]` timestamps, are saved as `.txt` files next to the audio, can be copied with one click, and highlight the current paragraph during playback.
 - **Light, dark and system themes**, keyboard navigation, single instance, and the window remembers its size and position.
 
 ## Screenshots
@@ -61,6 +61,7 @@ Target: `x86_64-pc-windows-msvc` on Windows 10 or 11.
     $env:Path = "$env:USERPROFILE\.cargo\bin;" + $env:Path
    ```
 2. Install the MSVC Build Tools (Visual Studio Build Tools workload "Desktop development with C++") and a Windows 10/11 SDK. The linker is `link.exe` from that toolchain.
+3. Install [CMake](https://cmake.org/) (3.15 or newer) and Git. `build.rs` builds the speech engine from the `third_party/parakeet.cpp` submodule, so clone with `--recurse-submodules` or run `git submodule update --init --recursive`. The first build compiles parakeet.cpp and ggml and takes a few minutes. No libclang is needed.
 
 ### Commands
 
@@ -111,7 +112,7 @@ Pushing a tag like `vX.Y.Z` starts the `release` workflow (`.github/workflows/re
 2. **Version check.** Fails if the tag does not match the `Cargo.toml` version.
 3. **Build.** `cargo build --release --locked`, then checks that the exe's `ProductVersion` and `FileVersionRaw` equal the version.
 4. **Licenses.** Generates `releases/licenses/THIRD-PARTY.txt` with `cargo about`.
-5. **Package.** `scripts/package.ps1` builds `target/dist/skrivli-X.Y.Z-windows-x64.zip` and its `.sha256` file. The ZIP holds `skrivli.exe`, `README.txt`, `PRIVACY.txt`, the licenses and the third-party notices. It must not contain `.bin` or `.pdb` files. If `SKRIVLI_SIGN_CMD` is set, the exe is signed first (not used yet).
+5. **Package.** `scripts/package.ps1` builds `target/dist/skrivli-X.Y.Z-windows-x64.zip` and its `.sha256` file. The ZIP holds `skrivli.exe`, `README.txt`, `PRIVACY.txt`, the licenses and the third-party notices. It must not contain `.bin`, `.gguf` or `.pdb` files. If `SKRIVLI_SIGN_CMD` is set, the exe is signed first (not used yet).
 6. **Release notes.** Takes `releases/release-notes-header.md` (install steps, SmartScreen note, SHA-256) and adds the commit subjects since the previous tag, with merge commits left out.
 7. **Publish.** Creates the GitHub release `Skrivli X.Y.Z` immediately (not a draft), marked as latest, with the ZIP and checksum attached. If the release already exists, the assets are replaced instead.
 8. **Artifact.** Also uploads the ZIP and checksum as a workflow artifact, kept for 7 days.

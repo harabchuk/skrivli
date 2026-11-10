@@ -22,12 +22,12 @@ function Get-ExpectedEntries([string]$Root) {
         "$Root/PRIVACY.txt",
         "$Root/LICENSE.txt",
         "$Root/licenses/sonora-BSD-3-Clause.txt",
-        "$Root/licenses/whisper.cpp-MIT.txt",
+        "$Root/licenses/parakeet.cpp-MIT.txt",
         "$Root/licenses/THIRD-PARTY.txt"
     )
 }
 
-# Throws if the ZIP lacks an expected entry or holds a *.bin / *.pdb.
+# Throws if the ZIP lacks an expected entry or holds a *.bin, *.gguf or *.pdb.
 function Test-PackageZip([string]$ZipPath, [string]$Root) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
@@ -41,7 +41,7 @@ function Test-PackageZip([string]$ZipPath, [string]$Root) {
     if ($missing) {
         throw "ZIP is missing expected entries: $($missing -join ', ')"
     }
-    $forbidden = @($names | Where-Object { $_ -match '\.(bin|pdb)$' })
+    $forbidden = @($names | Where-Object { $_ -match '\.(bin|gguf|pdb)$' })
     if ($forbidden) {
         throw "ZIP contains forbidden files: $($forbidden -join ', ')"
     }
@@ -83,7 +83,7 @@ function Invoke-Package {
         @('releases\dist\PRIVACY.txt', 'PRIVACY.txt'),
         @('LICENSE', 'LICENSE.txt'),
         @('releases\licenses\sonora-BSD-3-Clause.txt', 'licenses\sonora-BSD-3-Clause.txt'),
-        @('releases\licenses\whisper.cpp-MIT.txt', 'licenses\whisper.cpp-MIT.txt')
+        @('releases\licenses\parakeet.cpp-MIT.txt', 'licenses\parakeet.cpp-MIT.txt')
     )
     if (-not $placeholder) { $files += , @($thirdParty, 'licenses\THIRD-PARTY.txt') }
     foreach ($f in $files) {
