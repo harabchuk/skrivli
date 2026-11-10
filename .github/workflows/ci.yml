@@ -8,6 +8,13 @@ on:
 
 jobs:
   windows:
+    # A cargo-release commit ("Release vX.Y.Z") is pushed together with its tag,
+    # and release.yml runs this workflow for that tag. Skip the duplicate branch run.
+    # When called from release.yml the ref is the tag, so that run is kept.
+    if: >-
+      github.event_name != 'push' ||
+      github.ref_type == 'tag' ||
+      !startsWith(github.event.head_commit.message, 'Release v')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
