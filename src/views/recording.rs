@@ -73,6 +73,8 @@ pub(crate) struct RecordView<'a> {
     pub(crate) system: DeviceChoice,
     pub(crate) gain: &'a Entity<SliderState>,
     pub(crate) gain_label: SharedString,
+    pub(crate) system_gain: &'a Entity<SliderState>,
+    pub(crate) system_gain_label: SharedString,
     pub(crate) locked: bool,
     pub(crate) phase: RecordPhase,
     pub(crate) elapsed: SharedString,
@@ -99,7 +101,16 @@ where
     Toggle: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
     let saving = view.phase == RecordPhase::Stopping;
-    let gain = gain_controls(view.gain, view.gain_label, saving, cx).into_any_element();
+    let gain =
+        gain_controls(view.gain, view.gain_label, "Microphone gain", saving, cx).into_any_element();
+    let system_gain = gain_controls(
+        view.system_gain,
+        view.system_gain_label,
+        "System audio gain",
+        saving,
+        cx,
+    )
+    .into_any_element();
     let microphone = SourceRow {
         id: "microphone",
         caption: "Microphone",
@@ -115,7 +126,7 @@ where
         caption: "System audio",
         icon: Icon::default().data(VOLUME_SVG),
         device: view.system,
-        extra: None,
+        extra: Some(system_gain),
         locked: view.locked,
         db: view.system_db,
         hold: view.system_hold,
@@ -338,6 +349,7 @@ fn device_control(
 fn gain_controls(
     gain: &Entity<SliderState>,
     gain_label: SharedString,
+    accessibility_label: &'static str,
     saving: bool,
     cx: &App,
 ) -> impl IntoElement {
@@ -352,7 +364,7 @@ fn gain_controls(
             Slider::new(gain)
                 .disabled(saving)
                 .w(px(GAIN_SLIDER_WIDTH))
-                .accessibility_label("Microphone gain"),
+                .accessibility_label(accessibility_label),
         )
         .child(gain_label)
 }

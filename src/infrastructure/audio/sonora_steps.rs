@@ -14,11 +14,10 @@ use sonora::{AudioProcessing, Config, Error as SonoraError, StreamConfig};
 
 use crate::domain::audio::INTERNAL_SAMPLE_RATE;
 use crate::domain::audio_frame::{AudioFrame, ChannelLayout, FRAME_LEN};
-use crate::domain::gain::SYSTEM_GAIN;
 use crate::infrastructure::audio::levels::{GainControl, MeterSlot, PeakTap};
 use crate::infrastructure::audio::resampler::StereoResampler;
 use crate::services::audio_pipeline::{
-    Aligner, Chain, EchoStats, EchoStatsSlot, FixedGain, Pipeline, PipelineSetup, PipelineStages,
+    Aligner, Chain, EchoStats, EchoStatsSlot, Pipeline, PipelineSetup, PipelineStages, RampedGain,
     SoftLimiter, SumMixer,
 };
 use crate::services::ports::{AudioProcessor, PipelineFactory, ProcessContext, ProcessError};
@@ -322,10 +321,10 @@ fn with_mic_gain(chain: Chain, gain: Result<SonoraMicGain, ProcessError>) -> Cha
 ///
 /// Mic chain, when system audio was requested: [`SonoraEchoCanceller`], then
 /// [`SonoraMicGain`], then the mic [`PeakTap`]. The canceller sees the raw
-/// microphone. Its reference is the system frame before [`FixedGain`].
+/// microphone. Its reference is the system frame before [`RampedGain`].
 /// When system audio was not requested, the mic chain starts at
 /// [`SonoraMicGain`].
-/// System chain: [`FixedGain`] of [`SYSTEM_GAIN`] then the system tap.
+/// System chain: [`RampedGain`] from the system slider, then the system tap.
 /// Mix chain: [`SoftLimiter`] then the mixed tap.
 #[derive(Debug, Default)]
 pub(crate) struct SonoraPipelineFactory;
@@ -338,10 +337,10 @@ impl PipelineFactory for SonoraPipelineFactory {
         } else {
             (Chain::new(), None)
         };
-        let mic = with_mic_gain(mic, SonoraMicGain::new(Arc::clone(&setup.gain)))
+        let mic = with_mic_gain(mic, SonoraMicGain::new(Arc::clone(&setup.mic_gain)))
             .tap(PeakTap::new(Arc::clone(&setup.levels), MeterSlot::Mic));
         let system = Chain::new()
-            .process(FixedGain::new(SYSTEM_GAIN)?)
+            .process(RampedGain::new(Arc::clone(&setup.system_gain)))
             .tap(PeakTap::new(Arc::clone(&setup.levels), MeterSlot::System));
         let mix = Chain::new()
             .process(SoftLimiter::counting(Arc::clone(&limited_samples)))
@@ -719,7 +718,8 @@ mod tests {
         SonoraPipelineFactory
             .build(PipelineSetup {
                 system_active,
-                gain: Arc::new(GainControl::new(1.0)),
+                mic_gain: Arc::new(GainControl::new(1.0)),
+                system_gain: Arc::new(GainControl::new(crate::domain::gain::SYSTEM_GAIN_DEFAULT)),
                 levels: Arc::new(LevelSnapshot::new()),
             })
             .expect("pipeline")

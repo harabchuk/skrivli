@@ -217,7 +217,7 @@ mod tests {
     use super::Aligner;
     use crate::domain::audio::AudioBlock;
     use crate::domain::chunk_plan::{LATENCY_LIMIT_FRAMES, MIX_BLOCK_FRAMES};
-    use crate::domain::gain::{soft_limit, SYSTEM_GAIN};
+    use crate::domain::gain::{soft_limit, SYSTEM_GAIN_DEFAULT};
 
     fn aligner(system: bool) -> Aligner {
         Aligner::new(system)
@@ -248,8 +248,8 @@ mod tests {
         let count = mic.len().min(system.len());
         let mut index = 0;
         while index + 1 < count {
-            let left_system = system[index] * SYSTEM_GAIN;
-            let right_system = system[index + 1] * SYSTEM_GAIN;
+            let left_system = system[index] * SYSTEM_GAIN_DEFAULT;
+            let right_system = system[index + 1] * SYSTEM_GAIN_DEFAULT;
             let left_sum = f64::from(mic[index]) + f64::from(left_system);
             let right_sum = f64::from(mic[index + 1]) + f64::from(right_system);
             mixed.push(soft_limit(left_sum as f32));
@@ -275,7 +275,7 @@ mod tests {
         assert!((mixed[0] - 0.2).abs() < 0.0001);
         assert!((mixed[2] - 0.2).abs() < 0.0001);
         let at_lead = 2_400 * 2;
-        let expected = soft_limit(0.2 + 0.5 * SYSTEM_GAIN);
+        let expected = soft_limit(0.2 + 0.5 * SYSTEM_GAIN_DEFAULT);
         assert!((mixed[at_lead] - expected).abs() < 0.0001);
     }
 

@@ -209,7 +209,8 @@ pub(crate) struct RecordingEngine {
     pub(crate) space: Box<dyn FreeSpace>,
     pub(crate) performance: Box<dyn PerformanceCounter>,
     pub(crate) levels: Arc<LevelSnapshot>,
-    pub(crate) gain: Arc<GainControl>,
+    pub(crate) mic_gain: Arc<GainControl>,
+    pub(crate) system_gain: Arc<GainControl>,
     pub(crate) pipeline: Box<dyn PipelineFactory>,
     pub(crate) lease: Arc<EndpointLease>,
     /// How often to recheck free space and writability while recording.
@@ -465,7 +466,8 @@ fn session_body(
     });
     let mut pipeline = match engine.pipeline.build(PipelineSetup {
         system_active: want_system,
-        gain: Arc::clone(&engine.gain),
+        mic_gain: Arc::clone(&engine.mic_gain),
+        system_gain: Arc::clone(&engine.system_gain),
         levels: Arc::clone(&engine.levels),
     }) {
         Ok(pipeline) => pipeline,
@@ -1142,7 +1144,14 @@ mod tests {
             space: Box::new(Space(1024)),
             performance: Box::new(FixedCounter),
             levels: std::sync::Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
-            gain: std::sync::Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
+            mic_gain: std::sync::Arc::new(crate::infrastructure::audio::levels::GainControl::new(
+                1.0,
+            )),
+            system_gain: std::sync::Arc::new(
+                crate::infrastructure::audio::levels::GainControl::new(
+                    crate::domain::gain::SYSTEM_GAIN_DEFAULT,
+                ),
+            ),
             pipeline: Box::new(PassThroughPipelineFactory),
             lease: std::sync::Arc::new(crate::services::lease::EndpointLease::new()),
             space_check_every: Duration::from_secs(30),
@@ -1236,7 +1245,10 @@ mod tests {
             space: Box::new(Space(u64::MAX)),
             performance: Box::new(FixedCounter),
             levels: Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
-            gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
+            mic_gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
+            system_gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(
+                crate::domain::gain::SYSTEM_GAIN_DEFAULT,
+            )),
             pipeline: Box::new(PassThroughPipelineFactory),
             lease: Arc::new(crate::services::lease::EndpointLease::new()),
             space_check_every: Duration::from_secs(30),
@@ -1579,7 +1591,10 @@ mod tests {
             space: Box::new(Space(u64::MAX)),
             performance: Box::new(FixedCounter),
             levels: Arc::new(crate::infrastructure::audio::levels::LevelSnapshot::new()),
-            gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
+            mic_gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(1.0)),
+            system_gain: Arc::new(crate::infrastructure::audio::levels::GainControl::new(
+                crate::domain::gain::SYSTEM_GAIN_DEFAULT,
+            )),
             pipeline,
             lease: Arc::new(crate::services::lease::EndpointLease::new()),
             space_check_every: Duration::from_secs(30),

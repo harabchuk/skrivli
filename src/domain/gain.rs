@@ -1,12 +1,12 @@
-//! Microphone slider gain, the fixed system mix gain, and the soft limiter.
+//! Default microphone and system slider gains, and the soft limiter.
 //!
 //! The limiter leaves samples inside the knee untouched and bends louder
 //! sums toward full scale.
 
 /// Initial microphone mix gain.
 pub(crate) const MIC_GAIN_DEFAULT: f32 = 1.0;
-/// Fixed system-audio mix gain. The system meter is display-only.
-pub(crate) const SYSTEM_GAIN: f32 = 0.8;
+/// Initial system-audio mix gain. Users move it with the system slider.
+pub(crate) const SYSTEM_GAIN_DEFAULT: f32 = 0.8;
 /// Samples at or under this absolute value pass through the limiter.
 pub(crate) const LIMIT_KNEE: f32 = 0.8;
 const SLIDER_MAX: f32 = 4.0;
@@ -90,14 +90,14 @@ pub(crate) fn soft_limit(sample: f32) -> f32 {
 mod tests {
     use super::{
         db_fs, format_db, meter_band, meter_fraction, soft_limit, MeterBand, LIMIT_KNEE,
-        MIC_GAIN_DEFAULT, SYSTEM_GAIN,
+        MIC_GAIN_DEFAULT, SYSTEM_GAIN_DEFAULT,
     };
 
     #[test]
     fn limiter_keeps_quiet_samples_and_bends_hot_sums() {
         // Arrange
         let quiet = 0.25_f32;
-        let hot = 1.0 + SYSTEM_GAIN;
+        let hot = 1.0 + SYSTEM_GAIN_DEFAULT;
 
         // Act
         let passed = soft_limit(quiet);

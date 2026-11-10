@@ -15,7 +15,9 @@ pub(crate) use aligner::{Aligner, AudioSource};
 pub(crate) use chain::Chain;
 pub(crate) use echo_stats::{EchoStats, EchoStatsSlot};
 pub(crate) use pipeline::{PassThroughPipelineFactory, Pipeline, PipelineSetup, PipelineStages};
-pub(crate) use steps::{FixedGain, SoftLimiter, SumMixer};
+#[cfg(test)]
+pub(crate) use steps::FixedGain;
+pub(crate) use steps::{RampedGain, SoftLimiter, SumMixer};
 // A later meter or stem is one `.tap(...)` at the chain site. The session
 // factory does not install these yet, so the names stay unused.
 #[allow(unused_imports)]

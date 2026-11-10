@@ -444,7 +444,8 @@ fn probe_devices(duration: Duration) -> ProbeReport {
     // timeline error. The resampler itself is not what this probe measures.
     let mut pipeline = match PassThroughPipelineFactory.build(PipelineSetup {
         system_active: true,
-        gain: Arc::new(GainControl::new(1.0)),
+        mic_gain: Arc::new(GainControl::new(1.0)),
+        system_gain: Arc::new(GainControl::new(crate::domain::gain::SYSTEM_GAIN_DEFAULT)),
         levels: Arc::new(LevelSnapshot::new()),
     }) {
         Ok(pipeline) => pipeline,

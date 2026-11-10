@@ -5,7 +5,7 @@
 //! closes its clients. It opens them again after the recording releases the
 //! lease, including after a failed start. Idle meters stay outside the
 //! recording pipeline: microphone peak times the slider, system peak times
-//! the fixed system gain.
+//! the system gain slider.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,7 +13,6 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::domain::audio::SessionOrigin;
-use crate::domain::gain::SYSTEM_GAIN;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::services::recording::CapturePort;
 
@@ -63,18 +62,37 @@ impl MonitorTargets {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_level_monitor(
     mic: Box<dyn CapturePort>,
     system: Box<dyn CapturePort>,
     lease: Arc<EndpointLease>,
     levels: Arc<LevelSnapshot>,
-    gain: Arc<GainControl>,
+    mic_gain: Arc<GainControl>,
+    system_gain: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
     stop: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
-        monitor_loop(mic, system, &lease, &levels, &gain, &targets, &stop);
+        monitor_loop(
+            mic,
+            system,
+            &lease,
+            &levels,
+            &Gains {
+                mic: &mic_gain,
+                system: &system_gain,
+            },
+            &targets,
+            &stop,
+        );
     })
+}
+
+/// The two meter sliders the idle monitor applies.
+struct Gains<'a> {
+    mic: &'a GainControl,
+    system: &'a GainControl,
 }
 
 fn monitor_loop(
@@ -82,7 +100,7 @@ fn monitor_loop(
     mut system_port: Box<dyn CapturePort>,
     lease: &EndpointLease,
     levels: &LevelSnapshot,
-    gain: &GainControl,
+    gains: &Gains<'_>,
     targets: &MonitorTargets,
     stop: &AtomicBool,
 ) {
@@ -120,7 +138,7 @@ fn monitor_loop(
             if let Some(stream) = mic.as_mut() {
                 match stream.pull() {
                     Ok(Some(block)) => {
-                        levels.publish(peak(&block.samples, gain.slider()), 0.0, 0.0);
+                        levels.publish(peak(&block.samples, gains.mic.slider()), 0.0, 0.0);
                     }
                     Ok(None) => {}
                     Err(_) => {
@@ -132,7 +150,7 @@ fn monitor_loop(
             if let Some(stream) = system.as_mut() {
                 match stream.pull() {
                     Ok(Some(block)) => {
-                        levels.publish(0.0, peak(&block.samples, SYSTEM_GAIN), 0.0);
+                        levels.publish(0.0, peak(&block.samples, gains.system.slider()), 0.0);
                     }
                     Ok(None) => {}
                     Err(_) => {
@@ -234,6 +252,75 @@ mod tests {
         }
     }
 
+    struct ToneStream;
+
+    impl CaptureStream for ToneStream {
+        fn pull(&mut self) -> Result<Option<AudioBlock>, CaptureError> {
+            thread::sleep(Duration::from_millis(5));
+            Ok(Some(AudioBlock {
+                samples: vec![0.25; 64],
+                timeline_frame: None,
+                discontinuity: false,
+            }))
+        }
+
+        fn close(&mut self) {}
+
+        fn overruns(&self) -> u64 {
+            0
+        }
+    }
+
+    struct TonePort;
+
+    impl CapturePort for TonePort {
+        fn open(
+            &mut self,
+            _: &str,
+            _: SessionOrigin,
+        ) -> Result<Box<dyn CaptureStream>, CaptureError> {
+            Ok(Box::new(ToneStream))
+        }
+    }
+
+    #[test]
+    fn idle_system_meter_uses_system_slider() {
+        // Arrange
+        let levels = Arc::new(LevelSnapshot::new());
+        let system_gain = Arc::new(GainControl::new(2.0));
+        let targets = Arc::new(MonitorTargets::new());
+        targets.set(None, Some(String::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let handle = spawn_level_monitor(
+            Box::new(CountingPort {
+                live: Arc::new(AtomicUsize::new(0)),
+                opened: Arc::new(AtomicUsize::new(0)),
+            }),
+            Box::new(TonePort),
+            Arc::new(EndpointLease::new()),
+            Arc::clone(&levels),
+            Arc::new(GainControl::new(1.0)),
+            Arc::clone(&system_gain),
+            targets,
+            Arc::clone(&stop),
+        );
+
+        // Act
+        thread::sleep(Duration::from_millis(150));
+        let loud = levels.take_system();
+        system_gain.set_slider(0.5);
+        thread::sleep(Duration::from_millis(150));
+        let _ = levels.take_system();
+        thread::sleep(Duration::from_millis(60));
+        let quiet = levels.take_system();
+        stop.store(true, Ordering::Release);
+        let _ = handle.join();
+
+        // Assert
+        assert!((loud - 0.5).abs() < 0.0001, "loud {loud}");
+        assert!((quiet - 0.125).abs() < 0.0001, "quiet {quiet}");
+    }
+
     #[test]
     fn recording_waits_until_the_monitor_releases_both_endpoints() {
         // Arrange
@@ -254,6 +341,7 @@ mod tests {
             Box::new(system),
             Arc::clone(&lease),
             Arc::new(LevelSnapshot::new()),
+            Arc::new(GainControl::new(1.0)),
             Arc::new(GainControl::new(1.0)),
             Arc::new(MonitorTargets::new()),
             Arc::clone(&stop),
@@ -308,6 +396,7 @@ mod tests {
             Arc::clone(&lease),
             Arc::new(LevelSnapshot::new()),
             Arc::new(GainControl::new(1.0)),
+            Arc::new(GainControl::new(1.0)),
             Arc::new(MonitorTargets::new()),
             Arc::clone(&stop),
         );
@@ -345,6 +434,7 @@ mod tests {
             }),
             Arc::clone(&lease),
             Arc::new(LevelSnapshot::new()),
+            Arc::new(GainControl::new(1.0)),
             Arc::new(GainControl::new(1.0)),
             Arc::clone(&targets),
             Arc::clone(&stop),
