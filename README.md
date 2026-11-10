@@ -44,6 +44,10 @@ Skrivli is distributed as a portable Windows application in a ZIP archive.
 
 ![Recordings view](.assets/recordings.png)
 
+### Model selection
+
+![Transcription model dialog](.assets/model-selection.png)
+
 ## For developers
 
 ### Contribution
