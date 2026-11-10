@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use crate::domain::audio::AudioBlock;
 use crate::domain::audio_frame::{AudioFrame, ChannelLayout, FRAME_LEN};
-use crate::domain::gain::SYSTEM_GAIN;
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot, MeterSlot, PeakTap};
 use crate::services::ports::{
     AudioMixer, DriftResampler, PipelineFactory, ProcessContext, ProcessError,
@@ -19,13 +18,14 @@ use crate::services::ports::{
 
 use super::echo_stats::{EchoStats, EchoStatsSlot};
 use super::steps::LinearGain;
-use super::{Aligner, AudioSource, Chain, FixedGain, SoftLimiter, SumMixer};
+use super::{Aligner, AudioSource, Chain, RampedGain, SoftLimiter, SumMixer};
 
 /// Inputs for one recording session. The production factory adds echo
 /// cancellation when `system_active` is true. The pass-through factory does not.
 pub(crate) struct PipelineSetup {
     pub(crate) system_active: bool,
-    pub(crate) gain: Arc<GainControl>,
+    pub(crate) mic_gain: Arc<GainControl>,
+    pub(crate) system_gain: Arc<GainControl>,
     pub(crate) levels: Arc<LevelSnapshot>,
 }
 
@@ -423,10 +423,10 @@ impl DriftResampler for PassThroughResampler {
 fn build_harness(setup: PipelineSetup) -> Result<Pipeline, ProcessError> {
     let limited_samples = Arc::new(AtomicU64::new(0));
     let mic = Chain::new()
-        .process(LinearGain::new(Arc::clone(&setup.gain)))
+        .process(LinearGain::new(Arc::clone(&setup.mic_gain)))
         .tap(PeakTap::new(Arc::clone(&setup.levels), MeterSlot::Mic));
     let system = Chain::new()
-        .process(FixedGain::new(SYSTEM_GAIN)?)
+        .process(RampedGain::new(Arc::clone(&setup.system_gain)))
         .tap(PeakTap::new(Arc::clone(&setup.levels), MeterSlot::System));
     let mix = Chain::new()
         .process(SoftLimiter::counting(Arc::clone(&limited_samples)))
@@ -467,7 +467,7 @@ mod tests {
     use crate::domain::audio::AudioBlock;
     use crate::domain::audio_frame::{AudioFrame, ChannelLayout, FRAME_LEN};
     use crate::domain::chunk_plan::DRIFT_THRESHOLD_FRAMES;
-    use crate::domain::gain::{soft_limit, SYSTEM_GAIN};
+    use crate::domain::gain::{soft_limit, SYSTEM_GAIN_DEFAULT};
     use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
     use crate::infrastructure::audio::resampler::StereoResampler;
     use crate::services::audio_pipeline::{Aligner, AudioSource, Chain, FixedGain, SumMixer};
@@ -622,12 +622,17 @@ mod tests {
         })
     }
 
-    fn test_pipeline(system_active: bool, gain: f32) -> (Pipeline, Arc<LevelSnapshot>) {
+    fn test_pipeline(
+        system_active: bool,
+        mic_gain: f32,
+        system_gain: f32,
+    ) -> (Pipeline, Arc<LevelSnapshot>) {
         let levels = Arc::new(LevelSnapshot::new());
         let pipeline = PassThroughPipelineFactory
             .build(PipelineSetup {
                 system_active,
-                gain: Arc::new(GainControl::new(gain)),
+                mic_gain: Arc::new(GainControl::new(mic_gain)),
+                system_gain: Arc::new(GainControl::new(system_gain)),
                 levels: Arc::clone(&levels),
             })
             .expect("pipeline");
@@ -673,7 +678,7 @@ mod tests {
         let mut samples = vec![0.0; FRAME_LEN * 2];
         samples[0] = 0.2;
         samples[1] = 0.6;
-        let (mut pipeline, _) = test_pipeline(false, 1.0);
+        let (mut pipeline, _) = test_pipeline(false, 1.0, SYSTEM_GAIN_DEFAULT);
         pipeline.push_mic(AudioBlock {
             samples,
             timeline_frame: Some(0),
@@ -694,7 +699,7 @@ mod tests {
     #[test]
     fn tail_shorter_than_a_frame_keeps_its_length() {
         // Arrange
-        let (mut pipeline, _) = test_pipeline(false, 1.0);
+        let (mut pipeline, _) = test_pipeline(false, 1.0, SYSTEM_GAIN_DEFAULT);
         pipeline.push_mic(tone(Some(0), 100, 0.25));
 
         // Act
@@ -711,13 +716,13 @@ mod tests {
     #[test]
     fn hot_sums_enter_the_limiter() {
         // Arrange
-        let (mut pipeline, levels) = test_pipeline(true, 1.0);
+        let (mut pipeline, levels) = test_pipeline(true, 1.0, SYSTEM_GAIN_DEFAULT);
 
         // Act
         pipeline.push_mic(tone(Some(0), FRAME_LEN, 1.0));
         pipeline.push_system(tone(Some(0), FRAME_LEN, 1.0));
         let mixed = pipeline.pull(0, false).expect("frame").to_vec();
-        let expected = soft_limit(1.0 + SYSTEM_GAIN);
+        let expected = soft_limit(1.0 + SYSTEM_GAIN_DEFAULT);
 
         // Assert
         assert!(!mixed.is_empty());
@@ -726,14 +731,30 @@ mod tests {
         assert!((mixed[1] - expected).abs() < 0.0001);
         assert!(pipeline.diagnostics().limited_samples > 0);
         assert!((levels.take_mic() - 1.0).abs() < 0.0001);
-        assert!((levels.take_system() - SYSTEM_GAIN).abs() < 0.0001);
+        assert!((levels.take_system() - SYSTEM_GAIN_DEFAULT).abs() < 0.0001);
         assert!((levels.take_mixed() - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn system_slider_scales_system_meter_and_mix() {
+        // Arrange
+        let (mut pipeline, levels) = test_pipeline(true, 1.0, 2.0);
+
+        // Act
+        pipeline.push_mic(tone(Some(0), FRAME_LEN, 0.0));
+        pipeline.push_system(tone(Some(0), FRAME_LEN, 0.2));
+        let mixed = pipeline.pull(0, false).expect("frame").to_vec();
+
+        // Assert
+        assert!((levels.take_system() - 0.4).abs() < 0.0001);
+        assert!((mixed[0] - 0.4).abs() < 0.0001);
+        assert!((mixed[1] - 0.4).abs() < 0.0001);
     }
 
     #[test]
     fn mic_meter_reads_audio_after_the_slider() {
         // Arrange
-        let (mut pipeline, levels) = test_pipeline(false, 2.0);
+        let (mut pipeline, levels) = test_pipeline(false, 2.0, SYSTEM_GAIN_DEFAULT);
 
         // Act
         pipeline.push_mic(tone(Some(0), FRAME_LEN, 0.2));
