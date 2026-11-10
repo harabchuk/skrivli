@@ -21,4 +21,4 @@ cargo run
 
 `cargo test` does not use a microphone, a GPU device check, or an interactive window. `cargo run` opens the Skrivli window.
 
-`scriptsbuild_run.bat` stops a running `skrivli.exe`, builds a debug binary and launches it.
+`scripts\build_run.bat` stops a running `skrivli.exe`, builds a debug binary and launches it.
