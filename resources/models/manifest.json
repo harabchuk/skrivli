@@ -25,6 +25,54 @@
       "description": "Fast and accurate in 25 European languages, including English and Swedish",
       "speed": 3,
       "accuracy": 3
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v3-q6_k",
+      "filename": "tdt-0.6b-v3-q6_k.gguf",
+      "bytes": 812700512,
+      "sha256": "5fe7e4631e645463c1f33a597391814bbb9d518b703191e936fb7ccfd2d717aa",
+      "license": "CC-BY-4.0",
+      "default": false,
+      "name": "Parakeet TDT v3 Compact (European)",
+      "description": "Smaller download, 25 European languages, including English and Swedish",
+      "speed": 3,
+      "accuracy": 2
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v3-q4_k",
+      "filename": "tdt-0.6b-v3-q4_k.gguf",
+      "bytes": 675200864,
+      "sha256": "993d73feb4206dadda865ab25bd64b50c48dc4d013c3bf6126a721f28b1d5ee8",
+      "license": "CC-BY-4.0",
+      "default": false,
+      "name": "Parakeet TDT v3 Smallest (European)",
+      "description": "Smallest download, 25 European languages, including English and Swedish",
+      "speed": 3,
+      "accuracy": 1
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v2-q8_0",
+      "filename": "tdt-0.6b-v2-q8_0.gguf",
+      "bytes": 903835936,
+      "sha256": "2027e2e1a4dc60ccdd8558f93b15e7c0db4ef8895b4e82e889f3a6275d8119c6",
+      "license": "CC-BY-4.0",
+      "default": false,
+      "name": "Parakeet TDT v2 (English)",
+      "description": "Fast and accurate, English only",
+      "speed": 3,
+      "accuracy": 3
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v2-q6_k",
+      "filename": "tdt-0.6b-v2-q6_k.gguf",
+      "bytes": 775872800,
+      "sha256": "232c382715c568cdb92f51fe8ee18e5f1acb13d8beb4dd6f0250e62da01e99d0",
+      "license": "CC-BY-4.0",
+      "default": false,
+      "name": "Parakeet TDT v2 Compact (English)",
+      "description": "Smaller download, English only",
+      "speed": 3,
+      "accuracy": 2
     }
   ]
 }

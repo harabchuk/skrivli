@@ -478,7 +478,7 @@ mod tests {
             default.sha256(),
             "ba2f13eccd4a5245be728f77e6149bd6a4fdcdd133ff2e08ac6005bcef7a99f1"
         );
-        assert_eq!(manifest.entries().len(), 2);
+        assert_eq!(manifest.entries().len(), 6);
         assert_eq!(default.license_override(), None);
         assert_eq!(default.name(), "Nemotron 3.5 (Multilingual)");
     }
@@ -512,7 +512,12 @@ mod tests {
         assert_eq!(defaults, 1);
         for entry in manifest.entries() {
             let file = entry.filename().to_lowercase();
-            assert!(file.ends_with("-q8_0.gguf"), "{file}");
+            assert!(
+                ["-q8_0.gguf", "-q6_k.gguf", "-q4_k.gguf"]
+                    .iter()
+                    .any(|suffix| file.ends_with(suffix)),
+                "{file}"
+            );
             assert!(!file.contains("f16") && !file.contains("f32"), "{file}");
         }
     }
