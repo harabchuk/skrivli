@@ -584,7 +584,7 @@ mod tests {
             models: installed
                 .iter()
                 .map(|id| ModelFile {
-                    filename: format!("ggml-{id}.bin"),
+                    filename: format!("{id}.gguf"),
                     variant_id: Some((*id).to_string()),
                 })
                 .collect(),
@@ -596,7 +596,7 @@ mod tests {
         // Arrange
         let files = model_snapshot(ModelPhase::Idle, &["a"]).models;
         let unmapped = [ModelFile {
-            filename: "ggml-x.bin".to_string(),
+            filename: "x.gguf".to_string(),
             variant_id: None,
         }];
 
@@ -840,6 +840,20 @@ mod tests {
 
         // Act
         let status = state.model_status("a");
+
+        // Assert
+        assert_eq!(status, ModelStatus::Missing);
+    }
+
+    #[test]
+    fn old_whisper_selection_shows_no_model_installed() {
+        // Arrange: settings from before the engine change still name a Whisper model,
+        // and no `.gguf` file is on disk (old `ggml-*.bin` files are not listed).
+        let mut state = presentation();
+        state.apply_model(model_snapshot(ModelPhase::Idle, &[]));
+
+        // Act
+        let status = state.model_status("base-q5_1");
 
         // Assert
         assert_eq!(status, ModelStatus::Missing);

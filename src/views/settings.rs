@@ -257,18 +257,19 @@ mod tests {
     fn row_shows_the_model_in_use_with_its_size() {
         // Arrange
         let status = ModelStatus::InUse {
-            id: "base-q5_1".to_string(),
+            id: "nemotron-3.5-streaming-0.6b-q8_0".to_string(),
         };
 
         // Act
-        let row = settings_model_row(&status, Some(59_707_625));
+        let row = settings_model_row(&status, Some(983_696_512));
 
         // Assert
         assert_eq!(
             row,
             SettingsModelRow {
-                title: "Base (Multilingual)".to_string(),
-                description: "Good balance for most meetings · 56.9 MB".to_string(),
+                title: "Nemotron Streaming (Multilingual)".to_string(),
+                description: "Accurate in 40 languages, including English and Swedish · 938.1 MB"
+                    .to_string(),
                 button: "Change model…",
                 in_use: true,
             }

@@ -1,4 +1,4 @@
-//! Discover, validate, and download local whisper.cpp GGML model files.
+//! Discover, validate, and download local speech model files (GGUF).
 //!
 //! Downloads run only from an explicit caller (never bootstrap). A failed or
 //! cancelled download leaves no accepted model file.
@@ -17,12 +17,12 @@ use sha2::{Digest, Sha256};
 use crate::common::error::AppError;
 use crate::infrastructure::platform;
 
-/// Checked-in default variant id (quantized multilingual base).
-pub(crate) const DEFAULT_VARIANT_ID: &str = "base-q5_1";
+/// Checked-in default variant id (Nemotron streaming, Q8_0).
+pub(crate) const DEFAULT_VARIANT_ID: &str = "nemotron-3.5-streaming-0.6b-q8_0";
 
 const MANIFEST_JSON: &str = include_str!("../../../resources/models/manifest.json");
-/// whisper.cpp reads a little-endian `u32` 0x67676d6c, so the bytes on disk are `lmgg`.
-const GGML_MAGIC: [u8; 4] = 0x6767_6d6c_u32.to_le_bytes();
+/// GGUF files start with the little-endian `u32` 0x46554747, which is the bytes `GGUF`.
+const GGUF_MAGIC: [u8; 4] = 0x4655_4747_u32.to_le_bytes();
 const DOWNLOAD_CHUNK: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -162,7 +162,7 @@ impl ModelManifest {
     }
 }
 
-/// A `ggml-*.bin` found under the models directory or a user-picked path.
+/// A `*.gguf` file found under the models directory or a user-picked path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DiscoveredModel {
     pub(crate) path: PathBuf,
@@ -176,7 +176,7 @@ pub(crate) struct DownloadProgress {
     pub(crate) total_bytes: Option<u64>,
 }
 
-/// List `ggml-*.bin` files under `models_dir` and optionally one extra path
+/// List `*.gguf` files under `models_dir` and optionally one extra path
 /// (a file or a directory the user chose).
 pub(crate) fn discover(
     models_dir: &Path,
@@ -188,7 +188,7 @@ pub(crate) fn discover(
     if let Some(path) = extra {
         if path.is_dir() {
             push_directory(path, manifest, &mut found);
-        } else if is_ggml_filename(path) {
+        } else if is_gguf_filename(path) {
             push_file(path, manifest, &mut found);
         }
     }
@@ -197,7 +197,7 @@ pub(crate) fn discover(
     found
 }
 
-/// Confirm the path exists, is readable, and looks like a GGML model the
+/// Confirm the path exists, is readable, and looks like a GGUF model the
 /// pinned engine can attempt to load. Missing / unreadable / unsupported are
 /// distinct [`AppError`] contexts.
 pub(crate) fn validate_model_file(path: &Path) -> Result<(), AppError> {
@@ -211,7 +211,7 @@ pub(crate) fn validate_model_file(path: &Path) -> Result<(), AppError> {
     let mut magic = [0_u8; 4];
     file.read_exact(&mut magic)
         .map_err(|source| AppError::io("model unreadable", source))?;
-    if !is_ggml_magic(magic) {
+    if !is_gguf_magic(magic) {
         return Err(AppError::message(
             "model unsupported",
             format!("unexpected magic on {}", path.display()),
@@ -220,11 +220,11 @@ pub(crate) fn validate_model_file(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Copy a user-picked GGML file into `models_dir` after [`validate_model_file`].
+/// Copy a user-picked GGUF file into `models_dir` after [`validate_model_file`].
 /// A file that is already in that directory is accepted in place.
 pub(crate) fn install_picked_file(source: &Path, models_dir: &Path) -> Result<PathBuf, AppError> {
     validate_model_file(source)?;
-    if !is_ggml_filename(source) {
+    if !is_gguf_filename(source) {
         return Err(AppError::message(
             "model unsupported",
             format!("name {}", source.display()),
@@ -391,7 +391,7 @@ fn push_directory(dir: &Path, manifest: &ModelManifest, out: &mut Vec<Discovered
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_file() && is_ggml_filename(&path) {
+        if path.is_file() && is_gguf_filename(&path) {
             push_file(&path, manifest, out);
         }
     }
@@ -409,24 +409,24 @@ fn push_file(path: &Path, manifest: &ModelManifest, out: &mut Vec<DiscoveredMode
     });
 }
 
-fn is_ggml_filename(path: &Path) -> bool {
+fn is_gguf_filename(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
             let lower = name.to_ascii_lowercase();
-            lower.starts_with("ggml-") && lower.ends_with(".bin")
+            lower.ends_with(".gguf")
         })
 }
 
-fn is_ggml_magic(magic: [u8; 4]) -> bool {
-    magic == GGML_MAGIC
+fn is_gguf_magic(magic: [u8; 4]) -> bool {
+    magic == GGUF_MAGIC
 }
 
 fn temp_sibling(path: &Path) -> PathBuf {
     let mut name = path
         .file_name()
         .map(|name| name.to_os_string())
-        .unwrap_or_else(|| std::ffi::OsString::from("model.bin"));
+        .unwrap_or_else(|| std::ffi::OsString::from("model.gguf"));
     name.push(".tmp");
     path.with_file_name(name)
 }
@@ -435,7 +435,7 @@ fn temp_sibling(path: &Path) -> PathBuf {
 mod tests {
     use super::{
         discover, install_from_reader, validate_model_file, DownloadProgress, ModelManifest,
-        DEFAULT_VARIANT_ID, GGML_MAGIC,
+        DEFAULT_VARIANT_ID, GGUF_MAGIC,
     };
     use sha2::{Digest, Sha256};
     use std::io::Cursor;
@@ -464,50 +464,74 @@ mod tests {
         let default = manifest.default_entry().expect("default");
 
         // Assert
-        assert_eq!(manifest.license(), "MIT");
+        assert_eq!(manifest.license(), "OpenMDW-1.1");
         assert!(manifest
             .source_base()
-            .starts_with("https://huggingface.co/ggerganov/whisper.cpp/"));
+            .starts_with("https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/"));
         assert_eq!(default.id(), DEFAULT_VARIANT_ID);
-        assert_eq!(default.bytes(), 59_707_625);
+        assert_eq!(
+            default.filename(),
+            "nemotron-3.5-asr-streaming-0.6b-q8_0.gguf"
+        );
+        assert_eq!(default.bytes(), 983_696_512);
         assert_eq!(
             default.sha256(),
-            "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"
+            "ba2f13eccd4a5245be728f77e6149bd6a4fdcdd133ff2e08ac6005bcef7a99f1"
         );
-        assert_eq!(manifest.entries().len(), 8);
-        assert!(manifest.by_id("small-q5_1").is_some());
-        assert!(manifest.by_id("large-v3-turbo-q5_0").is_some());
-        assert!(manifest.by_id("medium-en-q5_0").is_some());
+        assert_eq!(manifest.entries().len(), 1);
+    }
+
+    #[test]
+    fn bundled_download_address_is_pinned_to_a_commit() {
+        // Arrange
+        let manifest = bundled();
+        let entry = manifest.default_entry().expect("default");
+
+        // Act
+        let url = entry.download_url(manifest.source_base());
+
+        // Assert
+        assert_eq!(
+            url,
+            "https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/\
+             07a08a3a405d20c5434b9a1442f6e6cf571f57ad/\
+             nemotron-3.5-asr-streaming-0.6b-q8_0.gguf"
+        );
     }
 
     #[test]
     fn entry_with_its_own_url_ignores_the_source_base() {
         // Arrange
-        let manifest = bundled();
-        let swedish = manifest.by_id("kb-whisper-small-q5_0").expect("swedish");
-        let english = manifest.by_id("medium-en-q5_0").expect("english");
+        let json = r#"{"schema_version":3,"source_base":"https://example.invalid/base/",
+            "license":"MIT","models":[
+              {"id":"a","filename":"a.gguf","bytes":1,"sha256":"00",
+               "url":"https://elsewhere.invalid/x/a.gguf",
+               "name":"A","description":"a","speed":1,"accuracy":1},
+              {"id":"b","filename":"b.gguf","bytes":1,"sha256":"00",
+               "name":"B","description":"b","speed":1,"accuracy":1}
+            ]}"#;
+        let manifest = ModelManifest::parse(json).expect("manifest");
 
         // Act
-        let swedish_url = swedish.download_url(manifest.source_base());
-        let english_url = english.download_url(manifest.source_base());
+        let own = manifest
+            .by_id("a")
+            .expect("a")
+            .download_url(manifest.source_base());
+        let shared = manifest
+            .by_id("b")
+            .expect("b")
+            .download_url(manifest.source_base());
 
         // Assert
-        assert_eq!(
-            swedish_url,
-            "https://huggingface.co/KBLab/kb-whisper-small/resolve/\
-             3564d61a42fc210ceaa55a22a96dd64478959c78/ggml-model-q5_0.bin"
-        );
-        assert_eq!(
-            english_url,
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en-q5_0.bin"
-        );
+        assert_eq!(own, "https://elsewhere.invalid/x/a.gguf");
+        assert_eq!(shared, "https://example.invalid/base/b.gguf");
     }
 
     fn manifest_json(second_filename: &str, speed: u8) -> String {
         format!(
-            r#"{{"schema_version":2,"source_base":"https://example.invalid/","license":"MIT",
+            r#"{{"schema_version":3,"source_base":"https://example.invalid/","license":"MIT",
             "models":[
-              {{"id":"a","filename":"ggml-a.bin","bytes":1,"sha256":"00",
+              {{"id":"a","filename":"a.gguf","bytes":1,"sha256":"00",
                 "name":"A","description":"a","speed":1,"accuracy":1}},
               {{"id":"b","filename":"{second_filename}","bytes":1,"sha256":"00",
                 "name":"B","description":"b","speed":{speed},"accuracy":1}}
@@ -518,7 +542,7 @@ mod tests {
     #[test]
     fn manifest_accepts_valid_entries() {
         // Arrange
-        let json = manifest_json("ggml-b.bin", 3);
+        let json = manifest_json("b.gguf", 3);
 
         // Act
         let parsed = ModelManifest::parse(&json);
@@ -530,7 +554,7 @@ mod tests {
     #[test]
     fn manifest_rejects_two_models_sharing_a_local_file() {
         // Arrange
-        let json = manifest_json("ggml-a.bin", 1);
+        let json = manifest_json("a.gguf", 1);
 
         // Act
         let parsed = ModelManifest::parse(&json);
@@ -542,7 +566,7 @@ mod tests {
     #[test]
     fn manifest_rejects_a_rating_outside_one_to_three() {
         // Arrange
-        let json = manifest_json("ggml-b.bin", 4);
+        let json = manifest_json("b.gguf", 4);
 
         // Act
         let parsed = ModelManifest::parse(&json);
@@ -552,13 +576,14 @@ mod tests {
     }
 
     #[test]
-    fn discover_finds_ggml_files_and_maps_manifest_ids() {
+    fn discovers_only_gguf_files() {
         // Arrange
         let dir = temp_dir("discover");
-        let base = dir.join("ggml-base-q5_1.bin");
-        let other = dir.join("ggml-custom.bin");
-        std::fs::write(&base, b"ggml-data").expect("write base");
-        std::fs::write(&other, b"ggml-data").expect("write other");
+        let known = dir.join("nemotron-3.5-asr-streaming-0.6b-q8_0.gguf");
+        let custom = dir.join("custom.GGUF");
+        std::fs::write(&known, b"GGUF-data").expect("write known");
+        std::fs::write(&custom, b"GGUF-data").expect("write custom");
+        std::fs::write(dir.join("ggml-base-q5_1.bin"), b"lmgg-data").expect("write old");
         std::fs::write(dir.join("readme.txt"), b"no").expect("write txt");
         let manifest = bundled();
 
@@ -569,23 +594,24 @@ mod tests {
         assert_eq!(found.len(), 2);
         let mapped = found
             .iter()
-            .find(|item| item.filename == "ggml-base-q5_1.bin")
-            .expect("base");
-        assert_eq!(mapped.variant_id.as_deref(), Some("base-q5_1"));
-        let custom = found
+            .find(|item| item.filename == "nemotron-3.5-asr-streaming-0.6b-q8_0.gguf")
+            .expect("known");
+        assert_eq!(mapped.variant_id.as_deref(), Some(DEFAULT_VARIANT_ID));
+        let other = found
             .iter()
-            .find(|item| item.filename == "ggml-custom.bin")
+            .find(|item| item.filename == "custom.GGUF")
             .expect("custom");
-        assert!(custom.variant_id.is_none());
+        assert!(other.variant_id.is_none());
+        assert!(dir.join("ggml-base-q5_1.bin").is_file());
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn validate_accepts_real_whisper_header_bytes() {
-        // Arrange: first bytes of a real ggml-base-q5_1.bin (u32 0x67676d6c, little-endian).
+    fn validate_accepts_gguf_header_bytes() {
+        // Arrange: the first bytes of a GGUF file (magic, then version 3).
         let dir = temp_dir("validate-real");
-        let path = dir.join("ggml-real.bin");
-        std::fs::write(&path, [0x6c, 0x6d, 0x67, 0x67, 0x99, 0xca, 0x00, 0x00]).expect("write");
+        let path = dir.join("model.gguf");
+        std::fs::write(&path, [b'G', b'G', b'U', b'F', 3, 0, 0, 0]).expect("write");
 
         // Act
         let result = validate_model_file(&path);
@@ -596,11 +622,11 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_text_ggml_prefix() {
-        // Arrange
-        let dir = temp_dir("validate-text");
-        let path = dir.join("ggml-text.bin");
-        std::fs::write(&path, b"ggml-not-a-model").expect("write");
+    fn rejects_ggml_magic_as_unsupported() {
+        // Arrange: a whisper.cpp file header (u32 0x67676d6c, little-endian).
+        let dir = temp_dir("validate-ggml");
+        let path = dir.join("model.gguf");
+        std::fs::write(&path, [0x6c, 0x6d, 0x67, 0x67, 0x99, 0xca, 0x00, 0x00]).expect("write");
 
         // Act
         let error = validate_model_file(&path).expect_err("unsupported");
@@ -617,10 +643,10 @@ mod tests {
     fn validate_distinguishes_missing_unreadable_unsupported() {
         // Arrange
         let dir = temp_dir("validate");
-        let missing = dir.join("ggml-missing.bin");
-        let good = dir.join("ggml-good.bin");
-        let bad = dir.join("ggml-bad.bin");
-        let mut good_bytes = Vec::from(GGML_MAGIC);
+        let missing = dir.join("missing.gguf");
+        let good = dir.join("good.gguf");
+        let bad = dir.join("bad.gguf");
+        let mut good_bytes = Vec::from(GGUF_MAGIC);
         good_bytes.extend_from_slice(b"rest");
         std::fs::write(&good, &good_bytes).expect("good");
         std::fs::write(&bad, b"XXXX").expect("bad");
@@ -646,7 +672,7 @@ mod tests {
     fn install_promotes_only_when_hash_and_size_match() {
         // Arrange
         let dir = temp_dir("install-ok");
-        let dest = dir.join("ggml-base-q5_1.bin");
+        let dest = dir.join("model-a.gguf");
         let payload = b"ggml-payload-for-hash";
         let digest = hex::encode(Sha256::digest(payload));
         let cancel = AtomicBool::new(false);
@@ -669,7 +695,7 @@ mod tests {
 
         // Assert
         assert_eq!(std::fs::read(&dest).expect("read"), payload);
-        assert!(!dir.join("ggml-base-q5_1.bin.tmp").exists());
+        assert!(!dir.join("model-a.gguf.tmp").exists());
         assert!(!progress.lock().expect("lock").is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -678,7 +704,7 @@ mod tests {
     fn failed_hash_leaves_no_accepted_model() {
         // Arrange
         let dir = temp_dir("install-bad");
-        let dest = dir.join("ggml-base-q5_1.bin");
+        let dest = dir.join("model-a.gguf");
         let cancel = AtomicBool::new(false);
 
         // Act
@@ -699,7 +725,7 @@ mod tests {
             "The downloaded transcription model could not be verified."
         );
         assert!(!dest.exists());
-        assert!(!dir.join("ggml-base-q5_1.bin.tmp").exists());
+        assert!(!dir.join("model-a.gguf.tmp").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -707,7 +733,7 @@ mod tests {
     fn cancel_leaves_no_accepted_model() {
         // Arrange
         let dir = temp_dir("install-cancel");
-        let dest = dir.join("ggml-tiny-q5_1.bin");
+        let dest = dir.join("model-b.gguf");
         let cancel = AtomicBool::new(true);
 
         // Act
@@ -725,7 +751,7 @@ mod tests {
         // Assert
         assert_eq!(error.user_message(), "The model download was cancelled.");
         assert!(!dest.exists());
-        assert!(!dir.join("ggml-tiny-q5_1.bin.tmp").exists());
+        assert!(!dir.join("model-b.gguf.tmp").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 }
