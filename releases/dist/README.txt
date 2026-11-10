@@ -24,7 +24,8 @@ Where your data lives
 Transcription models
   Models are not in the ZIP. Skrivli shows the size and asks before it
   downloads one, and only downloads when you choose to. Once a model is
-  installed, transcription runs offline on your PC.
+  installed, transcription runs offline on your PC. Notices for the models
+  (Nemotron 3.5 and Parakeet TDT v3) are in the licenses folder.
 
 More
   PRIVACY.txt           what Skrivli does and does not do with your data

@@ -23,6 +23,8 @@ function Get-ExpectedEntries([string]$Root) {
         "$Root/LICENSE.txt",
         "$Root/licenses/sonora-BSD-3-Clause.txt",
         "$Root/licenses/parakeet.cpp-MIT.txt",
+        "$Root/licenses/parakeet-tdt-0.6b-v3-CC-BY-4.0.txt",
+        "$Root/licenses/nemotron-3.5-asr-OpenMDW-1.1.txt",
         "$Root/licenses/THIRD-PARTY.txt"
     )
 }
@@ -83,7 +85,9 @@ function Invoke-Package {
         @('releases\dist\PRIVACY.txt', 'PRIVACY.txt'),
         @('LICENSE', 'LICENSE.txt'),
         @('releases\licenses\sonora-BSD-3-Clause.txt', 'licenses\sonora-BSD-3-Clause.txt'),
-        @('releases\licenses\parakeet.cpp-MIT.txt', 'licenses\parakeet.cpp-MIT.txt')
+        @('releases\licenses\parakeet.cpp-MIT.txt', 'licenses\parakeet.cpp-MIT.txt'),
+        @('releases\licenses\parakeet-tdt-0.6b-v3-CC-BY-4.0.txt', 'licenses\parakeet-tdt-0.6b-v3-CC-BY-4.0.txt'),
+        @('releases\licenses\nemotron-3.5-asr-OpenMDW-1.1.txt', 'licenses\nemotron-3.5-asr-OpenMDW-1.1.txt')
     )
     if (-not $placeholder) { $files += , @($thirdParty, 'licenses\THIRD-PARTY.txt') }
     foreach ($f in $files) {

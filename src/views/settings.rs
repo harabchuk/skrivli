@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(
             row,
             SettingsModelRow {
-                title: "Nemotron Streaming (Multilingual)".to_string(),
+                title: "Nemotron 3.5 (Multilingual)".to_string(),
                 description: "Accurate in 40 languages, including English and Swedish · 938.1 MB"
                     .to_string(),
                 button: "Change model…",

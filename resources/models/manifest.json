@@ -9,9 +9,21 @@
       "bytes": 983696512,
       "sha256": "ba2f13eccd4a5245be728f77e6149bd6a4fdcdd133ff2e08ac6005bcef7a99f1",
       "default": true,
-      "name": "Nemotron Streaming (Multilingual)",
+      "name": "Nemotron 3.5 (Multilingual)",
       "description": "Accurate in 40 languages, including English and Swedish",
       "speed": 2,
+      "accuracy": 3
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v3-q8_0",
+      "filename": "tdt-0.6b-v3-q8_0.gguf",
+      "bytes": 940663680,
+      "sha256": "4d69a4a6683f4f2d952bad794c1357ca6eb628027695b4699c5a9ad4cd07d757",
+      "license": "CC-BY-4.0",
+      "default": false,
+      "name": "Parakeet TDT v3 (European)",
+      "description": "Fast and accurate in 25 European languages, including English and Swedish",
+      "speed": 3,
       "accuracy": 3
     }
   ]

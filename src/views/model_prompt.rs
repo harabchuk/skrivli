@@ -391,11 +391,11 @@ mod tests {
         // Assert
         assert_eq!(
             in_use_text.as_deref(),
-            Some("Model: Nemotron Streaming (Multilingual)")
+            Some("Model: Nemotron 3.5 (Multilingual)")
         );
         assert_eq!(
             downloading_text.as_deref(),
-            Some("Downloading Nemotron Streaming (Multilingual) 42%")
+            Some("Downloading Nemotron 3.5 (Multilingual) 42%")
         );
         assert_eq!(checking, None);
         assert_eq!(missing.as_deref(), Some("No model installed · Choose…"));
@@ -410,7 +410,7 @@ mod tests {
         let copy = model_copy(id);
 
         // Assert
-        assert_eq!(copy.name, "Nemotron Streaming (Multilingual)");
+        assert_eq!(copy.name, "Nemotron 3.5 (Multilingual)");
         assert_eq!(
             copy.description,
             "Accurate in 40 languages, including English and Swedish"
@@ -422,7 +422,7 @@ mod tests {
     fn every_manifest_entry_name_marks_its_language() {
         // Arrange
         let manifest = ModelManifest::load_bundled().expect("manifest");
-        let marks = ["(Multilingual)"];
+        let marks = ["(Multilingual)", "(European)"];
 
         // Act
         let missing: Vec<&str> = manifest
@@ -608,11 +608,11 @@ mod tests {
         // Assert
         assert_eq!(
             in_use,
-            "Nemotron Streaming (Multilingual), in use, speed 2 of 3, accuracy 3 of 3"
+            "Nemotron 3.5 (Multilingual), in use, speed 2 of 3, accuracy 3 of 3"
         );
         assert_eq!(
             missing,
-            "Nemotron Streaming (Multilingual), not installed, speed 2 of 3, accuracy 3 of 3"
+            "Nemotron 3.5 (Multilingual), not installed, speed 2 of 3, accuracy 3 of 3"
         );
     }
 

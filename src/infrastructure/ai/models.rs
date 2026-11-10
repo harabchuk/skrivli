@@ -478,7 +478,43 @@ mod tests {
             default.sha256(),
             "ba2f13eccd4a5245be728f77e6149bd6a4fdcdd133ff2e08ac6005bcef7a99f1"
         );
-        assert_eq!(manifest.entries().len(), 1);
+        assert_eq!(manifest.entries().len(), 2);
+        assert_eq!(default.license_override(), None);
+        assert_eq!(default.name(), "Nemotron 3.5 (Multilingual)");
+    }
+
+    #[test]
+    fn bundled_manifest_offers_quantized_tdt_under_its_own_license() {
+        // Arrange
+        let manifest = bundled();
+
+        // Act
+        let tdt = manifest
+            .entries()
+            .iter()
+            .find(|entry| entry.id() == "parakeet-tdt-0.6b-v3-q8_0")
+            .expect("tdt entry");
+        let defaults = manifest
+            .entries()
+            .iter()
+            .filter(|entry| entry.id() == DEFAULT_VARIANT_ID)
+            .count();
+
+        // Assert
+        assert_eq!(tdt.filename(), "tdt-0.6b-v3-q8_0.gguf");
+        assert_eq!(tdt.bytes(), 940_663_680);
+        assert_eq!(
+            tdt.sha256(),
+            "4d69a4a6683f4f2d952bad794c1357ca6eb628027695b4699c5a9ad4cd07d757"
+        );
+        assert_eq!(tdt.license_override(), Some("CC-BY-4.0"));
+        assert_eq!(tdt.name(), "Parakeet TDT v3 (European)");
+        assert_eq!(defaults, 1);
+        for entry in manifest.entries() {
+            let file = entry.filename().to_lowercase();
+            assert!(file.ends_with("-q8_0.gguf"), "{file}");
+            assert!(!file.contains("f16") && !file.contains("f32"), "{file}");
+        }
     }
 
     #[test]

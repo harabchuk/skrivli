@@ -31,7 +31,7 @@ Skrivli is distributed as a portable Windows application in a ZIP archive.
 - **Tray mode.** Hide the window to the tray and the recording keeps running.
 - **Reliable saving.** If something fails during a recording, the audio captured so far is saved. You get a warning when disk space runs low, and a recording is still saved if one device drops.
 - **Recordings library** grouped by Today, Yesterday and Earlier. It updates live when files change, and has playback with a seek bar, rename, delete to the Recycle Bin, and Show in folder.
-- **Offline transcription** with parakeet.cpp and NVIDIA's Nemotron streaming model (40 languages, including English and Swedish, with automatic language detection). The model is a one-time download of about 940 MB, only when you ask. Transcripts have `[HH:MM:SS]` timestamps, are saved as `.txt` files next to the audio, can be copied with one click, and highlight the current paragraph during playback.
+- **Offline transcription** with parakeet.cpp and your choice of two NVIDIA models: Nemotron 3.5 (40 languages) or Parakeet TDT v3 (25 European languages), both including English and Swedish, with automatic language detection. A model is a one-time download of about 940 to 984 MB, only when you ask. Transcripts have `[HH:MM:SS]` timestamps, are saved as `.txt` files next to the audio, can be copied with one click, and highlight the current paragraph during playback.
 - **Light, dark and system themes**, keyboard navigation, single instance, and the window remembers its size and position.
 
 ## Screenshots
