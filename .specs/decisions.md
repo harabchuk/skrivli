@@ -368,6 +368,6 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 **Segments:** the adapter groups words into a segment until a word ends in `.`, `?` or `!`, an `eou` event fires, or 60 words pass; `format_transcript` then breaks paragraphs on pauses over 1.5 s as before. Language tags such as `<en-US>` are stripped from words and text. The fixture clip produced no tags, so the stripping is defensive and not yet seen on real multilingual output.
 
-**Not verified:** a Swedish recording, a recording of an hour or more (memory over time), and `dumpbin /dependents` on a release exe (checked on the library test executable: no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports). Streaming quality when the 1 s FLAC blocks are resampled one by one (existing behaviour, edge effects every second) was not compared with a single resample.
+**Not verified:** a Swedish recording and a recording of an hour or more (memory over time). `dumpbin /dependents` on the release exe shows no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports. Streaming quality when the 1 s FLAC blocks are resampled one by one (existing behaviour, edge effects every second) was not compared with a single resample.
 
 **Settings and old files:** `selected_model` defaults to the Nemotron id. A stored Whisper id stays in `settings.json`, matches no installed file, and shows "No model installed". Old `ggml-*.bin` files are neither listed nor deleted.
