@@ -13,9 +13,6 @@
 //!   longest pause after [`MIN_PIECE_MS`]. With no pause at all, it goes at the
 //!   frame with the lowest speech score.
 
-// Wired in by package B (offline piece transcription).
-#![allow(dead_code)]
-
 /// Pauses that start before this are ignored.
 pub(crate) const MIN_PIECE_MS: u64 = 8_000;
 /// From here, a pause of at least [`MIN_PAUSE_MS`] is a cut.
@@ -86,7 +83,9 @@ impl CutPlanner {
         Self::default()
     }
 
-    /// Start of the piece being built.
+    /// Start of the piece being built. Only tests read it; the transcription service
+    /// tracks its own sample offset.
+    #[cfg(test)]
     pub(crate) fn piece_start_ms(&self) -> u64 {
         self.piece_start_ms
     }

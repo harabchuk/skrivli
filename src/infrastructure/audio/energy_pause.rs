@@ -4,16 +4,12 @@
 //! the 10th percentile of frame loudness over the last 10 s, so steady
 //! background noise raises the floor instead of counting as speech.
 
-// Wired in by package B (offline piece transcription).
-#![allow(dead_code)]
-
 use std::collections::VecDeque;
 
 use crate::services::ports::{PauseDetector, PauseDetectorFactory, VoiceFrame};
 
 const SAMPLE_RATE: u64 = 16_000;
 const FRAME_SAMPLES: usize = 320;
-const FRAME_MS: u64 = 20;
 /// 10 s of 20 ms frames.
 const FLOOR_WINDOW_FRAMES: usize = 500;
 /// Share of the window that sits below the noise floor.
@@ -109,6 +105,8 @@ impl PauseDetectorFactory for EnergyPauseDetectorFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const FRAME_MS: u64 = 20;
 
     fn tone(samples: usize, amplitude: f32) -> Vec<f32> {
         (0..samples)

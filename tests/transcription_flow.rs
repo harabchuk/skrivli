@@ -242,7 +242,7 @@ fn host_invalid_model_fails() {
 }
 
 #[test]
-fn host_streams_the_file_in_read_sized_feeds() {
+fn host_sends_a_short_file_as_one_piece() {
     // Arrange
     let dir = temp_dir("host-chunk");
     let audio = dir.join("long.flac");
@@ -267,10 +267,9 @@ fn host_streams_the_file_in_read_sized_feeds() {
 
     // Assert
     assert_eq!(result.phase, TranscriptionFlowPhase::Done);
-    assert!(sizes.len() >= 2, "expected multiple feeds, got {sizes:?}");
-    // 1,000 frames at 48 kHz are about 333 samples at 16 kHz.
-    let max = sizes.iter().copied().max().unwrap_or(0);
-    assert!(max <= 400, "feed too large: max={max} sizes={sizes:?}");
+    // 24,000 frames at 48 kHz are about 8,000 samples at 16 kHz, in a single call.
+    assert_eq!(sizes.len(), 1, "expected one piece, got {sizes:?}");
+    assert!((7_500..=8_500).contains(&sizes[0]), "{sizes:?}");
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -404,7 +403,7 @@ fn running_delete_cancels_before_write_and_keeps_flac() {
     write_pcm_flac(&audio, 4_000);
     seed_sidecar(&audio, 5);
     let before = fs::read(&audio).expect("before");
-    let session = IdentitySession::start(&dir, InferenceHold::DuringFeed);
+    let session = IdentitySession::start(&dir, InferenceHold::DuringPiece);
     session.wait_for_library_id(5);
     session.enqueue(5, &audio);
     session.wait_until_held();
@@ -534,7 +533,7 @@ fn late_completion_after_delete_does_not_write_transcript() {
     write_pcm_flac(&audio, 4_000);
     seed_sidecar(&audio, 10);
     let before = fs::read(&audio).expect("before");
-    let session = IdentitySession::start(&dir, InferenceHold::DuringFeed);
+    let session = IdentitySession::start(&dir, InferenceHold::DuringPiece);
     session.wait_for_library_id(10);
     session.enqueue(10, &audio);
     session.wait_until_held();

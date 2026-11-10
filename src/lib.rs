@@ -29,10 +29,11 @@ pub mod testing {
 
     use crate::common::error::AppError;
     use crate::domain::ids::RecordingId;
+    use crate::infrastructure::audio::energy_pause::EnergyPauseDetectorFactory;
     use crate::infrastructure::storage::sidecar::{
         load_sidecar, write_sidecar, Sidecar, SidecarLoad,
     };
-    use crate::services::ports::{InferencePort, InferenceSegment, SpeechStream};
+    use crate::services::ports::{InferencePort, InferenceSegment};
     use crate::services::transcription::{
         JobPhase, TranscriptionConfig, TranscriptionHost, TranscriptionSnapshot,
     };
@@ -105,17 +106,10 @@ pub mod testing {
         pub sidecar_status: Option<String>,
     }
 
-    /// Configurable fake inference for integration tests (no speech engine).
+    /// Configurable fake inference for integration tests (no speech engine). The first piece
+    /// returns the scripted text.
     pub struct FakeInferenceEngine {
         fail_load_name: Option<&'static str>,
-        fail_chunk: bool,
-        hold_ms: u64,
-        calls: Arc<Mutex<Vec<usize>>>,
-        text: String,
-    }
-
-    /// Stream over [`FakeInferenceEngine`]: the first feed returns the scripted text.
-    struct FakeStream {
         fail_chunk: bool,
         hold_ms: u64,
         calls: Arc<Mutex<Vec<usize>>>,
@@ -129,7 +123,7 @@ pub mod testing {
                 fail_chunk: false,
                 hold_ms: 0,
                 calls: Arc::new(Mutex::new(Vec::new())),
-                text: text.to_string(),
+                text: Some(text.to_string()),
             }
         }
 
@@ -171,18 +165,7 @@ pub mod testing {
 
         fn unload(&mut self) {}
 
-        fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError> {
-            Ok(Box::new(FakeStream {
-                fail_chunk: self.fail_chunk,
-                hold_ms: self.hold_ms,
-                calls: Arc::clone(&self.calls),
-                text: Some(self.text.clone()),
-            }))
-        }
-    }
-
-    impl SpeechStream for FakeStream {
-        fn feed(&mut self, samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
+        fn transcribe(&mut self, samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
             self.calls
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -204,10 +187,6 @@ pub mod testing {
                 .into_iter()
                 .collect())
         }
-
-        fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError> {
-            Ok(Vec::new())
-        }
     }
 
     /// Run one transcription job to a terminal phase (integration tests).
@@ -222,6 +201,7 @@ pub mod testing {
     ) -> TranscriptionFlowResult {
         let (host, handle) = TranscriptionHost::spawn_with_config(
             Box::new(engine),
+            Box::new(EnergyPauseDetectorFactory),
             TranscriptionConfig {
                 read_frames: config.read_frames,
             },
@@ -299,6 +279,7 @@ pub mod testing {
         let sink = Arc::clone(&order);
         let (host, handle) = TranscriptionHost::spawn_with_config(
             Box::new(engine),
+            Box::new(EnergyPauseDetectorFactory),
             TranscriptionConfig {
                 read_frames: config.read_frames,
             },
@@ -377,8 +358,8 @@ pub mod testing {
     pub enum InferenceHold {
         /// Block in `load`, before the audio file is opened, so a rename can move the file.
         BeforeOpen,
-        /// Block inside the first feed, then return text after release (a late completion).
-        DuringFeed,
+        /// Block inside the first piece, then return text after release (a late completion).
+        DuringPiece,
     }
 
     /// Library plus transcription, with a gate on the fake inference port.
@@ -407,6 +388,7 @@ pub mod testing {
             };
             let (transcription, transcription_thread) = TranscriptionHost::spawn_with_config(
                 Box::new(engine),
+                Box::new(EnergyPauseDetectorFactory),
                 TranscriptionConfig { read_frames: 1_000 },
                 Box::new(|_| {}),
             );
@@ -571,29 +553,15 @@ pub mod testing {
 
         fn unload(&mut self) {}
 
-        fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError> {
-            Ok(Box::new(HoldStream { engine: self }))
-        }
-    }
-
-    struct HoldStream<'a> {
-        engine: &'a mut HoldEngine,
-    }
-
-    impl SpeechStream for HoldStream<'_> {
-        fn feed(&mut self, _samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
-            if !self.engine.hold_before_open {
-                self.engine.block();
+        fn transcribe(&mut self, _samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
+            if !self.hold_before_open {
+                self.block();
             }
             Ok(vec![InferenceSegment {
                 start_ms: 0,
                 end_ms: 400,
                 text: "noted".into(),
             }])
-        }
-
-        fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError> {
-            Ok(Vec::new())
         }
     }
 

@@ -233,14 +233,10 @@ pub(crate) trait SingleInstance: Send + Sync {
 
 /// Shared frame type for detectors and the planner. It lives in the domain, which
 /// services and adapters may depend on, but not the reverse.
-// Wired in by package B.
-#[allow(unused_imports)]
 pub(crate) use crate::domain::cut_plan::VoiceFrame;
 
 /// Finds pauses in 16 kHz mono audio. Fed in order; reports one [`VoiceFrame`] per
 /// analysed slice, with times in ms from the first sample.
-// Wired in by package B.
-#[allow(dead_code)]
 pub(crate) trait PauseDetector {
     /// Takes any number of samples (split points are arbitrary) and returns the
     /// frames completed by them, possibly none.
@@ -252,14 +248,12 @@ pub(crate) trait PauseDetector {
 
 /// Hands out one detector per job. A model-based detector can load its model once
 /// here and share it between jobs.
-// Wired in by package B.
-#[allow(dead_code)]
 pub(crate) trait PauseDetectorFactory: Send {
     fn begin(&mut self) -> Box<dyn PauseDetector + '_>;
 }
 
 /// One transcribed segment as plain values. No engine types cross this boundary.
-/// Times are milliseconds from the start of the stream that produced it.
+/// Times are milliseconds from the start of the piece that produced it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct InferenceSegment {
     pub(crate) start_ms: u64,
@@ -268,26 +262,18 @@ pub(crate) struct InferenceSegment {
 }
 
 /// Local speech inference engine. The real adapter lives in `infrastructure/ai/parakeet.rs`.
-/// The engine loads one model, then opens streams over it. Implementations must not
-/// expose engine pointers or log transcript text / audio samples.
+/// The engine loads one model, then transcribes short pieces of audio offline, one call per
+/// piece. Implementations must not expose engine pointers or log transcript text / audio
+/// samples.
 pub(crate) trait InferencePort: Send {
     fn load(&mut self, model_path: &Path) -> Result<(), AppError>;
 
     fn unload(&mut self);
 
-    /// Open a recognition stream over the loaded model. The stream borrows the engine,
-    /// so only one stream exists at a time.
-    fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError>;
-}
-
-/// One recognition session fed with audio in order. Cancel and progress belong to the
-/// caller, which decides between feeds.
-pub(crate) trait SpeechStream {
-    /// Feed 16 kHz mono `f32` samples. Returns the segments finished by this audio, if any.
-    fn feed(&mut self, samples_f32_16k_mono: &[f32]) -> Result<Vec<InferenceSegment>, AppError>;
-
-    /// Flush the tail of the stream and return the remaining segments.
-    fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError>;
+    /// Transcribe one piece of 16 kHz mono `f32` audio (up to about 30 s). Segment times
+    /// are milliseconds from the start of the piece. An empty piece gives no segments.
+    /// Cancel and progress belong to the caller, which decides between pieces.
+    fn transcribe(&mut self, samples_16k_mono: &[f32]) -> Result<Vec<InferenceSegment>, AppError>;
 }
 
 /// Byte source for a user-initiated model download.
@@ -315,17 +301,13 @@ pub(crate) trait PlaybackSession {
 
 #[cfg(test)]
 mod inference_port_tests {
-    use super::{InferencePort, InferenceSegment, SpeechStream};
+    use super::{InferencePort, InferenceSegment};
     use crate::common::error::AppError;
     use std::path::Path;
 
     struct FakeInference {
         loaded: bool,
         fail_load: bool,
-    }
-
-    struct FakeStream {
-        fed: usize,
     }
 
     impl InferencePort for FakeInference {
@@ -341,35 +323,20 @@ mod inference_port_tests {
             self.loaded = false;
         }
 
-        fn begin_stream(&mut self) -> Result<Box<dyn SpeechStream + '_>, AppError> {
+        fn transcribe(&mut self, samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
             if !self.loaded {
                 return Err(AppError::message("inference", "model not loaded"));
             }
-            Ok(Box::new(FakeStream { fed: 0 }))
-        }
-    }
-
-    impl SpeechStream for FakeStream {
-        fn feed(&mut self, samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
-            self.fed += samples.len();
             Ok(vec![InferenceSegment {
                 start_ms: 0,
                 end_ms: 1_000,
-                text: "hello".into(),
-            }])
-        }
-
-        fn finish(self: Box<Self>) -> Result<Vec<InferenceSegment>, AppError> {
-            Ok(vec![InferenceSegment {
-                start_ms: 1_000,
-                end_ms: 2_000,
-                text: format!("tail after {}", self.fed),
+                text: format!("heard {}", samples.len()),
             }])
         }
     }
 
     #[test]
-    fn fake_port_streams_segments_and_flushes_the_tail() {
+    fn fake_port_transcribes_a_piece_after_load() {
         // Arrange
         let mut fake = FakeInference {
             loaded: false,
@@ -378,19 +345,16 @@ mod inference_port_tests {
         fake.load(Path::new("model.gguf")).expect("load");
 
         // Act
-        let mut stream = fake.begin_stream().expect("stream");
-        let fed = stream.feed(&[0.0; 160]).expect("feed");
-        let tail = stream.finish().expect("finish");
+        let segments = fake.transcribe(&[0.0; 160]).expect("transcribe");
 
         // Assert
-        assert_eq!(fed[0].text, "hello");
-        assert_eq!(tail[0].text, "tail after 160");
+        assert_eq!(segments[0].text, "heard 160");
         fake.unload();
         assert!(!fake.loaded);
     }
 
     #[test]
-    fn fake_port_refuses_a_stream_before_load() {
+    fn fake_port_refuses_a_piece_before_load() {
         // Arrange
         let mut fake = FakeInference {
             loaded: false,
@@ -398,7 +362,7 @@ mod inference_port_tests {
         };
 
         // Act
-        let error = fake.begin_stream().err().expect("unloaded");
+        let error = fake.transcribe(&[0.0; 16]).expect_err("unloaded");
 
         // Assert
         assert_eq!(error.user_message(), "Could not run speech recognition.");
