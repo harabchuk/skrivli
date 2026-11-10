@@ -197,7 +197,7 @@ Under the player the Recordings detail pane shows exactly one of these states:
 ### Transcript content
 
 - Plain text with timestamps like `[HH:MM:SS]`, including sessions longer than one hour.
-- Shown as a scrolling list with one item per paragraph, with the timestamp in a column to the left of the text. Page Up, Page Down, Home and End scroll the list while it has focus. The **Copy** button copies the whole transcript, including timestamps. Selecting part of the text is not supported; open the `.txt` file for anything finer.
+- Shown as a scrolling list with one item per paragraph, with the timestamp in a column to the left of the text. A scrollbar on the right shows where you are in the transcript and can be dragged. Page Up, Page Down, Home and End scroll the list while it has focus. The **Copy** button copies the whole transcript, including timestamps. Selecting part of the text is not supported; open the `.txt` file for anything finer.
 - Associated with the recording as a sibling text file the user owns and can open outside the app.
 
 ### Identity safety
