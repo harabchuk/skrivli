@@ -231,6 +231,33 @@ pub(crate) trait SingleInstance: Send + Sync {
     fn acquire(&self) -> Result<InstanceAcquire, AppError>;
 }
 
+/// Shared frame type for detectors and the planner. It lives in the domain, which
+/// services and adapters may depend on, but not the reverse.
+// Wired in by package B.
+#[allow(unused_imports)]
+pub(crate) use crate::domain::cut_plan::VoiceFrame;
+
+/// Finds pauses in 16 kHz mono audio. Fed in order; reports one [`VoiceFrame`] per
+/// analysed slice, with times in ms from the first sample.
+// Wired in by package B.
+#[allow(dead_code)]
+pub(crate) trait PauseDetector {
+    /// Takes any number of samples (split points are arbitrary) and returns the
+    /// frames completed by them, possibly none.
+    fn push(&mut self, samples_16k_mono: &[f32]) -> Vec<VoiceFrame>;
+
+    /// Returns the frame for any samples still held (a short final frame).
+    fn finish(&mut self) -> Vec<VoiceFrame>;
+}
+
+/// Hands out one detector per job. A model-based detector can load its model once
+/// here and share it between jobs.
+// Wired in by package B.
+#[allow(dead_code)]
+pub(crate) trait PauseDetectorFactory: Send {
+    fn begin(&mut self) -> Box<dyn PauseDetector + '_>;
+}
+
 /// One transcribed segment as plain values. No engine types cross this boundary.
 /// Times are milliseconds from the start of the stream that produced it.
 #[derive(Clone, Debug, PartialEq, Eq)]

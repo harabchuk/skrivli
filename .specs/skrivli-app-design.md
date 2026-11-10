@@ -421,6 +421,15 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 - Transcription runs after recording only. Feeding a growing file while recording is future work (section 14).
 - Keep audio source immutable during transcription. A failed job must never alter the recorded file.
 
+### 7.2a Pause detection and cut planning (wiring in progress)
+
+Status: the port, the planner and the energy detector exist and are unit tested; `transcribe_file` does not use them yet. Until it does, 7.2 describes the running behaviour.
+
+- Planned flow: decoded audio, 16 kHz mono, `PauseDetector`, `CutPlanner`, one piece of at most 30 s, offline transcription of that piece, segment times shifted by the piece start. Detection runs on the transcription worker on the same audio the engine gets, so its times match the engine's. It is not part of the recording pipeline.
+- Port (`services/ports.rs`): `PauseDetector` (`push(&[f32]) -> Vec<VoiceFrame>`, `finish()`) and `PauseDetectorFactory` (`begin()` returns one detector per job, so a model-based detector can load once). `VoiceFrame` holds start and end in ms, `silent`, and `speech_score` from 0 to 1. It is defined in `domain/cut_plan.rs` and re-exported by the ports, because the domain planner reads it and the domain must not depend on services.
+- `domain/cut_plan.rs`: pure, incremental `CutPlanner`. Pauses before 8 s into a piece are ignored; from 20 s, the middle of the first pause of at least 300 ms is a cut; at 30 s the middle of the longest pause is cut, or the quietest frame when there is none. It keeps only the frames of the open piece.
+- `infrastructure/audio/energy_pause.rs`: 20 ms frames, RMS in dBFS, noise floor as the 10th percentile over the last 10 s, silent below floor + 8 dB or below -50 dBFS, score = dB above floor / 30 clamped. A Silero-based detector can replace it behind the same port.
+
 ### 7.3 Local model management
 
 - Discover `*.gguf` files with the `GGUF` magic in `%LOCALAPPDATA%\Skrivli\models\` plus explicitly chosen user paths. Old `ggml-*.bin` Whisper files are neither listed nor deleted, so a settings file that still selects a Whisper model resolves to "No model installed".

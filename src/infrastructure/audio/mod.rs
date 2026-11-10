@@ -1,6 +1,7 @@
 //! Audio adapters. Capture uses flexaudio; OS clocks and device wake live under platform.
 
 pub(crate) mod devices;
+pub(crate) mod energy_pause;
 pub(crate) mod flex_capture;
 pub(crate) mod format;
 pub(crate) mod levels;
