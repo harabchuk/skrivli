@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::base::{v_virtual_list, VirtualListScrollHandle};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -963,6 +964,7 @@ impl MainWindow {
         let focus = self.transcript_focus.clone();
         div()
             .id("transcript-list")
+            .relative()
             .track_focus(&self.transcript_focus)
             .size_full()
             .min_h_0()
@@ -990,7 +992,8 @@ impl MainWindow {
                         .w_full()
                         .items_start()
                         .gap_3()
-                        .px_2()
+                        .pl_2()
+                        .pr_4()
                         .py_1()
                         .rounded(px(8.))
                         .when(current == Some(index), |row| row.bg(cx.theme().accent))
@@ -1013,6 +1016,7 @@ impl MainWindow {
                 })
                 .size_full(),
             )
+            .vertical_scrollbar(&self.transcript_list)
             .into_any_element()
     }
 
