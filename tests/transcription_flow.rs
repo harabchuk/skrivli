@@ -1,8 +1,8 @@
-//! Transcript write + TranscriptionHost flow. No whisper.cpp or microphone.
+//! Transcript write + TranscriptionHost flow. No speech engine or microphone.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -38,11 +38,7 @@ fn seed_sidecar(audio: &Path, id: u64) {
 }
 
 fn short_config() -> TranscriptionFlowConfig {
-    TranscriptionFlowConfig {
-        window_ms: 200,
-        overlap_ms: 40,
-        read_frames: 1_000,
-    }
+    TranscriptionFlowConfig { read_frames: 1_000 }
 }
 
 #[test]
@@ -194,11 +190,10 @@ fn host_cancel_racing_completion_is_stable() {
     seed_sidecar(&audio, 14);
     let model = dir.join("ggml-base.bin");
     fs::write(&model, b"ggml").expect("model");
-    let race = Arc::new(AtomicBool::new(true));
 
     // Act
     let result = run_transcription_flow(
-        FakeInferenceEngine::race_cancel(Arc::clone(&race)),
+        FakeInferenceEngine::race_cancel(),
         short_config(),
         14,
         &audio,
@@ -247,7 +242,7 @@ fn host_invalid_model_fails() {
 }
 
 #[test]
-fn host_long_input_stays_chunked() {
+fn host_sends_a_short_file_as_one_piece() {
     // Arrange
     let dir = temp_dir("host-chunk");
     let audio = dir.join("long.flac");
@@ -272,16 +267,9 @@ fn host_long_input_stays_chunked() {
 
     // Assert
     assert_eq!(result.phase, TranscriptionFlowPhase::Done);
-    assert!(
-        sizes.len() >= 2,
-        "expected multiple windowed infer calls, got {sizes:?}"
-    );
-    let max = sizes.iter().copied().max().unwrap_or(0);
-    let window_cap = ((0.200_f64 * 16_000.0).round() as usize) + 64;
-    assert!(
-        max <= window_cap,
-        "infer chunk too large: max={max} cap={window_cap}"
-    );
+    // 24,000 frames at 48 kHz are about 8,000 samples at 16 kHz, in a single call.
+    assert_eq!(sizes.len(), 1, "expected one piece, got {sizes:?}");
+    assert!((7_500..=8_500).contains(&sizes[0]), "{sizes:?}");
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -415,7 +403,7 @@ fn running_delete_cancels_before_write_and_keeps_flac() {
     write_pcm_flac(&audio, 4_000);
     seed_sidecar(&audio, 5);
     let before = fs::read(&audio).expect("before");
-    let session = IdentitySession::start(&dir, InferenceHold::DuringChunk { honor_cancel: true });
+    let session = IdentitySession::start(&dir, InferenceHold::DuringPiece);
     session.wait_for_library_id(5);
     session.enqueue(5, &audio);
     session.wait_until_held();
@@ -545,12 +533,7 @@ fn late_completion_after_delete_does_not_write_transcript() {
     write_pcm_flac(&audio, 4_000);
     seed_sidecar(&audio, 10);
     let before = fs::read(&audio).expect("before");
-    let session = IdentitySession::start(
-        &dir,
-        InferenceHold::DuringChunk {
-            honor_cancel: false,
-        },
-    );
+    let session = IdentitySession::start(&dir, InferenceHold::DuringPiece);
     session.wait_for_library_id(10);
     session.enqueue(10, &audio);
     session.wait_until_held();

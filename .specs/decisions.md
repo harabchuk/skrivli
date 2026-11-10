@@ -114,7 +114,9 @@ Rescue copy and startup recovery were removed later, see D-23.
 
 **Outcome:** Every Win32 / COM / `std::os::windows` call lives under `infrastructure/platform/windows/`. `platform/mod.rs` is `cfg(windows)` today and `compile_error!` on other targets. Traits (`DesktopShell`, `Trash`, `DirectoryWatch`, `SingleInstance`, `Tray`, recording clocks/capture) live in `services/ports.rs`. Free functions `replace_file`, `user_paths`, `spawn_device_watch`, `clock`, `disk`, and `performance_counter` are selected in `platform/mod.rs`. flexaudio capture stays in `infrastructure/audio/`; adapters take an injected `PerformanceCounter`. Future OS work follows **Adding a platform** in `skrivli-app-design.md` (§4.4). Product scope stays Windows until another host ships.
 
-## D-07 — whisper.cpp binding pin (CPU, Windows MSVC)
+## D-07 — whisper.cpp binding pin (CPU, Windows MSVC) (superseded by D-33)
+
+> Historical. Skrivli no longer uses whisper.cpp or `whisper-rs`; the engine is parakeet.cpp (D-33).
 
 **Outcome:** Pin **`whisper-rs` 0.16** (crates.io semver `0.16`, resolved in `Cargo.lock`) with **default features only** (CPU). No CUDA/Vulkan/Metal/OpenBLAS features. The crate’s `whisper-rs-sys` build script owns the whisper.cpp CMake build; Skrivli does not add a separate FFI crate.
 
@@ -128,7 +130,9 @@ Rescue copy and startup recovery were removed later, see D-23.
 
 **Runtime contract:** load one model on the inference worker thread; `FullParams` with `SamplingStrategy::Greedy { best_of: 1 }`; disable engine stdout (`set_print_*` false); progress and abort via safe callbacks; never log transcript text or audio samples. Default `cargo test` uses a fake `InferencePort` and does not download models or run real inference.
 
-## D-08 — Checked-in model manifest (verified HF LFS digests)
+## D-08 — Checked-in model manifest (verified HF LFS digests) (superseded by D-33)
+
+> Historical. The manifest now lists one Nemotron model (D-33). The table below is the removed Whisper catalogue. The download policy and the settings paragraph still hold, except that the default model id is now `nemotron-3.5-streaming-0.6b-q8_0` and discovery looks for `*.gguf`.
 
 **Outcome:** `resources/models/manifest.json` lists the only variants Skrivli offers for download in v1. Source base: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/`. License: **MIT**. Digests were supplied as verified Hugging Face LFS SHA-256 values for this pin:
 
@@ -241,7 +245,9 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 **Outcome:** Settings uses `settings_section` and `settings_row` in `ui/components/settings_rows.rs` (uppercase label, bordered group, text left and control right). Kit's `setting` module is not used: its `Settings` component is built around a sidebar with pages, which is too much for the current two rows. Revisit it during M8.1 once the list is longer; if it is adopted, record that here. Settings' **Change model…** dispatches `AppCommand::OpenModelDialog`. The manual checks in the plan (dialog stacking, light/dark rendering) have not been run.
 
-## D-18 — Transcription window is 10 minutes
+## D-18 — Transcription window is 10 minutes (superseded by D-33)
+
+> Historical. Recordings are now fed to the engine as one stream, so there are no windows (D-33).
 
 **Outcome:** `WINDOW_DURATION` went from 30 to 10 minutes, with the overlap still 30 seconds, and the worker passes each window to the engine as a borrowed slice instead of copying it. By calculation, peak audio and spectrogram memory falls from about 290 MB to about 58 MB, excluding the model. About 5% of the audio is now decoded twice, up from about 2%.
 
@@ -288,9 +294,9 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 
 ## D-24 — Static CRT (release plan R2)
 
-**Outcome:** `.cargo/config.toml` sets `crt-static` for `x86_64-pc-windows-msvc`. `dumpbin /dependents` on the release exe shows no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports. The remaining non-base DLLs are `icuuc.dll` (Windows 10 and later) and `mmdevapi.dll`. The whisper.cpp licence text in the ZIP is copied from the vendored source of `whisper-rs-sys` 0.15.0.
+**Outcome:** `.cargo/config.toml` sets `crt-static` for `x86_64-pc-windows-msvc`. `dumpbin /dependents` on the release exe shows no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports. The remaining non-base DLLs are `icuuc.dll` (Windows 10 and later) and `mmdevapi.dll`. The parakeet.cpp and ggml licence text in the ZIP is copied from the vendored submodule (D-33).
 
-**whisper.cpp must match:** `.cargo/config.toml` `[env]` sets `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` and `CMAKE_POLICY_DEFAULT_CMP0091=NEW` (whisper.cpp declares `cmake_minimum_required(3.5)`, so the policy is OFF otherwise). `whisper-rs-sys` forwards `CMAKE_*` env vars to CMake. Without both, a clean build compiles ggml with `/MD` and the link fails on `__imp_fgetc`, `__imp_realloc` and other CRT imports. A stale local `target/` can hide the failure; the build script does not rerun on env changes, so run `cargo clean -p whisper-rs-sys` after changing them.
+**The native engine must match (superseded by D-33):** `.cargo/config.toml` `[env]` used to set `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` and `CMAKE_POLICY_DEFAULT_CMP0091=NEW` (whisper.cpp declares `cmake_minimum_required(3.5)`, so the policy is OFF otherwise). `whisper-rs-sys` forwards `CMAKE_*` env vars to CMake. Without both, a clean build compiles ggml with `/MD` and the link fails on `__imp_fgetc`, `__imp_realloc` and other CRT imports. A stale local `target/` can hide the failure; the build script does not rerun on env changes, so run `cargo clean -p whisper-rs-sys` after changing them.
 
 **Not verified:** a clean VM without Visual Studio (M9.2 stays open).
 
@@ -341,3 +347,53 @@ No pass or fail result is recorded for those checks. The third M7.2 checkbox and
 ## D-32 — Disabled audio sources are a stored state (2026-11-09)
 
 **Outcome:** turning off the microphone or system audio is `StoredEndpoint::Disabled` (`{"mode":"disabled"}`), not a magic device id. The settings schema version is unchanged (additive). An older build reading it falls back to defaults, which is accepted before v1. `EndpointChoice::Disabled` and `ResolveError::Disabled` keep "turned off" apart from "no device". An intentionally disabled source shows no degraded warning; the sidecar `microphone_id` or `system_audio_id` is `"disabled"`. The menu label is **Disabled**. Starting with both sources disabled is refused in `build_start_request`, so the Record button, the tray and the hotkey share one check.
+
+## D-33 — parakeet.cpp pin and streaming Nemotron (2026-11-10)
+
+> Superseded in part by D-34: the engine is no longer driven as a stream. The pin, build, CPU requirement, model digest and segment rules still hold. The streaming calls, the 2 s feed gathering (`MIN_FEED_SAMPLES`) and the "cancel within a couple of seconds" figure are gone.
+
+**Outcome:** Whisper is replaced by **parakeet.cpp v0.6.1** (MIT, tag `v0.6.1`, commit `5c9b0fbbd8e611d88e47d7e1ebae9bca9b447e8f`) running **`nvidia/nemotron-3.5-asr-streaming-0.6b` at Q8_0**. It replaces D-07, the D-08 table and the D-18 window size. The Nemotron model is multilingual (40 locales, automatic language ID) and licensed OpenMDW-1.1. TDT and other chunk-based Parakeet models are out of scope.
+
+**Header checked at the tag (`include/parakeet_capi.h`, ABI version 10):**
+- Used: `parakeet_capi_abi_version`, `_load`, `_load_error`, `_free`, `_last_error`, `_stream_begin`, `_stream_feed_json`, `_stream_finalize_json`, `_stream_free`, `_free_string`. `parakeet_capi_stream_begin` (model default language, "auto") streams Nemotron 3.5; `_stream_begin_lang` also exists at this tag and would carry a language setting later.
+- Input is 16 kHz mono `f32`. The JSON document is `{"text","eou","eob","frame_sec","events","words":[{"w","start","end","conf"}]}`; `words` carries stream-relative start and end seconds, so segment times come from the engine and not from sample counts. This corrects the earlier assumption that the streaming path has no word timestamps.
+- There is **no abort callback and no progress callback**. The service checks cancel and reports progress between feeds.
+- One context may be used from several threads (calls queue behind one backend; the last-error buffer is written under a lock), so `ParakeetInference` is `Send` and not `Sync`.
+
+**Build:** the engine is the submodule `third_party/parakeet.cpp`. `build.rs` runs CMake through the `cmake` crate: `Release`, static (`BUILD_SHARED_LIBS=OFF`), `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` with `CMAKE_POLICY_DEFAULT_CMP0091=NEW` (the same static CRT rule as D-24), `PARAKEET_BUILD_CLI/SERVER/TESTS=OFF`, `PARAKEET_WITH_CED=OFF`, `PARAKEET_WITH_VOICEDETECT=OFF`, `GGML_NATIVE=OFF`, `GGML_OPENMP=OFF` (OpenMP would import `vcomp140.dll`). It links `parakeet`, `ggml`, `ggml-base` and `ggml-cpu`. The Cargo dev profile makes the cmake crate pass no optimisation flags even with `.profile("Release")`, which ran the engine at about 0.27x real time, so `CMAKE_C_FLAGS_RELEASE` and `CMAKE_CXX_FLAGS_RELEASE` are set to `/O2 /Ob2 /DNDEBUG` explicitly. No libclang is needed; the declarations are written by hand. A build host needs CMake and Git, and the clone needs `--recurse-submodules`. CMake configure applies `third_party/ggml-patches` to the nested ggml checkout, so that checkout shows as modified in `git status`; that is expected and is not committed.
+
+**CPU requirement:** with `GGML_NATIVE=OFF` the ggml defaults turn on SSE4.2, AVX, AVX2, BMI2 and FMA, so the build assumes an AVX2 CPU (Intel Haswell 2013 / AMD Excavator 2015 or newer). It does not use the build machine's own flags, so one binary runs on all such CPUs. Not verified on an older CPU.
+
+**Model:** `nemotron-3.5-asr-streaming-0.6b-q8_0.gguf` from `mudler/parakeet-cpp-gguf` at commit `07a08a3a405d20c5434b9a1442f6e6cf571f57ad`, 983,696,512 bytes (938.1 MiB), SHA-256 `ba2f13eccd4a5245be728f77e6149bd6a4fdcdd133ff2e08ac6005bcef7a99f1`. The size and digest were confirmed by downloading the file once and hashing it, not only from the Hugging Face LFS record. `manifest.json` is schema 3.
+
+**Measured (Ryzen 7 7840HS, default 8 engine threads, 7.4 s English clip, release-optimised native code):** load 0.26 s, streaming 2.0 s, about 3.6x real time, so a one-hour recording should take about 17 minutes. The same clip fed in 0.25 s, 0.5 s or 1 s blocks gave dropped and repeated words ("Well Well", "ebe Phoebe", "ly certainly"); blocks of 2 s or more (and one whole-clip feed) gave the clean text. The adapter therefore gathers audio into blocks of at least 2 s (`MIN_FEED_SAMPLES`). The model also loaded and transcribed from a path with non-ASCII characters.
+
+**Segments:** the adapter groups words into a segment until a word ends in `.`, `?` or `!`, an `eou` event fires, or 60 words pass; `format_transcript` then breaks paragraphs on pauses over 1.5 s as before. Language tags such as `<en-US>` are stripped from words and text. The fixture clip produced no tags, so the stripping is defensive and not yet seen on real multilingual output.
+
+**Not verified:** a Swedish recording and a recording of an hour or more (memory over time). `dumpbin /dependents` on the release exe shows no `vcruntime140`, `msvcp140` or `api-ms-win-crt` imports. Streaming quality when the 1 s FLAC blocks are resampled one by one (existing behaviour, edge effects every second) was not compared with a single resample.
+
+**Settings and old files:** `selected_model` defaults to the Nemotron id. A stored Whisper id stays in `settings.json`, matches no installed file, and shows "No model installed". Old `ggml-*.bin` files are neither listed nor deleted.
+
+## D-34 — Offline pieces cut at pauses (2026-11-10)
+
+**Outcome:** the recording is no longer fed to the engine as one stream. After recording it is cut at pauses into pieces of about 8 to 30 s, and each piece is transcribed offline with `parakeet_capi_transcribe_pcm_batch_json` (one clip, 16 kHz, decoder 0 = the model's own decoder). This supersedes the streaming parts of D-33.
+
+**Findings (a real 2:20 Swedish recording with two speakers, Nemotron 3.5 Q8_0):**
+- Streaming over one long stream dropped four whole phrases of 1.7 to 5 s, mostly at male to female handovers. Examples: "Problemet är inte att tolka runorna" at about 41 s and "Ok, låt oss backa bandet till vikingatiden" at about 19 s. The audio was clear. Skrivli does no speaker recognition, so the speakers are not the cause in themselves.
+- Offline (full-context) transcription of the same audio recovered them, and so did a fresh short stream over a window around the gap.
+- State carried over a long stream is the trigger: a stream that had run for about 20 s still dropped the phrase, one with about 5 s of history did not. Resetting the RNN-T decoder on language tags made it worse, which points at the streaming encoder's attention cache rather than the decoder.
+- parakeet.cpp checked streaming Nemotron against NeMo only on short single-speaker clips (`docs/parity.md`), so long multi-speaker input is outside its parity evidence.
+
+**Cut rules (`domain/cut_plan.rs`, relative to the start of the open piece):** `MIN_PIECE` 8 s (earlier pauses are ignored); from `PREFERRED_PIECE` 20 s the middle of the first pause of at least `MIN_PAUSE` 300 ms (once it has ended) is a cut; at `MAX_PIECE` 30 s the middle of the longest pause after 8 s is cut, or the frame with the lowest speech score when there is no silence at all. A recording shorter than 8 s is one piece. The planner holds only the frames of the open piece.
+
+**Energy detector (`infrastructure/audio/energy_pause.rs`):** 20 ms frames (320 samples), RMS in dBFS, noise floor = 10th percentile of frame loudness over the last 10 s (500 frames), a frame is silent below floor + 8 dB or below -50 dBFS, speech score = dB above floor / 30 clamped to 0..1. Detection runs on the transcription worker on the same 16 kHz mono audio the engine gets, so its times match the engine's word times. A Silero detector (already in parakeet.cpp) can replace it behind the `PauseDetector` port.
+
+**Cancel-latency trade-off:** the engine has no abort callback, so cancel is checked between pieces. A piece of 30 s or less takes about 8 s on the reference laptop (about 3.6x real time), so the worst-case cancel is about 8 s instead of about 1 s. The product spec says "within about 10 seconds". Progress is reported per piece (samples transcribed over total samples, held below 100 until saved), so it moves in steps of up to 30 s of audio.
+
+**Adapter:** pieces under 100 ms (1,600 samples) return no segments without an engine call. The streaming FFI declarations, `ParakeetStream`, `FeedBuffer` and `MIN_FEED_SAMPLES` are removed. Words are grouped by a fresh `Segmenter` per piece (sentence end or 60 words), language tags stripped, and times are shifted by the piece start in the service.
+
+**Result with pieces (Nemotron 3.5 Q8_0, same recording, release build, energy detector):** both example phrases are present. 7 pieces, 11.9 s for 2:20 of audio, about 11.7x real time on the reference laptop.
+
+**Model list (Package C):** the manifest (schema 3, same `source_base` commit `07a08a3a405d20c5434b9a1442f6e6cf571f57ad`, Q8_0 only, no F16) now holds two entries. `nemotron-3.5-streaming-0.6b-q8_0` keeps its id so saved settings still match, and is renamed "Nemotron 3.5 (Multilingual)" (OpenMDW-1.1, default). `parakeet-tdt-0.6b-v3-q8_0` is new: file `tdt-0.6b-v3-q8_0.gguf`, 940,663,680 bytes, SHA-256 `4d69a4a6683f4f2d952bad794c1357ca6eb628027695b4699c5a9ad4cd07d757`, licence CC-BY-4.0 as a per-entry override, "Parakeet TDT v3 (European)", 25 European languages. Size and digest were confirmed by one full download from the pinned URL. Notices for both models ship in `licenses\` (CC BY 4.0 requires credit to NVIDIA, the licence link and a note that the GGUF is a converted, quantized copy).
+
+**Model results (same 2:20 Swedish recording, release build, energy detector, decoder 0):** TDT v3 loads and transcribes through the existing adapter with no change (decoder 0 picks TDT). Whole test run including model load: 13.8 s for TDT v3, 14.3 s for Nemotron 3.5 (about 10x real time for both; the engine does not print load time separately). Both models produce "Problemet är inte att tolka runorna" (about 41 s) and "backa bandet till vikingatiden" (about 19 s). No `<xx-XX>` language tag leaked from either. Quality is close: in the first 30 s each model has two to three visibly wrong words, in different places (TDT v3: one wrong verb form and one wrong noun, "Nordens" heard as another word; Nemotron: one split word, one dropped word, one glued word pair). Nemotron keeps the second sentence at 41 s as a short sentence of its own, TDT v3 runs it on into the next clause. Neither is clearly better on this clip, so Nemotron stays the default and TDT v3 is offered for European languages at a slightly smaller download.

@@ -1,0 +1,17 @@
+Nemotron 3.5 ASR (model notice)
+===============================
+
+Skrivli can download the speech model "Nemotron 3.5 (Multilingual)" on demand,
+only when you choose it. The model is not part of this package.
+
+Model:    nvidia/nemotron-3.5-asr-streaming-0.6b
+Author:   NVIDIA
+Licence:  OpenMDW License Agreement, version 1.1 (OpenMDW-1.1)
+          https://openmdw.ai/
+Source:   https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b
+
+Changes: the file Skrivli downloads (nemotron-3.5-asr-streaming-0.6b-q8_0.gguf)
+is a copy of the model that the parakeet.cpp project converted to the GGUF
+format and quantized to Q8_0. The model was not retrained. The copy is
+published at https://huggingface.co/mudler/parakeet-cpp-gguf. The licence text
+is part of the model repository above.

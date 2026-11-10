@@ -5,7 +5,7 @@
 **UI:** **GPUI Kit** (`gpui-kit`) on GPUI, with its styled component library; pin a Windows-tested version  
 **Status:** Greenfield application design and phased implementation plan.
 
-Skrivli records microphone and system playback audio concurrently, aligns and mixes the sources into a local audio file, and optionally transcribes a completed recording with an offline Whisper-compatible model. It operates from a desktop window and Windows notification area (system tray).
+Skrivli records microphone and system playback audio concurrently, aligns and mixes the sources into a local audio file, and optionally transcribes a completed recording with an offline speech model, one short piece at a time. It operates from a desktop window and Windows notification area (system tray).
 
 This document defines a new Windows-first application built from scratch with Rust and **GPUI Kit**. **`AGENTS.md` is authoritative for source placement, layering and coding conventions.** Use **GPUI Kit as the primary application UI framework**, including its bundled, compatible GPUI runtime and styled components; verify the pinned Kit version on Windows before committing to window/tray integration APIs.
 
@@ -39,7 +39,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 1. Create a **single Cargo package** with `src/main.rs` as a thin entry point and `src/lib.rs` as a testable application library. Introduce a workspace only if an independent component has a concrete need.
 2. Pin the Rust toolchain when appropriate, commit `Cargo.lock`, and select a **Windows-tested GPUI Kit revision** with its compatible GPUI runtime. Prove that a basic window starts and renders on Windows before building the full UI.
 3. Implement feature-oriented, cohesive Rust modules with clear domain, service, infrastructure, and presentation boundaries; follow **`AGENTS.md`** for source placement and coding conventions.
-4. Integrate native libraries only where needed, such as whisper.cpp through Rust bindings or a tightly scoped FFI layer. Keep native build steps isolated and reproducible.
+4. Integrate native libraries only where needed, such as parakeet.cpp through a tightly scoped FFI layer. Keep native build steps isolated and reproducible.
 5. Set up Windows application identity, icon, manifest, and version metadata using suitable Rust-compatible build tooling. Validate DPI behavior with the pinned GPUI backend.
 6. Establish logging, typed errors, configuration defaults, deterministic tests, and formatting/linting checks from the first milestone.
 
@@ -56,15 +56,15 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | Device format conversion | flexaudio normalizer to 48 kHz stereo `f32`. The pipeline's Rubato nudge runs on the session thread | Internal 48 kHz stereo `f32`; device ids from `flexaudio::devices()` |
 | Audio pipeline | `Pipeline` on the session thread, bounded SPSC buffers | Align, mono microphone downmix, echo cancellation, sonora microphone gain, fixed system gain, sum, soft limit, peak taps |
 | Recording | `flac-codec` 1.3 `FlacSampleWriter`, PCM16 stereo 48 kHz, level 5 | Streamed straight to `.flac.partial`; renamed to `.flac` on finalize. FLAC is the only container |
-| Transcription | whisper.cpp via maintained Rust bindings or a pinned FFI adapter | Local CPU inference; explicitly controlled native build, optional acceleration later |
-| Default model | Quantized multilingual `base` model, subject to verified catalog/hash | Model isn't shipped; download only after user confirmation |
+| Transcription | parakeet.cpp v0.6.1 (submodule, C API declared by hand, built by `build.rs`) | Local CPU inference of short pieces (offline `transcribe_pcm_batch_json`, D-34); static `/MT` build, no GPU backends (D-33) |
+| Default model | Nemotron 3.5 ASR 0.6B, Q8_0 GGUF, verified against the manifest hash (Parakeet TDT v3 0.6B Q8_0 is the second choice) | Model isn't shipped; download only after user confirmation |
 | Persistent settings | `serde` + `serde_json` under `%APPDATA%\Skrivli\settings.json` | Atomic replacement and validation |
 | Recordings/metadata | Filesystem + JSON sidecars | Avoid DB for v1 |
 | Async work | Dedicated audio threads and one transcription worker; channels to UI | GPUI foreground tasks only for UI-coordinating work |
 | Diagnostics | `tracing` + rotating file sink, or comparable maintained solution | `%LOCALAPPDATA%\Skrivli\logs\` |
 | Tests | Built-in Rust `#[test]`, integration tests in root `tests/` | No hardware for deterministic DSP tests |
 
-**Technical validation points:** (1) GPUI Kit and its pinned GPUI Windows backend and window lifecycle; (2) WASAPI loopback behavior and format negotiation on target devices; (3) whisper.cpp binding, model formats, and licensing; (4) `flac-codec` encode/decode of 48 kHz stereo PCM16. Do not claim all of these APIs are already supported by a particular crate until proven with a small executable.
+**Technical validation points:** (1) GPUI Kit and its pinned GPUI Windows backend and window lifecycle; (2) WASAPI loopback behavior and format negotiation on target devices; (3) the parakeet.cpp engine build, model format and licensing (validated, D-33); (4) `flac-codec` encode/decode of 48 kHz stereo PCM16. Do not claim all of these APIs are already supported by a particular crate until proven with a small executable.
 
 ---
 
@@ -112,7 +112,7 @@ This is a firm framework decision, **not** an optional later UI improvement.
  │ infrastructure/                                                      │
  │  audio: flexaudio mic + loopback → SPSC → Pipeline → peak snapshots │
  │  files: FLAC writer / Rodio output / writability probe │
- │  ai: decode → 16 kHz mono → whisper.cpp → transcript                  │
+ │  ai: decode → 16 kHz mono → pause detector → cut planner → parakeet.cpp piece │
  │  storage: settings / library / sidecars (no OS APIs)                 │
  │  platform/: shell, tray, trash, watch, replace, clocks, disk, wake   │
  └───────────────────────────────────────────────────────────────────────┘
@@ -188,7 +188,7 @@ Do not sprinkle `cfg` through views, services, domain, or storage. If a call nee
 - **Capture.** Do not write a new `CapturePort` for Linux or macOS. flexaudio already selects the backend (cpal mic; PipeWire, WASAPI, or macOS system loopback) and normalizes to 48 kHz stereo `f32`. Keep `infrastructure/audio/flex_capture.rs`. Pass that OS’s `PerformanceCounter` into the existing adapters so the worker does not call QPC. Re-enumerate with `flexaudio::devices()` into the same `DeviceCatalog`. Implement `spawn_device_watch` for that OS: Windows needs `IMMNotificationClient` because flexaudio’s `DeviceWatcher` is a no-op except on Linux; an OS where `flexaudio::watch_devices` reports events should use that and still call `enumerate_catalog`. Do not change the pipeline. A capture adapter under `platform/<os>/` is only for a target flexaudio does not support.
 - **Playback.** `services/playback.rs` owns the command loop (`PlayerHost`: play, pause, resume, seek, stop). It talks to a `PlaybackOutput` port (a `Send` factory) whose `PlaybackSession` is created and used only on the player worker, because OS output streams are not `Send`. `files/player.rs` is the only Rodio user: Rodio 0.21 (cpal 0.16, default features off, only `playback`), fed by `FlacSource`, a `flac-codec` `FlacSampleReader` wrapped as a seekable Rodio `Source` on the default output device. The worker uses `recv_timeout(100 ms)` while a session is live, and each tick publishes the end of playback (`Idle`, position 0) or a changed position. `PlayerSnapshot` carries `phase` (`Idle`, `Playing`, `Paused`, `Error`), `recording_id`, `notice`, `position_ms` and `duration_ms`; the bridge keeps only the latest one, so state, not events, is published. Seeking while paused stays paused, and a seek past the end clamps to the duration. Rename, delete and selection change stop playback first. Another OS output adapter would sit behind the same port.
 - **Packaging.** Windows icon and manifest stay in `build.rs`. Add that OS’s bundle, `.desktop` file, or equivalent beside it. Do not compile `winresource` for the new target.
-- **Not built yet.** When autostart, global hotkey, or whisper.cpp land, their OS APIs and native build flags go under `platform/<os>/` (or that crate’s build script), behind a port in `services/ports.rs`. Services do not link shell or inference libraries themselves.
+- **Not built yet.** When autostart or a global hotkey land, their OS APIs and native build flags go under `platform/<os>/` (or that crate’s build script), behind a port in `services/ports.rs`. Services do not link shell or inference libraries themselves.
 
 **Prove it**
 
@@ -259,7 +259,7 @@ skrivli/
 │   │   │   └── format.rs
 │   │   ├── ai/
 │   │   │   ├── mod.rs
-│   │   │   ├── whisper.rs
+│   │   │   ├── parakeet.rs         # parakeet.cpp C API adapter (only engine pointers)
 │   │   │   ├── models.rs
 │   │   │   └── fetch.rs            # HTTP ModelSource; tests never construct it
 │   │   ├── storage/
@@ -270,7 +270,7 @@ skrivli/
 │   │   ├── files/
 │   │   │   ├── mod.rs
 │   │   │   ├── flac.rs             # FlacWriter
-│   │   │   ├── transcript_reader.rs  # bounded-chunk FLAC decode for Whisper
+│   │   │   ├── transcript_reader.rs  # bounded-chunk FLAC decode for transcription
 │   │   │   ├── player.rs           # Rodio output + FlacSource (PlaybackOutput adapter)
 │   │   │   └── writable.rs         # recordings folder probe
 │   │   └── platform/
@@ -326,7 +326,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `domain/` | Audio formats, `AudioBlock`, `RecordPhase`, `ThemePreference`, timeline, recording metadata |
 | `services/` | Recording sessions, playback host, idle level monitoring, transcription jobs, model download host |
 | `infrastructure/audio/` | flexaudio capture adapters, device catalog, the 48 kHz drift resampler, and the sonora echo and gain steps (no OS APIs). Production code imports `sonora` only in `sonora_steps.rs` |
-| `infrastructure/ai/` | Whisper engine integration and local model management |
+| `infrastructure/ai/` | Speech engine adapter (parakeet.cpp) and local model management |
 | `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
 | `infrastructure/files/` | FLAC writer, Rodio output session with FLAC source, transcript reader, writability probe |
 | `infrastructure/platform/` | Sole home for OS APIs: shell, tray, trash, watch, replace, clocks, disk, device wake |
@@ -403,30 +403,42 @@ Idle ──start──▶ Starting ──ready──▶ Recording ──stop─�
 
 ### 7.1 Engine and FFI ownership
 
-- Use a pinned whisper.cpp revision exposed through a maintained Rust crate/bindings or a minimal `whisper-sys`-style adapter. Verify ABI/API compatibility and bundle notices/licenses. Keep FFI in `infrastructure/ai/whisper.rs` or a dedicated internal binding crate if justified.
-- Build CPU inference by default. Do not enable GPU backends until there is a supported Windows packaging path.
-- Load the selected model once per active service session; optionally unload after about five minutes of idle time to release memory.
-- Defaults: multilingual auto language detection, translation off, conservative CPU thread count (roughly available cores minus one), no console output from inference.
-- Translate engine progress/abort callbacks into structured events and a cancellation flag, without touching GPUI from the callback.
-- Collect segment text, timestamps and engine metadata into domain transcript types. Keep all engine-owned pointers/buffers inside their safe lifetime and thread context.
-- Optional voice activity detection, after validating supported model and engine version, to skip silence and reduce fabricated text.
+- The engine is parakeet.cpp **v0.6.1**, vendored as the git submodule `third_party/parakeet.cpp` and built by `build.rs` through the `cmake` crate as static, CPU-only libraries (`parakeet`, `ggml`, `ggml-base`, `ggml-cpu`) with the static MSVC runtime. The exact flags, ABI version and pin are in D-33. Licences for parakeet.cpp and ggml ship in `releases/licenses/parakeet.cpp-MIT.txt`.
+- The flat C API (`include/parakeet_capi.h`) is declared by hand in a private `ffi` module of `infrastructure/ai/parakeet.rs`. That is the only module that holds engine pointers. There is no `-sys` crate and no bindgen, so a build needs no libclang. `load` checks `parakeet_capi_abi_version()` against the header version the declarations were written for.
+- Ownership. `ParakeetInference` owns the `parakeet_ctx*` and frees it in `Drop`. There is no stream object: each `transcribe` call is one self-contained engine call. Every returned `char*` is copied and then released with `parakeet_capi_free_string`. Errors come from `parakeet_capi_last_error` / `parakeet_capi_load_error` into `AppError` with the `load model` and `inference` contexts. `ParakeetInference` is `Send` (the header documents a context as usable from several threads) and not `Sync`; it moves to the transcription worker.
+- The port is `InferencePort` (`load`, `unload`, `transcribe(&mut self, samples_16k_mono: &[f32]) -> Result<Vec<InferenceSegment>, AppError>`) in `services/ports.rs`. `transcribe` takes one piece of 16 kHz mono `f32` (up to about 30 s) and returns `InferenceSegment`s with times in ms from the start of that piece. An empty or sub-100 ms piece returns no segments without calling the engine. Another engine implements the same trait; the service does not change. The adapter calls `parakeet_capi_transcribe_pcm_batch_json` with one clip, 16 kHz and decoder 0 (the model's own decoder); the result is a JSON array with one `{"text","words":[{"w","start","end","conf"}],"tokens"}` object.
+- Language is detected automatically by the model. Segments are built from the engine's word times: words are grouped until a sentence end (`. ? !`), or 60 words, and stray language tags such as `<en-US>` are removed. A fresh `Segmenter` is used per piece. If a model returned text without word times, the segment spans the whole piece.
+- Build CPU inference only. The engine has no abort or progress callback, so the service owns both between pieces.
+- Load the selected model once per job; unload when the job ends.
+- Nothing in the adapter logs transcript text or samples. Engine chatter goes to the process stderr, not into `tracing`.
 
-### 7.2 Input normalization and chunking
+### 7.2 Input normalization and pieces
 
 - Decode finalized `.flac` files with `flac-codec` in bounded chunks (`transcript_reader.rs`); refuse `.partial` and any non-FLAC file, naming the format. Other formats are not supported.
-- Convert decoded input to **16 kHz mono `f32`** with explicit downmix and anti-alias resampling. Verify sample counts and timestamps.
-- Do not decode a two-hour file into a single in-memory buffer. Stream/cut long recordings into approximately **10-minute chunks** with a 30-second overlap, offset segment timestamps and deduplicate content in overlap regions.
+- Convert each decoded block to **16 kHz mono `f32`** with explicit downmix and anti-alias resampling (`resample.rs`).
+- Pipeline: `FLAC → 16 kHz mono → PauseDetector → CutPlanner → InferencePort::transcribe(piece) → add piece offset → format_transcript`. `transcribe_file` reads about one second of 48 kHz stereo per block, resamples it, pushes it to a `PauseDetector` (one per job, from the injected `PauseDetectorFactory`) and feeds the frames to a `CutPlanner`. It keeps only the samples of the open piece, so a two-hour file is never held in memory. Cuts are in ms and convert exactly to samples (16 per ms). Every sample lands in exactly one piece, in order, including audio after the last detector frame. There is no overlap or de-duplication.
+- For each cut and for the final piece the service checks cancel, calls `transcribe`, shifts the segment times by the piece start, and reports progress as samples transcribed over total samples, held below 100 until the transcript is saved. Cancel is also checked between read blocks. A piece of 30 s or less takes about 8 s on the reference laptop, so cancel takes effect within about 10 s (D-34).
+- Transcription runs after recording only. Feeding a growing file while recording is future work (section 14).
 - Keep audio source immutable during transcription. A failed job must never alter the recorded file.
+
+### 7.2a Pause detection and cut planning
+
+The port, the planner and the energy detector are wired into `transcribe_file` (7.2). `TranscriptionHost::spawn*` takes a `Box<dyn PauseDetectorFactory>` next to the inference port, and `app/bootstrap.rs` passes `EnergyPauseDetectorFactory`.
+
+- Flow: decoded audio, 16 kHz mono, `PauseDetector`, `CutPlanner`, one piece of at most 30 s, offline transcription of that piece, segment times shifted by the piece start. Detection runs on the transcription worker on the same audio the engine gets, so its times match the engine's. It is not part of the recording pipeline.
+- Port (`services/ports.rs`): `PauseDetector` (`push(&[f32]) -> Vec<VoiceFrame>`, `finish()`) and `PauseDetectorFactory` (`begin()` returns one detector per job, so a model-based detector can load once). `VoiceFrame` holds start and end in ms, `silent`, and `speech_score` from 0 to 1. It is defined in `domain/cut_plan.rs` and re-exported by the ports, because the domain planner reads it and the domain must not depend on services.
+- `domain/cut_plan.rs`: pure, incremental `CutPlanner`. Pauses before 8 s into a piece are ignored; from 20 s, the middle of the first pause of at least 300 ms is a cut; at 30 s the middle of the longest pause is cut, or the quietest frame when there is none. It keeps only the frames of the open piece.
+- `infrastructure/audio/energy_pause.rs`: 20 ms frames, RMS in dBFS, noise floor as the 10th percentile over the last 10 s, silent below floor + 8 dB or below -50 dBFS, score = dB above floor / 30 clamped. A Silero-based detector can replace it behind the same port.
 
 ### 7.3 Local model management
 
-- Discover `ggml-*.bin` in `%LOCALAPPDATA%\Skrivli\models\` plus explicitly chosen user paths.
+- Discover `*.gguf` files with the `GGUF` magic in `%LOCALAPPDATA%\Skrivli\models\` plus explicitly chosen user paths. Old `ggml-*.bin` Whisper files are neither listed nor deleted, so a settings file that still selects a Whisper model resolves to "No model installed".
 - On first use without a model, show a GPUI Kit dialog that lists every manifest variant. Each row carries an In use or Installed tag from `model_install_state`. Download installs that variant. The dialog hides its close button and ignores backdrop and Escape until the download reaches Ready, then the window closes it.
 - `services/models.rs` `ModelHost` owns that download. `app/bootstrap.rs` spawns it and `app/shutdown.rs` joins it, same as `TranscriptionHost`. The view never hashes a file or opens a socket. Bytes come through `ModelSource` on `services/ports.rs`; `infrastructure/ai/fetch.rs` is the HTTP adapter and tests inject a reader. Progress is one coalesced `ModelSnapshot` on the bridge (latest wins), reduced into `Presentation`.
-- `DesktopShell::pick_model_file` in `infrastructure/platform/windows/shell.rs` remains for a later local-file picker. The prompt does not call it. `ModelHost::accept_file` still validates and copies a picked path off the GPUI thread. Missing, hash-mismatch (`verify model`), and unsupported files each surface `AppError::user_message()` in a Kit alert.
+- `DesktopShell::pick_model_file` in `infrastructure/platform/windows/shell.rs` (filter `*.gguf`) remains for a later local-file picker. The prompt does not call it. `ModelHost::accept_file` still validates and copies a picked path off the GPUI thread. Missing, hash-mismatch (`verify model`), and unsupported files each surface `AppError::user_message()` in a Kit alert.
 - Downloads must be **user-initiated only**, with progress, resumability where supported, and **SHA-256 verification against a maintained trusted manifest** before a file is accepted. Download to a temporary file and rename after verification. The prompt downloads the variant the user selected, states each variant's size, and says that a network is required. Settings shows the model in use and its **Change model…** button dispatches `AppCommand::OpenModelDialog`; the remaining Settings fields are M8.1.
-- `resources/models/manifest.json` is the single source for each model's download details and its display copy (name, description, speed and accuracy from 1 to 3). `ModelManifest::parse` rejects duplicate ids or filenames and out-of-range ratings. An entry may set its own `url` and `license` when hosted outside `source_base`; `filename` is always the unique local name. Provide English/multilingual/language-specific options only when the pinned engine supports the selected model files. Do not hardcode unverified model sizes or hashes.
-- Language, model and CPU thread count are configurable. A local-model workflow is fully offline after installation.
+- `resources/models/manifest.json` (schema 3) is the single source for each model's download details and its display copy (name, description, speed and accuracy from 1 to 3). `ModelManifest::parse` rejects duplicate ids or filenames and out-of-range ratings. An entry may set its own `url` and `license` when hosted outside `source_base`; `filename` is always the unique local name. Today it holds two Q8_0 entries, `nemotron-3.5-streaming-0.6b-q8_0` (default, OpenMDW-1.1) and `parakeet-tdt-0.6b-v3-q8_0` (CC-BY-4.0 as a per-entry `license`), pinned to a Hugging Face commit with its byte size and SHA-256. Do not hardcode unverified model sizes or hashes.
+- Model and CPU thread count are configurable later; there is no language setting because the model detects the language. A local-model workflow is fully offline after installation.
 
 ### 7.4 Plain-text output
 
@@ -560,8 +572,8 @@ Privacy by default: no accounts, telemetry, network transcription or automatic m
 
 - Build target: `x86_64-pc-windows-msvc` on a supported Windows 10/11 development machine. Verify the selected GPUI Kit distribution’s minimum Windows and compiler requirements on target machines.
 - Install the Rust toolchain and the required MSVC/Windows SDK build tools for Windows linking and any native dependencies.
-- Cargo owns application dependency graph. Pin the exact GPUI Kit version (and its compatible GPUI runtime) and whisper/ggml integration versions; commit `Cargo.lock` for the app.
-- If linking whisper.cpp directly, configure its source/build via a documented Rust `build.rs`/`cmake`/`cc`-based build (or a maintained Rust wrapper's build process). Keep C++ build flags scoped to the native library.
+- Cargo owns application dependency graph. Pin the exact GPUI Kit version (and its compatible GPUI runtime); the speech engine is pinned by the `third_party/parakeet.cpp` submodule tag; commit `Cargo.lock` for the app.
+- `build.rs` builds the parakeet.cpp submodule with the `cmake` crate. Build hosts need CMake and Git, and a clone needs `--recurse-submodules`; The CI and release workflows must check out submodules (`submodules: recursive` on `actions/checkout`); that edit is still to be made in `.github/workflows/ci.yml` and `release.yml`. Keep C++ build flags scoped to the native library, and force `/O2` because the cmake crate would otherwise build the engine unoptimised in a dev profile.
 - Use `build.rs` and an appropriate resource compiler for Windows manifest, icon and version info; keep source resources in `resources/`.
 - Recommended local commands:
 
@@ -629,7 +641,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 | **M3 — Loopback + mixer** | Loopback capture, timestamp alignment, ring buffers, mixer, gains, level meters and idle monitoring | Synthetic tests pass; real two-source sync verified |
 | **M4 — Robustness** | Endpoint changes, disk checks, privacy flow, shutdown behavior | Device loss and interrupted recording preserve usable data |
 | **M5 — Recording library** | Library scan/watch, sidecars, list, playback, rename/delete/open folder | Files remain correctly paired and selected (implemented; hardware browse/playback spot-check still recommended) |
-| **M6 — Transcription** | Pinned whisper.cpp binding, decoder/resampler, model manager, FIFO worker, text formatter | Offline transcription yields correct `.txt` and supports cancel |
+| **M6 — Transcription** | Pinned parakeet.cpp engine, decoder/resampler, model manager, FIFO worker, text formatter | Offline transcription yields correct `.txt` and supports cancel |
 | **M7 — Transcript UI** | Paragraph list with Copy button, transcript statuses, progress and notification | Entire recording-to-transcript flow works from UI |
 | **M8 — Settings and polish** | Settings UI, hotkey/autostart, DPI and keyboard accessibility | User preferences persist and critical interactions are accessible |
 | **M9 — Release** | Release build, portable ZIP, licensing/README/privacy notes, manual test pass | Clean Windows machine can run app and record/transcribe |
@@ -648,9 +660,9 @@ Each milestone ends with a runnable app or independently validated recording fun
 | Driver rejects requested format/conversion | Probe `IsFormatSupported`/mix format; test alternate converter path |
 | Very long session | User Maximum meeting duration (default 3 h, ceiling 12 h); FLAC has no 4 GB limit |
 | Speaker echo | Echo removal is always on while system audio is captured. There is no off switch. Double-talk can reduce the user's own voice while the far side is talking. The stored file is the processed mix, so a bad result cannot be recovered afterwards. |
-| Silence hallucination in Whisper | VAD when verified, conservative duplicate cleanup, progress/cancel |
-| whisper.cpp FFI/build mismatch | Pin tested native revision/binding; minimal isolated adapter; CI native-build test |
-| High CPU/memory on slow laptops | Quantized model choice, one inference job, bounded chunking, no blocking UI work |
+| Repeated or invented text on silence | Conservative duplicate cleanup, progress/cancel |
+| parakeet.cpp FFI/build mismatch | Pin the tested tag as a submodule; hand-written adapter checks the ABI version at load; CI native-build test |
+| High CPU/memory on slow laptops | Q8_0 model, one inference job, bounded streaming reads, no blocking UI work |
 | Recording interrupted by crash/disk failure | Partial files, periodic flush/sync and actionable error |
 | Windows Shell/notification behavior changes | Native adapter with manual Windows/Explorer restart tests |
 
@@ -659,7 +671,7 @@ Each milestone ends with a runnable app or independently validated recording fun
 ## 14. Future work
 
 - Differentiate local microphone from remote participant speech using separate stems and/or diarization.
-- Live transcription using rolling windows once the asynchronous audio pipeline is established.
+- Live transcription while recording. The streaming engine API exists (D-33) but dropped phrases on long streams (D-34), so this needs a separate design.
 - Local summaries and action items (e.g. llama.cpp), without cloud dependency by default.
 - Full-text transcript search across the recording library.
 - Optional ggml GPU acceleration on supported Windows systems, with a validated distribution path.

@@ -375,10 +375,10 @@ mod tests {
     fn status_text_covers_every_model_status() {
         // Arrange
         let in_use = ModelStatus::InUse {
-            id: "base-q5_1".to_string(),
+            id: "nemotron-3.5-streaming-0.6b-q8_0".to_string(),
         };
         let downloading = ModelStatus::Downloading {
-            id: "small-q5_1".to_string(),
+            id: "nemotron-3.5-streaming-0.6b-q8_0".to_string(),
             percent: 42,
         };
 
@@ -389,10 +389,13 @@ mod tests {
         let missing = model_status_text(&ModelStatus::Missing);
 
         // Assert
-        assert_eq!(in_use_text.as_deref(), Some("Model: Base (Multilingual)"));
+        assert_eq!(
+            in_use_text.as_deref(),
+            Some("Model: Nemotron 3.5 (Multilingual)")
+        );
         assert_eq!(
             downloading_text.as_deref(),
-            Some("Downloading Small (Multilingual) 42%")
+            Some("Downloading Nemotron 3.5 (Multilingual) 42%")
         );
         assert_eq!(checking, None);
         assert_eq!(missing.as_deref(), Some("No model installed · Choose…"));
@@ -401,25 +404,25 @@ mod tests {
     #[test]
     fn copy_comes_from_the_manifest() {
         // Arrange
-        let id = "kb-whisper-medium-q5_0";
+        let id = "nemotron-3.5-streaming-0.6b-q8_0";
 
         // Act
         let copy = model_copy(id);
 
         // Assert
-        assert_eq!(copy.name, "KB-Whisper Medium (Swedish)");
+        assert_eq!(copy.name, "Nemotron 3.5 (Multilingual)");
         assert_eq!(
             copy.description,
-            "Tuned for Swedish, high accuracy, slowest to run"
+            "Accurate in 40 languages, including English and Swedish"
         );
-        assert_eq!(copy.ratings, Some((1, 3)));
+        assert_eq!(copy.ratings, Some((2, 3)));
     }
 
     #[test]
     fn every_manifest_entry_name_marks_its_language() {
         // Arrange
         let manifest = ModelManifest::load_bundled().expect("manifest");
-        let marks = ["(Multilingual)", "(English)", "(Swedish)"];
+        let marks = ["(Multilingual)", "(European)", "(English)"];
 
         // Act
         let missing: Vec<&str> = manifest
@@ -596,7 +599,7 @@ mod tests {
     #[test]
     fn accessibility_label_includes_the_state() {
         // Arrange
-        let copy = model_copy("base-q5_1");
+        let copy = model_copy("nemotron-3.5-streaming-0.6b-q8_0");
 
         // Act
         let in_use = row_accessibility_label(&copy, ModelInstallState::InUse);
@@ -605,11 +608,11 @@ mod tests {
         // Assert
         assert_eq!(
             in_use,
-            "Base (Multilingual), in use, speed 3 of 3, accuracy 2 of 3"
+            "Nemotron 3.5 (Multilingual), in use, speed 2 of 3, accuracy 3 of 3"
         );
         assert_eq!(
             missing,
-            "Base (Multilingual), not installed, speed 3 of 3, accuracy 2 of 3"
+            "Nemotron 3.5 (Multilingual), not installed, speed 2 of 3, accuracy 3 of 3"
         );
     }
 

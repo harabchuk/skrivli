@@ -1,0 +1,17 @@
+Parakeet TDT 0.6b v3 (model notice)
+===================================
+
+Skrivli can download the speech model "Parakeet TDT v3 (European)" on demand,
+only when you choose it. The model is not part of this package.
+
+Model:    nvidia/parakeet-tdt-0.6b-v3
+Author:   NVIDIA
+Licence:  Creative Commons Attribution 4.0 International (CC BY 4.0)
+          https://creativecommons.org/licenses/by/4.0/
+Source:   https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+
+Changes: the file Skrivli downloads (tdt-0.6b-v3-q8_0.gguf) is a copy of the
+model that the parakeet.cpp project converted to the GGUF format and quantized
+to Q8_0. The model was not retrained. The copy is published at
+https://huggingface.co/mudler/parakeet-cpp-gguf and is licensed under the same
+CC BY 4.0 terms. NVIDIA does not endorse Skrivli or this copy.

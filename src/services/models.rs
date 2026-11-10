@@ -375,7 +375,7 @@ mod tests {
 
     use sha2::{Digest, Sha256};
 
-    use super::{ModelHost, ModelPhase, ModelSnapshot};
+    use super::{accepted_models, ModelHost, ModelPhase, ModelSnapshot};
     use crate::common::error::AppError;
     use crate::infrastructure::ai::models::{validate_model_file, ModelManifest};
     use crate::services::ports::ModelSource;
@@ -425,8 +425,8 @@ mod tests {
                 "license": "MIT",
                 "models": [
                     {{
-                        "id": "base-q5_1",
-                        "filename": "ggml-base-q5_1.bin",
+                        "id": "model-a",
+                        "filename": "model-a.gguf",
                         "bytes": {bytes},
                         "sha256": "{sha}",
                         "default": true,
@@ -436,8 +436,8 @@ mod tests {
                         "accuracy": 2
                     }},
                     {{
-                        "id": "tiny-q5_1",
-                        "filename": "ggml-tiny-q5_1.bin",
+                        "id": "model-b",
+                        "filename": "model-b.gguf",
                         "bytes": {bytes},
                         "sha256": "{sha}",
                         "default": false,
@@ -459,8 +459,8 @@ mod tests {
                 "source_base": "https://example.invalid/models",
                 "license": "MIT",
                 "models": [{{
-                    "id": "base-q5_1",
-                    "filename": "ggml-base-q5_1.bin",
+                    "id": "model-a",
+                    "filename": "model-a.gguf",
                     "bytes": {bytes},
                     "sha256": "{sha}",
                     "default": true,
@@ -506,7 +506,7 @@ mod tests {
             std::env::temp_dir().join(format!("skrivli-model-pick-id-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
-        let body = b"lmgg".repeat(40);
+        let body = b"GGUF".repeat(40);
         let sha = hex::encode(Sha256::digest(&body));
         let manifest = two_variant_manifest(body.len() as u64, &sha);
         let snaps = Arc::new(Mutex::new(Vec::new()));
@@ -525,14 +525,14 @@ mod tests {
         );
 
         // Act
-        host.download("tiny-q5_1");
+        host.download("model-b");
         let _snap = wait_phase(&snaps, ModelPhase::Ready);
         host.shutdown();
         let _ = handle.join();
 
         // Assert
-        assert!(dir.join("ggml-tiny-q5_1.bin").is_file());
-        assert!(!dir.join("ggml-base-q5_1.bin").exists());
+        assert!(dir.join("model-b.gguf").is_file());
+        assert!(!dir.join("model-a.gguf").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -542,7 +542,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("skrivli-model-ok-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
-        let body = b"lmgg".repeat(80);
+        let body = b"GGUF".repeat(80);
         let sha = hex::encode(Sha256::digest(&body));
         let manifest = tiny_manifest(body.len() as u64, &sha);
         let reads = Arc::new(Mutex::new(0_usize));
@@ -568,7 +568,7 @@ mod tests {
         let _ = handle.join();
 
         // Assert
-        let installed = dir.join("ggml-base-q5_1.bin");
+        let installed = dir.join("model-a.gguf");
         assert!(installed.is_file());
         assert!(validate_model_file(&installed).is_ok());
         assert_eq!(snap.progress_percent, 100);
@@ -616,7 +616,7 @@ mod tests {
             snap.failure,
             Some("The downloaded transcription model could not be verified.")
         );
-        assert!(!dir.join("ggml-base-q5_1.bin").exists());
+        assert!(!dir.join("model-a.gguf").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -657,10 +657,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("skrivli-model-pick-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
-        let bad = dir.join("ggml-bad.bin");
+        let bad = dir.join("bad.gguf");
         std::fs::write(&bad, b"nope").expect("bad");
-        let good = dir.join("ggml-picked.bin");
-        std::fs::write(&good, b"lmgg-ok").expect("good");
+        let good = dir.join("picked.gguf");
+        std::fs::write(&good, b"GGUF-ok").expect("good");
         let snaps = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&snaps);
         let (host, handle) = ModelHost::spawn(
@@ -676,7 +676,7 @@ mod tests {
         );
 
         // Act
-        host.accept_file(PathBuf::from("missing-ggml.bin"));
+        host.accept_file(PathBuf::from("missing.gguf"));
         let missing = wait_after(&snaps, 0, ModelPhase::Failed);
         let after_missing = snaps.lock().expect("snaps").len();
         host.accept_file(bad);
@@ -699,7 +699,26 @@ mod tests {
         assert!(ready
             .models
             .iter()
-            .any(|model| model.filename.contains("ggml")));
+            .any(|model| model.filename.contains("picked")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn old_whisper_files_are_ignored_and_left_on_disk() {
+        // Arrange
+        let dir = std::env::temp_dir().join(format!("skrivli-model-old-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let old = dir.join("ggml-base-q5_1.bin");
+        std::fs::write(&old, [0x6c, 0x6d, 0x67, 0x67, 0, 0, 0, 0]).expect("old model");
+        let manifest = ModelManifest::load_bundled().expect("manifest");
+
+        // Act
+        let accepted = accepted_models(&dir, &manifest);
+
+        // Assert
+        assert!(accepted.is_empty());
+        assert!(old.is_file());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -122,7 +122,7 @@ fn pick_model_file() -> Result<Option<PathBuf>, AppError> {
             .map_err(|error| AppError::message("choose model", error.to_string()))?;
     let title = wide("Choose a transcription model");
     let filter_name = wide("Transcription models");
-    let filter_spec = wide("*.bin");
+    let filter_spec = wide("*.gguf");
     unsafe {
         let current = dialog
             .GetOptions()

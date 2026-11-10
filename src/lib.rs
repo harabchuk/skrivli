@@ -29,6 +29,7 @@ pub mod testing {
 
     use crate::common::error::AppError;
     use crate::domain::ids::RecordingId;
+    use crate::infrastructure::audio::energy_pause::EnergyPauseDetectorFactory;
     use crate::infrastructure::storage::sidecar::{
         load_sidecar, write_sidecar, Sidecar, SidecarLoad,
     };
@@ -86,8 +87,6 @@ pub mod testing {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct TranscriptionFlowConfig {
-        pub window_ms: u64,
-        pub overlap_ms: u64,
         pub read_frames: usize,
     }
 
@@ -107,14 +106,14 @@ pub mod testing {
         pub sidecar_status: Option<String>,
     }
 
-    /// Configurable fake inference for integration tests (no whisper.cpp).
+    /// Configurable fake inference for integration tests (no speech engine). The first piece
+    /// returns the scripted text.
     pub struct FakeInferenceEngine {
         fail_load_name: Option<&'static str>,
         fail_chunk: bool,
         hold_ms: u64,
-        race_complete_then_cancel: Arc<AtomicBool>,
         calls: Arc<Mutex<Vec<usize>>>,
-        text: String,
+        text: Option<String>,
     }
 
     impl FakeInferenceEngine {
@@ -123,9 +122,8 @@ pub mod testing {
                 fail_load_name: Some("invalid.bin"),
                 fail_chunk: false,
                 hold_ms: 0,
-                race_complete_then_cancel: Arc::new(AtomicBool::new(false)),
                 calls: Arc::new(Mutex::new(Vec::new())),
-                text: text.to_string(),
+                text: Some(text.to_string()),
             }
         }
 
@@ -147,10 +145,9 @@ pub mod testing {
             engine
         }
 
-        pub fn race_cancel(flag: Arc<AtomicBool>) -> Self {
+        pub fn race_cancel() -> Self {
             let mut engine = Self::success("maybe");
             engine.hold_ms = 50;
-            engine.race_complete_then_cancel = flag;
             engine
         }
     }
@@ -168,49 +165,27 @@ pub mod testing {
 
         fn unload(&mut self) {}
 
-        fn transcribe_chunk(
-            &mut self,
-            samples_f32_16k_mono: &[f32],
-            cancel: &Arc<AtomicBool>,
-            on_progress: &mut dyn FnMut(u8),
-        ) -> Result<Vec<InferenceSegment>, AppError> {
+        fn transcribe(&mut self, samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
             self.calls
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push(samples_f32_16k_mono.len());
+                .push(samples.len());
             if self.hold_ms > 0 {
-                let steps = (self.hold_ms / 20).max(1);
-                for _ in 0..steps {
-                    if cancel.load(Ordering::Acquire) {
-                        return Err(AppError::message("transcription cancelled", "cancel"));
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            }
-            if self.race_complete_then_cancel.swap(false, Ordering::AcqRel) {
-                on_progress(100);
-                if cancel.load(Ordering::Acquire) {
-                    return Err(AppError::message("transcription cancelled", "cancel"));
-                }
-                return Ok(vec![InferenceSegment {
-                    start_ms: 0,
-                    end_ms: 10,
-                    text: self.text.clone(),
-                }]);
+                std::thread::sleep(Duration::from_millis(self.hold_ms));
             }
             if self.fail_chunk {
                 return Err(AppError::message("inference", "engine boom"));
             }
-            if cancel.load(Ordering::Acquire) {
-                return Err(AppError::message("transcription cancelled", "cancel"));
-            }
-            on_progress(50);
-            on_progress(100);
-            Ok(vec![InferenceSegment {
-                start_ms: 0,
-                end_ms: 500,
-                text: self.text.clone(),
-            }])
+            Ok(self
+                .text
+                .take()
+                .map(|text| InferenceSegment {
+                    start_ms: 0,
+                    end_ms: 500,
+                    text,
+                })
+                .into_iter()
+                .collect())
         }
     }
 
@@ -226,9 +201,8 @@ pub mod testing {
     ) -> TranscriptionFlowResult {
         let (host, handle) = TranscriptionHost::spawn_with_config(
             Box::new(engine),
+            Box::new(EnergyPauseDetectorFactory),
             TranscriptionConfig {
-                window: Duration::from_millis(config.window_ms),
-                overlap: Duration::from_millis(config.overlap_ms),
                 read_frames: config.read_frames,
             },
             Box::new(|_| {}),
@@ -305,9 +279,8 @@ pub mod testing {
         let sink = Arc::clone(&order);
         let (host, handle) = TranscriptionHost::spawn_with_config(
             Box::new(engine),
+            Box::new(EnergyPauseDetectorFactory),
             TranscriptionConfig {
-                window: Duration::from_millis(config.window_ms),
-                overlap: Duration::from_millis(config.overlap_ms),
                 read_frames: config.read_frames,
             },
             Box::new(move |snap: TranscriptionSnapshot| {
@@ -380,14 +353,13 @@ pub mod testing {
         }
     }
 
-    /// Where the fake inference blocks. No microphone and no whisper.cpp.
+    /// Where the fake inference blocks. No microphone and no speech engine.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum InferenceHold {
         /// Block in `load`, before the audio file is opened, so a rename can move the file.
         BeforeOpen,
-        /// Block inside `transcribe_chunk`. When `honor_cancel` is false the chunk
-        /// still returns text after release (a late completion callback).
-        DuringChunk { honor_cancel: bool },
+        /// Block inside the first piece, then return text after release (a late completion).
+        DuringPiece,
     }
 
     /// Library plus transcription, with a gate on the fake inference port.
@@ -412,19 +384,12 @@ pub mod testing {
                 entered: Mutex::new(Some(entered_tx)),
                 release: Mutex::new(Some(release_rx)),
                 hold_before_open: matches!(hold, InferenceHold::BeforeOpen),
-                honor_cancel: matches!(
-                    hold,
-                    InferenceHold::BeforeOpen | InferenceHold::DuringChunk { honor_cancel: true }
-                ),
                 held: false,
             };
             let (transcription, transcription_thread) = TranscriptionHost::spawn_with_config(
                 Box::new(engine),
-                TranscriptionConfig {
-                    window: Duration::from_millis(200),
-                    overlap: Duration::from_millis(40),
-                    read_frames: 1_000,
-                },
+                Box::new(EnergyPauseDetectorFactory),
+                TranscriptionConfig { read_frames: 1_000 },
                 Box::new(|_| {}),
             );
             let trash = Arc::new(RecordingTrash {
@@ -550,7 +515,6 @@ pub mod testing {
         entered: Mutex<Option<Sender<()>>>,
         release: Mutex<Option<Receiver<()>>>,
         hold_before_open: bool,
-        honor_cancel: bool,
         held: bool,
     }
 
@@ -589,20 +553,10 @@ pub mod testing {
 
         fn unload(&mut self) {}
 
-        fn transcribe_chunk(
-            &mut self,
-            _samples_f32_16k_mono: &[f32],
-            cancel: &Arc<AtomicBool>,
-            on_progress: &mut dyn FnMut(u8),
-        ) -> Result<Vec<InferenceSegment>, AppError> {
+        fn transcribe(&mut self, _samples: &[f32]) -> Result<Vec<InferenceSegment>, AppError> {
             if !self.hold_before_open {
                 self.block();
             }
-            if self.honor_cancel && cancel.load(Ordering::Acquire) {
-                return Err(AppError::message("transcription cancelled", "cancel"));
-            }
-            on_progress(50);
-            on_progress(100);
             Ok(vec![InferenceSegment {
                 start_ms: 0,
                 end_ms: 400,

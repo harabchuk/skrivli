@@ -1,57 +1,16 @@
-//! Transcript windows, segments, and deterministic plain-text formatting.
+//! Transcript segments and deterministic plain-text formatting.
 //!
 //! No file I/O, GPUI, Windows, or AI/engine types live here. Infrastructure
 //! resamples audio and writes the formatted UTF-8 bytes to `<basename>.txt`.
 
 use std::time::Duration;
 
-/// Nominal transcription window length (~10 minutes).
-pub(crate) const WINDOW_DURATION: Duration = Duration::from_secs(10 * 60);
-/// Fixed overlap between consecutive windows (for de-duplication).
-pub(crate) const WINDOW_OVERLAP: Duration = Duration::from_secs(30);
 /// Pause between segments that starts a new paragraph (~1.5 s).
 pub(crate) const PARAGRAPH_PAUSE: Duration = Duration::from_millis(1_500);
 /// Maximum wall span covered by one paragraph before a forced break (~60 s).
 pub(crate) const PARAGRAPH_MAX_SPAN: Duration = Duration::from_secs(60);
 /// Keep this many identical consecutive segments; drop further runaway repeats.
 const REPEAT_KEEP: usize = 2;
-
-/// Global timeline offset for one planned decode window.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TranscriptWindow {
-    index: u32,
-    /// Inclusive start on the recording timeline.
-    offset: Duration,
-    /// Exclusive end on the recording timeline.
-    end: Duration,
-    /// Leading overlap with the previous window (`Duration::ZERO` for the first).
-    overlap: Duration,
-}
-
-impl TranscriptWindow {
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn index(self) -> u32 {
-        self.index
-    }
-
-    pub(crate) fn offset(self) -> Duration {
-        self.offset
-    }
-
-    pub(crate) fn end(self) -> Duration {
-        self.end
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn overlap(self) -> Duration {
-        self.overlap
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn duration(self) -> Duration {
-        self.end.saturating_sub(self.offset)
-    }
-}
 
 /// One timed transcript segment from the recording start.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,60 +41,6 @@ impl TranscriptSegment {
     pub(crate) fn text(&self) -> &str {
         &self.text
     }
-
-    /// Shift timestamps by a global window offset (chunk stitching).
-    pub(crate) fn with_offset(self, offset_ms: u64) -> Self {
-        Self {
-            start_ms: self.start_ms.saturating_add(offset_ms),
-            end_ms: self.end_ms.saturating_add(offset_ms),
-            text: self.text,
-        }
-    }
-}
-
-/// Plan ~10-minute windows for a known streaming length.
-///
-/// Only durations are retained — callers never need to buffer the full PCM.
-pub(crate) fn plan_windows(total: Duration) -> Vec<TranscriptWindow> {
-    if total.is_zero() {
-        return Vec::new();
-    }
-    let hop = WINDOW_DURATION.saturating_sub(WINDOW_OVERLAP);
-    if hop.is_zero() {
-        return vec![TranscriptWindow {
-            index: 0,
-            offset: Duration::ZERO,
-            end: total,
-            overlap: Duration::ZERO,
-        }];
-    }
-
-    let mut windows = Vec::new();
-    let mut offset = Duration::ZERO;
-    let mut index = 0_u32;
-    loop {
-        let end = (offset + WINDOW_DURATION).min(total);
-        let overlap = if index == 0 {
-            Duration::ZERO
-        } else {
-            WINDOW_OVERLAP.min(offset)
-        };
-        windows.push(TranscriptWindow {
-            index,
-            offset,
-            end,
-            overlap,
-        });
-        if end >= total {
-            break;
-        }
-        offset = offset.saturating_add(hop);
-        if offset >= total {
-            break;
-        }
-        index = index.saturating_add(1);
-    }
-    windows
 }
 
 /// Format elapsed wall time as `[HH:MM:SS]` (always includes hours).
@@ -150,32 +55,6 @@ pub(crate) fn format_timestamp(elapsed: Duration) -> String {
 /// Format milliseconds as `[HH:MM:SS]`.
 pub(crate) fn format_timestamp_ms(elapsed_ms: u64) -> String {
     format_timestamp(Duration::from_millis(elapsed_ms))
-}
-
-/// Merge overlapping chunk windows: drop segments whose global start falls
-/// inside the previous window's exclusive overlap half.
-pub(crate) fn stitch_segments(
-    windows: &[(u64, Vec<TranscriptSegment>)],
-    overlap_ms: u64,
-) -> Vec<TranscriptSegment> {
-    let mut out = Vec::new();
-    let mut cutoff_ms = 0_u64;
-    for (window_index, (offset_ms, segments)) in windows.iter().enumerate() {
-        for segment in segments {
-            let shifted = segment.clone().with_offset(*offset_ms);
-            if window_index > 0 && shifted.start_ms() < cutoff_ms {
-                continue;
-            }
-            out.push(shifted);
-        }
-        if let Some(last) = segments.last() {
-            let window_end = offset_ms.saturating_add(last.end_ms());
-            cutoff_ms = window_end.saturating_sub(overlap_ms / 2);
-        } else if window_index > 0 {
-            cutoff_ms = offset_ms.saturating_add(overlap_ms / 2);
-        }
-    }
-    out
 }
 
 /// Deterministic UTF-8 transcript body with timestamps and paragraph breaks.
@@ -383,8 +262,7 @@ pub(crate) fn current_paragraph(
 mod tests {
     use super::{
         cleanup_repeated_lines, current_paragraph, format_timestamp, format_transcript,
-        parse_transcript, plan_windows, stitch_segments, TranscriptSegment, PARAGRAPH_MAX_SPAN,
-        PARAGRAPH_PAUSE, WINDOW_DURATION, WINDOW_OVERLAP,
+        parse_transcript, TranscriptSegment, PARAGRAPH_MAX_SPAN, PARAGRAPH_PAUSE,
     };
     use std::time::Duration;
 
@@ -398,85 +276,6 @@ mod tests {
 
         // Assert
         assert_eq!(text, "[01:01:01]");
-    }
-
-    #[test]
-    fn plans_ten_minute_windows() {
-        // Arrange
-        let total = Duration::from_secs(25 * 60);
-
-        // Act
-        let windows = plan_windows(total);
-
-        // Assert
-        let ends: Vec<_> = windows.iter().map(|w| w.end().as_secs()).collect();
-        assert_eq!(ends, vec![600, 1_170, 1_500]);
-    }
-
-    #[test]
-    fn plans_streaming_windows_with_fixed_overlap() {
-        // Arrange — just over one window so a second window appears.
-        let total = WINDOW_DURATION + Duration::from_secs(60);
-
-        // Act
-        let windows = plan_windows(total);
-
-        // Assert
-        assert_eq!(windows.len(), 2);
-        assert_eq!(windows[0].offset(), Duration::ZERO);
-        assert_eq!(windows[0].end(), WINDOW_DURATION);
-        assert_eq!(windows[0].overlap(), Duration::ZERO);
-        assert_eq!(
-            windows[1].offset(),
-            WINDOW_DURATION.saturating_sub(WINDOW_OVERLAP)
-        );
-        assert_eq!(windows[1].overlap(), WINDOW_OVERLAP);
-        assert_eq!(windows[1].end(), total);
-        assert!(windows[1].duration() < WINDOW_DURATION);
-    }
-
-    #[test]
-    fn plan_windows_does_not_buffer_two_hour_pcm() {
-        // Arrange — only a duration is passed (no sample buffer exists).
-        let two_hours = Duration::from_secs(2 * 60 * 60);
-
-        // Act
-        let windows = plan_windows(two_hours);
-
-        // Assert — hop is 9.5 minutes → several windows, no audio allocation.
-        assert!(windows.len() >= 4);
-        assert_eq!(windows.first().map(|w| w.offset()), Some(Duration::ZERO));
-        assert_eq!(windows.last().map(|w| w.end()), Some(two_hours));
-        for window in &windows {
-            assert!(window.duration() <= WINDOW_DURATION);
-            if window.index() > 0 {
-                assert_eq!(window.overlap(), WINDOW_OVERLAP);
-            }
-        }
-    }
-
-    #[test]
-    fn stitches_overlapping_windows_without_dup_midpoint() {
-        // Arrange
-        let first = vec![
-            TranscriptSegment::new(0, 1_000, "hello"),
-            TranscriptSegment::new(28_000, 29_000, "edge"),
-        ];
-        let second = vec![
-            TranscriptSegment::new(0, 1_000, "dup"),
-            TranscriptSegment::new(3_000, 4_000, "next"),
-        ];
-        let windows = vec![(0_u64, first), (25_000_u64, second)];
-
-        // Act
-        let stitched = stitch_segments(&windows, 5_000);
-
-        // Assert
-        assert_eq!(stitched.len(), 3);
-        assert_eq!(stitched[0].text(), "hello");
-        assert_eq!(stitched[1].text(), "edge");
-        assert_eq!(stitched[2].text(), "next");
-        assert_eq!(stitched[2].start_ms(), 28_000);
     }
 
     #[test]
