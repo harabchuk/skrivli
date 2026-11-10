@@ -179,6 +179,10 @@ fn lock_fake(mutex: &Mutex<FakeState>) -> std::sync::MutexGuard<'_, FakeState> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
+/// Upper bound for every wait. Waits return as soon as the event arrives, so a
+/// generous limit only matters when a loaded CI runner stalls disk I/O.
+const WAIT_LIMIT: Duration = Duration::from_secs(20);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordingHarnessPhase {
     Idle,
@@ -380,6 +384,15 @@ impl RecordingHarness {
         self.host.workers()
     }
 
+    /// Waits until no session worker is running; returns the final count.
+    pub fn wait_workers_stopped(&self) -> usize {
+        let deadline = std::time::Instant::now() + WAIT_LIMIT;
+        while self.workers() > 0 && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        self.workers()
+    }
+
     pub fn capture_threads(&self) -> usize {
         self.capture
             .live
@@ -392,7 +405,7 @@ impl RecordingHarness {
     }
 
     pub fn wait_phase(&self, phase: RecordingHarnessPhase) -> Result<HarnessNotice, &'static str> {
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + WAIT_LIMIT;
         loop {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
@@ -417,7 +430,7 @@ impl RecordingHarness {
     }
 
     pub fn wait_notice_contains(&self, text: &str) -> Result<HarnessNotice, &'static str> {
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + WAIT_LIMIT;
         loop {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {

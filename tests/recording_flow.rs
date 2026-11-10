@@ -254,11 +254,7 @@ fn mid_session_low_disk_stops_with_warning() {
             | RecordingHarnessPhase::Error
             | RecordingHarnessPhase::Idle
     ));
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while harness.workers() > 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert_eq!(harness.workers(), 0);
+    assert_eq!(harness.wait_workers_stopped(), 0);
     assert_finalized_only(&dir);
     let _ = fs::remove_dir_all(dir);
 }
@@ -281,11 +277,7 @@ fn mid_session_write_fault_preserves_usable_output() {
 
     // Assert
     assert!(failed.notice.unwrap_or("").contains("Could not save"));
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while harness.workers() > 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert_eq!(harness.workers(), 0);
+    assert_eq!(harness.wait_workers_stopped(), 0);
     assert_finalized_only(&dir);
     let _ = fs::remove_dir_all(dir);
 }
@@ -317,10 +309,7 @@ fn folder_fault_finalizes_in_place_and_reports_folder() {
             | RecordingHarnessPhase::Error
             | RecordingHarnessPhase::Idle
     ));
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while harness.workers() > 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    assert_eq!(harness.wait_workers_stopped(), 0);
     assert_finalized_only(&dir);
     let _ = fs::remove_dir_all(dir);
 }
@@ -384,7 +373,7 @@ fn capture_worker_panic_is_surfaced() {
 
     // Assert
     assert!(noticed.notice.unwrap_or("").contains("worker"));
-    assert_eq!(harness.workers(), 0);
+    assert_eq!(harness.wait_workers_stopped(), 0);
     let _ = fs::remove_dir_all(dir);
 }
 
