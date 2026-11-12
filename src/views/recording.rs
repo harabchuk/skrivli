@@ -20,6 +20,7 @@ use gpui_kit::{
 use crate::domain::recording::RecordPhase;
 use crate::services::recording::NOTICE_SAVED;
 use crate::ui::components::level_meter::level_meter;
+use crate::views::state::is_transcription_notice;
 
 const COLUMN_MAX_WIDTH: f32 = 520.;
 const ACTION_WIDTH: f32 = 200.;
@@ -438,9 +439,12 @@ fn notice_tone(notice: &str) -> NoticeTone {
     }
 }
 
-/// Good news ("Saved.") lives in the shared status bar; only warnings get the banner.
+/// Good news ("Saved.") and transcription results live in the shared status bar; only
+/// recording and device warnings get the banner.
 pub(crate) fn banner_notice(notice: Option<&'static str>) -> Option<&'static str> {
-    notice.filter(|notice| notice_tone(notice) == NoticeTone::Warning)
+    notice.filter(|notice| {
+        notice_tone(notice) == NoticeTone::Warning && !is_transcription_notice(notice)
+    })
 }
 
 /// A separator sits after the Windows default and before the last option
@@ -460,6 +464,11 @@ fn selected_index<T: PartialEq>(choices: &[T], current: &T) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::recording::NOTICE_MIC;
+    use crate::services::transcription::{
+        NOTICE_CANCELLED, NOTICE_DONE, NOTICE_FAILED, NOTICE_MODEL,
+    };
+    use crate::views::state::NOTICE_FAILED_KEPT;
 
     const PHASES: [RecordPhase; 5] = [
         RecordPhase::Idle,
@@ -519,6 +528,26 @@ mod tests {
 
         // Assert
         assert_eq!(shown, (None, Some(failure), None));
+    }
+
+    #[test]
+    fn transcription_notices_stay_out_of_the_banner() {
+        // Arrange
+        let transcription = [
+            NOTICE_DONE,
+            NOTICE_FAILED,
+            NOTICE_CANCELLED,
+            NOTICE_MODEL,
+            NOTICE_FAILED_KEPT,
+        ];
+
+        // Act
+        let shown = transcription.map(|notice| banner_notice(Some(notice)));
+        let warning = banner_notice(Some(NOTICE_MIC));
+
+        // Assert
+        assert_eq!(shown, [None; 5]);
+        assert_eq!(warning, Some(NOTICE_MIC));
     }
 
     #[test]
