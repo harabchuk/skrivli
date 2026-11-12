@@ -20,6 +20,7 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, ParentElement, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled, Window,
 };
+use rust_i18n::t;
 
 // Lucide icons (ISC). Pencil and Trash are in the full catalog but not in Kit's
 // default `Assets`, so they are embedded here, as are Lucide Play and Pause. Ellipsis, FolderOpen and
@@ -36,12 +37,15 @@ use jiff::Timestamp;
 
 use crate::domain::audio::CivilTime;
 use crate::domain::ids::RecordingId;
+use crate::domain::language::Language;
 use crate::domain::recording::{
-    format_duration_ms, format_size, recording_day, RecordingContainer, RecordingDay,
-    RecordingInfo, SidecarState, TranscriptStatus,
+    format_duration_ms, recording_day, RecordingContainer, RecordingDay, RecordingInfo,
+    SidecarState, TranscriptStatus,
 };
 use crate::infrastructure::storage::library::LibraryCatalog;
 use crate::services::playback::PlayerPhase;
+
+use super::format::{clock_text, month_day_text, size_text};
 
 #[derive(Clone, Debug)]
 pub(crate) struct RecordingRow {
@@ -56,7 +60,13 @@ pub(crate) struct RecordingRow {
 
 impl RecordingRow {
     /// Build a row with an explicit time zone and "today", so tests are exact.
-    pub(crate) fn from_info_in(info: &RecordingInfo, zone: &TimeZone, today: CivilTime) -> Self {
+    /// Dates, sizes and notes are written in `language`.
+    pub(crate) fn from_info_in(
+        info: &RecordingInfo,
+        zone: &TimeZone,
+        today: CivilTime,
+        language: Language,
+    ) -> Self {
         let started = info
             .started_at_unix_ms()
             .and_then(|ms| civil_from_unix_ms(ms, zone).ok());
@@ -65,13 +75,13 @@ impl RecordingRow {
             .duration_ms()
             .map(format_duration_ms)
             .unwrap_or_else(|| "—".to_string());
-        let size = format_size(info.size_bytes());
+        let size = size_text(info.size_bytes(), language);
         let notes = recording_notes(info.sidecar(), info.problems())
             .into_iter()
-            .map(SharedString::from)
+            .map(|note| SharedString::from(note.text(language)))
             .collect();
-        let meta = row_meta(day, started, &duration, &size);
-        let detail_line = detail_line(day, started, &duration, &size, info.container());
+        let meta = row_meta(day, started, &duration, &size, language);
+        let detail_line = detail_line(day, started, &duration, &size, info.container(), language);
         Self {
             id: info.id(),
             name: SharedString::from(info.name().to_string()),
@@ -122,28 +132,18 @@ pub(crate) fn local_clock() -> (TimeZone, CivilTime) {
     (zone, today)
 }
 
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-fn clock_text(time: CivilTime) -> String {
-    format!("{:02}:{:02}", time.hour, time.minute)
-}
-
-fn month_day_text(time: CivilTime) -> String {
-    let month = MONTHS
-        .get(usize::from(time.month).saturating_sub(1))
-        .copied()
-        .unwrap_or("—");
-    format!("{month} {}", time.day)
-}
-
 /// Second line of a list row: `14:32 · 12:41 · 38 MB` or `Nov 3 · 31:04 · 93 MB`.
-fn row_meta(day: RecordingDay, started: Option<CivilTime>, duration: &str, size: &str) -> String {
+fn row_meta(
+    day: RecordingDay,
+    started: Option<CivilTime>,
+    duration: &str,
+    size: &str,
+    language: Language,
+) -> String {
     let when = match (day, started) {
         (_, None) => "—".to_string(),
-        (RecordingDay::Today | RecordingDay::Yesterday, Some(time)) => clock_text(time),
-        (RecordingDay::Earlier, Some(time)) => month_day_text(time),
+        (RecordingDay::Today | RecordingDay::Yesterday, Some(time)) => clock_text(time, language),
+        (RecordingDay::Earlier, Some(time)) => month_day_text(time, language),
     };
     format!("{when} · {duration} · {size}")
 }
@@ -155,35 +155,64 @@ fn detail_line(
     duration: &str,
     size: &str,
     container: RecordingContainer,
+    language: Language,
 ) -> String {
+    let locale = language.code();
     let when = match (day, started) {
         (_, None) => "—".to_string(),
-        (RecordingDay::Today, Some(time)) => format!("Today, {}", clock_text(time)),
-        (RecordingDay::Yesterday, Some(time)) => format!("Yesterday, {}", clock_text(time)),
-        (RecordingDay::Earlier, Some(time)) => {
-            format!("{}, {}", month_day_text(time), clock_text(time))
-        }
+        (RecordingDay::Today, Some(time)) => t!(
+            "app.recordings.today_at",
+            locale = locale,
+            time = clock_text(time, language)
+        )
+        .into_owned(),
+        (RecordingDay::Yesterday, Some(time)) => t!(
+            "app.recordings.yesterday_at",
+            locale = locale,
+            time = clock_text(time, language)
+        )
+        .into_owned(),
+        (RecordingDay::Earlier, Some(time)) => t!(
+            "app.recordings.date_at",
+            locale = locale,
+            date = month_day_text(time, language),
+            time = clock_text(time, language)
+        )
+        .into_owned(),
     };
     let format = container.extension().to_uppercase();
     format!("{when} · {duration} · {size} · {format}")
 }
 
-const NOTE_SIDECAR_MISSING: &str =
-    "Recording details are missing. The name and times come from the audio file.";
-const NOTE_SIDECAR_MALFORMED: &str =
-    "Recording details could not be read. The name and times come from the audio file.";
-const NOTE_PROBLEMS: &str = "Problems occurred while recording. Parts of the audio may be missing.";
+/// A note under the title of the detail pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordingNote {
+    SidecarMissing,
+    SidecarMalformed,
+    Problems,
+}
+
+impl RecordingNote {
+    fn text(self, language: Language) -> String {
+        let key = match self {
+            Self::SidecarMissing => "app.recordings.note_sidecar_missing",
+            Self::SidecarMalformed => "app.recordings.note_sidecar_malformed",
+            Self::Problems => "app.recordings.note_problems",
+        };
+        t!(key, locale = language.code()).into_owned()
+    }
+}
 
 /// Notes shown under the title of the detail pane. Empty for a clean recording.
-fn recording_notes(sidecar: SidecarState, problems: &[String]) -> Vec<&'static str> {
+fn recording_notes(sidecar: SidecarState, problems: &[String]) -> Vec<RecordingNote> {
     let mut notes = Vec::new();
     match sidecar {
         SidecarState::Present => {}
-        SidecarState::Missing => notes.push(NOTE_SIDECAR_MISSING),
-        SidecarState::Malformed => notes.push(NOTE_SIDECAR_MALFORMED),
+        SidecarState::Missing => notes.push(RecordingNote::SidecarMissing),
+        SidecarState::Malformed => notes.push(RecordingNote::SidecarMalformed),
     }
     if problems.iter().any(|code| is_serious_problem(code)) {
-        notes.push(NOTE_PROBLEMS);
+        notes.push(RecordingNote::Problems);
     }
     notes
 }
@@ -290,11 +319,11 @@ pub(crate) fn set_row_status(
     true
 }
 
-fn day_label(day: RecordingDay) -> &'static str {
+fn day_label(day: RecordingDay) -> SharedString {
     match day {
-        RecordingDay::Today => "Today",
-        RecordingDay::Yesterday => "Yesterday",
-        RecordingDay::Earlier => "Earlier",
+        RecordingDay::Today => ts!("app.recordings.today"),
+        RecordingDay::Yesterday => ts!("app.recordings.yesterday"),
+        RecordingDay::Earlier => ts!("app.recordings.earlier"),
     }
 }
 
@@ -375,16 +404,16 @@ fn row_badge(badge: RowBadge, cx: &App) -> AnyElement {
             .flex()
             .items_center()
             .text_color(theme.success)
-            .tooltip(|window, cx| Tooltip::new("Transcript").build(window, cx))
+            .tooltip(|window, cx| Tooltip::new(ts!("app.recordings.transcript")).build(window, cx))
             .child(Icon::new(IconName::BookOpen).xsmall())
             .into_any_element();
     }
     let (text, color) = match badge {
         RowBadge::None => return div().into_any_element(),
-        RowBadge::Queued => (SharedString::from("Queued"), theme.muted_foreground),
+        RowBadge::Queued => (ts!("app.recordings.queued"), theme.muted_foreground),
         RowBadge::Progress(percent) => (SharedString::from(format!("{percent}%")), theme.primary),
         RowBadge::Ready => return div().into_any_element(),
-        RowBadge::Failed => (SharedString::from("Failed"), theme.danger),
+        RowBadge::Failed => (ts!("app.recordings.failed"), theme.danger),
     };
     div()
         .flex_none()
@@ -466,7 +495,11 @@ fn player_card(card: PlayerCard<'_>, play_pause: &ClickAction, cx: &App) -> Div 
         duration_ms,
         seek,
     } = card;
-    let label = if playing { "Pause" } else { "Play" };
+    let label = if playing {
+        ts!("app.recordings.pause")
+    } else {
+        ts!("app.recordings.play")
+    };
     let total = duration_ms.map_or_else(|| "—".to_string(), format_duration_ms);
     h_flex()
         .flex_shrink_0()
@@ -482,7 +515,7 @@ fn player_card(card: PlayerCard<'_>, play_pause: &ClickAction, cx: &App) -> Div 
                 .primary()
                 .rounded(px(20.))
                 .icon(Icon::default().data(if playing { PAUSE_SVG } else { PLAY_SVG }))
-                .tooltip(label)
+                .tooltip(label.clone())
                 .accessibility_label(label)
                 .on_click(click(play_pause)),
         )
@@ -491,7 +524,7 @@ fn player_card(card: PlayerCard<'_>, play_pause: &ClickAction, cx: &App) -> Div 
             Slider::new(seek)
                 .flex_1()
                 .disabled(duration_ms.is_none())
-                .accessibility_label("Seek"),
+                .accessibility_label(ts!("app.recordings.seek")),
         )
         .child(time_label(total, cx))
 }
@@ -546,8 +579,8 @@ fn title_row(
                                 .ghost()
                                 .small()
                                 .icon(Icon::default().data(PENCIL_SVG))
-                                .tooltip("Rename recording")
-                                .accessibility_label("Rename recording")
+                                .tooltip(ts!("app.recordings.rename"))
+                                .accessibility_label(ts!("app.recordings.rename"))
                                 .on_click(click(&actions.rename)),
                         ),
                 )
@@ -556,27 +589,27 @@ fn title_row(
                     Button::new("delete-recording")
                         .ghost()
                         .icon(Icon::default().data(TRASH_SVG))
-                        .tooltip("Delete recording")
-                        .accessibility_label("Delete recording")
+                        .tooltip(ts!("app.recordings.delete"))
+                        .accessibility_label(ts!("app.recordings.delete"))
                         .on_click(click(&actions.delete)),
                 )
                 .child(
                     Button::new("recording-more")
                         .ghost()
                         .icon(IconName::Ellipsis)
-                        .tooltip("More")
-                        .accessibility_label("More actions")
+                        .tooltip(ts!("app.recordings.more"))
+                        .accessibility_label(ts!("app.recordings.more_actions"))
                         .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
                             let open = show_in_folder.clone();
                             let again = transcribe_again.clone();
                             menu.item(
-                                PopupMenuItem::new("Transcribe again…")
+                                PopupMenuItem::new(ts!("app.recordings.transcribe_again"))
                                     .icon(IconName::RefreshCw)
                                     .disabled(!can_transcribe_again)
                                     .on_click(move |event, window, cx| again(event, window, cx)),
                             )
                             .item(
-                                PopupMenuItem::new("Show in folder")
+                                PopupMenuItem::new(ts!("app.recordings.show_in_folder"))
                                     .icon(IconName::FolderOpen)
                                     .on_click(move |event, window, cx| open(event, window, cx)),
                             )
@@ -592,7 +625,7 @@ fn title_row(
         .children(row.notes.iter().map(|note| note_line(note.clone(), cx)))
 }
 
-fn pane_text(title: &'static str, description: Option<SharedString>, cx: &App) -> Div {
+fn pane_text(title: SharedString, description: Option<SharedString>, cx: &App) -> Div {
     v_flex()
         .gap_1()
         .child(div().font_semibold().child(title))
@@ -609,7 +642,7 @@ fn pane_text(title: &'static str, description: Option<SharedString>, cx: &App) -
 fn cancel_button(actions: &RecordingsActions) -> Option<Button> {
     actions.cancel_job.as_ref().map(|cancel| {
         Button::new("cancel-transcription")
-            .label("Cancel")
+            .label(ts!("app.recordings.cancel"))
             .on_click(click(cancel))
     })
 }
@@ -632,14 +665,14 @@ fn centered_pane_frame() -> Div {
 fn no_transcript_pane(frame: Div, actions: &RecordingsActions, cx: &App) -> Div {
     frame
         .child(pane_text(
-            "No transcript yet",
-            Some("Runs on this PC. Your audio never leaves it.".into()),
+            ts!("app.recordings.no_transcript"),
+            Some(ts!("app.recordings.runs_locally")),
             cx,
         ))
         .child(
             Button::new("transcribe-recording")
                 .primary()
-                .label("Transcribe")
+                .label(ts!("app.recordings.transcribe"))
                 .on_click(click(&actions.transcribe)),
         )
 }
@@ -647,8 +680,8 @@ fn no_transcript_pane(frame: Div, actions: &RecordingsActions, cx: &App) -> Div 
 fn queued_pane(frame: Div, actions: &RecordingsActions, cx: &App) -> Div {
     frame
         .child(pane_text(
-            "Queued",
-            Some("Starts when the current transcription finishes.".into()),
+            ts!("app.recordings.queued"),
+            Some(ts!("app.recordings.queued_hint")),
             cx,
         ))
         .children(cancel_button(actions))
@@ -657,7 +690,7 @@ fn queued_pane(frame: Div, actions: &RecordingsActions, cx: &App) -> Div {
 fn running_pane(frame: Div, percent: u8, actions: &RecordingsActions, cx: &App) -> Div {
     frame
         .child(pane_text(
-            "Transcribing",
+            ts!("app.recordings.transcribing"),
             Some(format!("{percent}%").into()),
             cx,
         ))
@@ -665,7 +698,7 @@ fn running_pane(frame: Div, percent: u8, actions: &RecordingsActions, cx: &App) 
             Progress::new("transcription-progress")
                 .value(f32::from(percent))
                 .w(px(280.))
-                .accessibility_label("Transcription progress"),
+                .accessibility_label(ts!("app.recordings.transcription_progress")),
         )
         .children(cancel_button(actions))
 }
@@ -673,23 +706,27 @@ fn running_pane(frame: Div, percent: u8, actions: &RecordingsActions, cx: &App) 
 fn failed_pane(reason: Option<SharedString>, actions: &RecordingsActions, cx: &App) -> Div {
     pane_frame()
         .child(
-            pane_text("Transcription failed", reason, cx).child(
+            pane_text(ts!("app.recordings.transcription_failed"), reason, cx).child(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("The recording itself is intact."),
+                    .child(ts!("app.recordings.recording_intact")),
             ),
         )
         .child(
             Button::new("retry-transcription")
                 .primary()
-                .label("Retry")
+                .label(ts!("app.recordings.retry"))
                 .on_click(click(&actions.retry)),
         )
 }
 
 fn unreadable_pane(reason: SharedString, cx: &App) -> Div {
-    pane_frame().child(pane_text("Could not open the transcript", Some(reason), cx))
+    pane_frame().child(pane_text(
+        ts!("app.recordings.transcript_unreadable"),
+        Some(reason),
+        cx,
+    ))
 }
 
 fn ready_pane(list: Option<AnyElement>, actions: &RecordingsActions) -> Div {
@@ -702,12 +739,16 @@ fn ready_pane(list: Option<AnyElement>, actions: &RecordingsActions) -> Div {
             h_flex()
                 .flex_shrink_0()
                 .items_center()
-                .child(div().font_semibold().child("Transcript"))
+                .child(
+                    div()
+                        .font_semibold()
+                        .child(ts!("app.recordings.transcript")),
+                )
                 .child(div().flex_1())
                 .child(
                     Clipboard::new("copy-transcript")
-                        .tooltip("Copy transcript")
-                        .accessibility_label("Copy transcript")
+                        .tooltip(ts!("app.recordings.copy_transcript"))
+                        .accessibility_label(ts!("app.recordings.copy_transcript"))
                         .value_fn(move |window, cx| copy(window, cx)),
                 ),
         )
@@ -759,7 +800,7 @@ pub(crate) fn recordings_tab(
         Empty::new()
             .header(
                 EmptyHeader::new()
-                    .title(EmptyTitle::new().child("Recordings unavailable"))
+                    .title(EmptyTitle::new().child(ts!("app.recordings.unavailable")))
                     .description(EmptyDescription::new().child(message)),
             )
             .into_any_element()
@@ -779,9 +820,9 @@ pub(crate) fn recordings_tab(
         None => Empty::new()
             .header(
                 EmptyHeader::new()
-                    .title(EmptyTitle::new().child("Select a recording"))
+                    .title(EmptyTitle::new().child(ts!("app.recordings.select_one")))
                     .description(
-                        EmptyDescription::new().child("Choose a row to play, rename, or delete."),
+                        EmptyDescription::new().child(ts!("app.recordings.select_one_hint")),
                     ),
             )
             .into_any_element(),
@@ -793,7 +834,7 @@ pub(crate) fn recordings_tab(
         .py_1()
         .gap_2()
         .items_center()
-        .child(div().font_semibold().child("Recordings"))
+        .child(div().font_semibold().child(ts!("app.recordings.title")))
         .child(
             div()
                 .text_sm()
@@ -805,16 +846,16 @@ pub(crate) fn recordings_tab(
             Button::new("refresh-library")
                 .ghost()
                 .icon(IconName::RefreshCw)
-                .tooltip("Refresh")
-                .accessibility_label("Refresh recordings")
+                .tooltip(ts!("app.recordings.refresh"))
+                .accessibility_label(ts!("app.recordings.refresh_recordings"))
                 .on_click(click(&actions.refresh)),
         )
         .child(
             Button::new("open-recordings-folder-tab")
                 .ghost()
                 .icon(IconName::FolderOpen)
-                .tooltip("Open recordings folder")
-                .accessibility_label("Open recordings folder")
+                .tooltip(ts!("app.recordings.open_folder"))
+                .accessibility_label(ts!("app.recordings.open_folder"))
                 .on_click(click(&actions.open_folder)),
         );
     let list_column = v_flex()
@@ -866,17 +907,22 @@ fn empty_library(actions: &RecordingsActions, cx: &App) -> Div {
                 .size(px(40.))
                 .text_color(cx.theme().muted_foreground),
         )
-        .child(div().text_lg().font_semibold().child("No recordings yet"))
+        .child(
+            div()
+                .text_lg()
+                .font_semibold()
+                .child(ts!("app.recordings.empty_title")),
+        )
         .child(
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("Recordings you make appear here, newest first."),
+                .child(ts!("app.recordings.empty_hint")),
         )
         .child(
             Button::new("start-recording-empty")
                 .primary()
-                .label("Start recording")
+                .label(ts!("app.recordings.start_recording"))
                 .on_click(click(&actions.go_record)),
         )
 }
@@ -889,14 +935,14 @@ pub(crate) fn open_rename_dialog(
 ) {
     let input = cx.new(|cx| {
         InputState::new(window, cx)
-            .placeholder("Recording name")
+            .placeholder(ts!("app.recordings.name_placeholder"))
             .default_value(current.to_string())
     });
     window.open_dialog(cx, move |dialog, _, cx| {
         let input = input.clone();
         let on_confirm = on_confirm.clone();
         dialog
-            .title("Rename recording")
+            .title(ts!("app.recordings.rename"))
             .w(DIALOG_WIDTH)
             .child(Input::new(&input))
             .on_ok({
@@ -911,12 +957,18 @@ pub(crate) fn open_rename_dialog(
             .footer(
                 dialog_footer(cx)
                     .child(
-                        DialogClose::new()
-                            .child(Button::new("rename-cancel").label("Cancel").outline()),
+                        DialogClose::new().child(
+                            Button::new("rename-cancel")
+                                .label(ts!("app.recordings.cancel"))
+                                .outline(),
+                        ),
                     )
                     .child(
-                        DialogAction::new()
-                            .child(Button::new("rename-ok").label("Rename").primary()),
+                        DialogAction::new().child(
+                            Button::new("rename-ok")
+                                .label(ts!("app.recordings.rename_confirm"))
+                                .primary(),
+                        ),
                     ),
             )
     });
@@ -930,13 +982,13 @@ pub(crate) fn open_delete_dialog(
 ) {
     window.open_alert_dialog(cx, move |alert, _, _| {
         let on_confirm = on_confirm.clone();
-        let description = format!("Send “{name}” and its related files to the Recycle Bin?");
+        let description = t!("app.recordings.delete_body", name = name).into_owned();
         alert
-            .title("Delete recording?")
+            .title(ts!("app.recordings.delete_title"))
             .w(DIALOG_WIDTH)
             .description(description)
             .confirm()
-            .ok_text("Delete")
+            .ok_text(ts!("app.recordings.delete_confirm"))
             .ok_variant(ButtonVariant::Danger)
             .on_ok(move |_, window, cx| {
                 on_confirm(window, cx);
@@ -954,11 +1006,11 @@ pub(crate) fn open_transcribe_again_dialog(
     window.open_alert_dialog(cx, move |alert, _, _| {
         let on_confirm = on_confirm.clone();
         alert
-            .title("Replace this transcript?")
+            .title(ts!("app.recordings.replace_title"))
             .w(DIALOG_WIDTH)
             .description(transcribe_again_description(&model_name))
             .confirm()
-            .ok_text("Replace")
+            .ok_text(ts!("app.recordings.replace_confirm"))
             .on_ok(move |_, window, cx| {
                 on_confirm(window, cx);
                 true
@@ -966,12 +1018,12 @@ pub(crate) fn open_transcribe_again_dialog(
     });
 }
 
-pub(crate) fn rows_from_catalog(catalog: &LibraryCatalog) -> Vec<RecordingRow> {
+pub(crate) fn rows_from_catalog(catalog: &LibraryCatalog, language: Language) -> Vec<RecordingRow> {
     let (zone, today) = local_clock();
     catalog
         .entries
         .iter()
-        .map(|entry| RecordingRow::from_info_in(&entry.info, &zone, today))
+        .map(|entry| RecordingRow::from_info_in(&entry.info, &zone, today, language))
         .collect()
 }
 
@@ -1017,9 +1069,7 @@ pub(crate) fn can_transcribe_again(status: TranscriptStatus, job_active: bool) -
 
 /// Body of the "Replace this transcript?" dialog.
 pub(crate) fn transcribe_again_description(model_name: &str) -> String {
-    format!(
-        "The current transcript stays until the new one is ready, then it is replaced.          Transcribing uses the {model_name} model and runs on this PC."
-    )
+    t!("app.recordings.replace_body", model = model_name).into_owned()
 }
 
 /// The failure reason belongs to the recording that failed, not to whichever is selected.
@@ -1223,6 +1273,7 @@ mod tests {
         ROW_HEIGHT_PX,
     };
     use crate::domain::ids::RecordingId;
+    use crate::domain::language::Language;
     use crate::domain::recording::{
         RecordingContainer, RecordingDay, RecordingInfo, SidecarState, TranscriptStatus,
     };
@@ -1247,7 +1298,12 @@ mod tests {
         );
 
         // Act
-        let row = RecordingRow::from_info_in(&info, &jiff::tz::TimeZone::UTC, today_utc());
+        let row = RecordingRow::from_info_in(
+            &info,
+            &jiff::tz::TimeZone::UTC,
+            today_utc(),
+            Language::English,
+        );
 
         // Assert
         assert_eq!(row.name.as_ref(), "clip");
@@ -1347,10 +1403,20 @@ mod tests {
         let yesterday_info = info_at(Some(ms("2026-11-06T23:59:00Z")), TranscriptStatus::None);
 
         // Act
-        let today_row = RecordingRow::from_info_in(&today_info, &TimeZone::UTC, today_utc());
-        let earlier_row = RecordingRow::from_info_in(&earlier_info, &TimeZone::UTC, today_utc());
-        let yesterday_row =
-            RecordingRow::from_info_in(&yesterday_info, &TimeZone::UTC, today_utc());
+        let today_row =
+            RecordingRow::from_info_in(&today_info, &TimeZone::UTC, today_utc(), Language::English);
+        let earlier_row = RecordingRow::from_info_in(
+            &earlier_info,
+            &TimeZone::UTC,
+            today_utc(),
+            Language::English,
+        );
+        let yesterday_row = RecordingRow::from_info_in(
+            &yesterday_info,
+            &TimeZone::UTC,
+            today_utc(),
+            Language::English,
+        );
 
         // Assert
         assert_eq!(today_row.day, RecordingDay::Today);
@@ -1373,6 +1439,50 @@ mod tests {
     }
 
     #[test]
+    fn swedish_row_text_follows_the_language() {
+        use jiff::tz::TimeZone;
+
+        // Arrange
+        let today_info = info_at(Some(ms("2026-11-07T14:32:00Z")), TranscriptStatus::None);
+        let earlier_info = info_at(Some(ms("2026-11-03T09:05:00Z")), TranscriptStatus::None);
+        let problems = RecordingInfo::new(
+            RecordingId::from_raw(2),
+            "clip",
+            RecordingContainer::Flac,
+            Some(ms("2026-11-07T14:32:00Z")),
+            Some(761_000),
+            38 * 1024 * 1024,
+            None,
+            TranscriptStatus::None,
+            SidecarState::Missing,
+            Vec::new(),
+        );
+
+        // Act
+        let today_row =
+            RecordingRow::from_info_in(&today_info, &TimeZone::UTC, today_utc(), Language::Swedish);
+        let earlier_row = RecordingRow::from_info_in(
+            &earlier_info,
+            &TimeZone::UTC,
+            today_utc(),
+            Language::Swedish,
+        );
+        let noted =
+            RecordingRow::from_info_in(&problems, &TimeZone::UTC, today_utc(), Language::Swedish);
+
+        // Assert
+        assert_eq!(
+            today_row.detail_line.as_ref(),
+            "I dag, 14:32 · 12:41 · 38,0 MB · FLAC"
+        );
+        assert_eq!(earlier_row.meta.as_ref(), "3 nov. · 12:41 · 38,0 MB");
+        assert_eq!(
+            noted.notes[0].as_ref(),
+            "Uppgifter om inspelningen saknas. Namn och tider hämtas från ljudfilen."
+        );
+    }
+
+    #[test]
     fn row_groups_by_local_day_not_utc_day() {
         use jiff::tz::{self, TimeZone};
 
@@ -1381,7 +1491,7 @@ mod tests {
         let info = info_at(Some(ms("2026-11-06T23:30:00Z")), TranscriptStatus::None);
 
         // Act
-        let row = RecordingRow::from_info_in(&info, &zone, today_utc());
+        let row = RecordingRow::from_info_in(&info, &zone, today_utc(), Language::English);
 
         // Assert
         assert_eq!(row.day, RecordingDay::Today);
@@ -1396,7 +1506,7 @@ mod tests {
         let info = info_at(None, TranscriptStatus::None);
 
         // Act
-        let row = RecordingRow::from_info_in(&info, &TimeZone::UTC, today_utc());
+        let row = RecordingRow::from_info_in(&info, &TimeZone::UTC, today_utc(), Language::English);
 
         // Assert
         assert_eq!(row.day, RecordingDay::Earlier);
@@ -1406,7 +1516,7 @@ mod tests {
 
     #[test]
     fn notes_cover_sidecar_and_problems() {
-        use super::{recording_notes, NOTE_PROBLEMS};
+        use super::{recording_notes, RecordingNote};
 
         // Arrange
         let serious = vec!["capture".to_string()];
@@ -1423,13 +1533,13 @@ mod tests {
         assert_eq!(missing.len(), 1);
         assert_eq!(malformed.len(), 1);
         assert_ne!(missing, malformed);
-        assert_eq!(problems, [NOTE_PROBLEMS]);
+        assert_eq!(problems, [RecordingNote::Problems]);
         assert_eq!(all.len(), 2);
     }
 
     #[test]
     fn recording_notes_ignore_routine_problem_codes() {
-        use super::{recording_notes, NOTE_PROBLEMS};
+        use super::{recording_notes, RecordingNote};
 
         // Arrange
         let codes = |list: &[&str]| list.iter().map(|c| c.to_string()).collect::<Vec<_>>();
@@ -1459,10 +1569,10 @@ mod tests {
 
         // Assert
         assert!(routine_notes.is_empty());
-        assert_eq!(mixed_notes, [NOTE_PROBLEMS]);
+        assert_eq!(mixed_notes, [RecordingNote::Problems]);
         for code in serious {
             let notes = recording_notes(SidecarState::Present, &codes(&[code]));
-            assert_eq!(notes, [NOTE_PROBLEMS], "{code}");
+            assert_eq!(notes, [RecordingNote::Problems], "{code}");
         }
     }
 
@@ -1495,7 +1605,8 @@ mod tests {
         let clean = info_at(None, TranscriptStatus::None);
 
         // Act
-        let clean_row = RecordingRow::from_info_in(&clean, &TimeZone::UTC, today_utc());
+        let clean_row =
+            RecordingRow::from_info_in(&clean, &TimeZone::UTC, today_utc(), Language::English);
 
         // Assert
         assert!(clean_row.notes.is_empty());
@@ -1631,7 +1742,12 @@ mod tests {
             SidecarState::Present,
             Vec::new(),
         );
-        RecordingRow::from_info_in(&info, &jiff::tz::TimeZone::UTC, today_utc())
+        RecordingRow::from_info_in(
+            &info,
+            &jiff::tz::TimeZone::UTC,
+            today_utc(),
+            Language::English,
+        )
     }
 
     fn item_names(items: &[LibraryItem]) -> Vec<String> {
@@ -1835,7 +1951,12 @@ mod tests {
             SidecarState::Present,
             Vec::new(),
         );
-        RecordingRow::from_info_in(&info, &jiff::tz::TimeZone::UTC, today_utc())
+        RecordingRow::from_info_in(
+            &info,
+            &jiff::tz::TimeZone::UTC,
+            today_utc(),
+            Language::English,
+        )
     }
 
     #[test]

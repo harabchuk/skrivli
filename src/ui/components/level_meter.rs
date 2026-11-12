@@ -9,6 +9,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, ActiveTheme as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{div, px, relative, App, IntoElement, ParentElement, SharedString, Styled};
+use rust_i18n::t;
 
 use crate::domain::gain::{format_db, meter_band, meter_fraction, MeterBand};
 
@@ -26,7 +27,8 @@ pub(crate) fn level_meter(id: &'static str, db: f32, hold_db: f32, cx: &App) -> 
         MeterBand::Warm => cx.theme().warning,
         MeterBand::Hot => cx.theme().danger,
     };
-    let hold_text = SharedString::from(format!("Peak hold {}", format_db(hold_db)));
+    let hold_text =
+        SharedString::from(t!("app.record.peak_hold", value = format_db(hold_db)).into_owned());
     h_flex()
         .w_full()
         .gap(px(10.))

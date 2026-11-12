@@ -17,10 +17,14 @@ use gpui_kit::{
     Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window,
 };
 
+use rust_i18n::t;
+
 use crate::domain::recording::RecordPhase;
 use crate::services::recording::NOTICE_SAVED;
 use crate::ui::components::level_meter::level_meter;
 use crate::views::state::is_transcription_notice;
+
+use super::notices::localize;
 
 const COLUMN_MAX_WIDTH: f32 = 520.;
 const ACTION_WIDTH: f32 = 200.;
@@ -33,7 +37,6 @@ const MENU_MIN_WIDTH: f32 = 280.;
 const MENU_MAX_HEIGHT: f32 = 240.;
 /// Always reserved, so the centered column does not jump when a notice comes or goes.
 const NOTICE_SLOT_HEIGHT: f32 = 34.;
-const LOCKED_HINT: &str = "Device choices are locked while recording";
 
 // Lucide icons (ISC) that Kit's default asset set does not bundle.
 const VOLUME_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>"#;
@@ -88,7 +91,7 @@ pub(crate) struct RecordView<'a> {
 
 struct SourceRow {
     id: &'static str,
-    caption: &'static str,
+    caption: SharedString,
     icon: Icon,
     device: DeviceChoice,
     extra: Option<AnyElement>,
@@ -102,19 +105,25 @@ where
     Toggle: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
     let saving = view.phase == RecordPhase::Stopping;
-    let gain =
-        gain_controls(view.gain, view.gain_label, "Microphone gain", saving, cx).into_any_element();
+    let gain = gain_controls(
+        view.gain,
+        view.gain_label,
+        ts!("app.record.microphone_gain"),
+        saving,
+        cx,
+    )
+    .into_any_element();
     let system_gain = gain_controls(
         view.system_gain,
         view.system_gain_label,
-        "System audio gain",
+        ts!("app.record.system_gain"),
         saving,
         cx,
     )
     .into_any_element();
     let microphone = SourceRow {
         id: "microphone",
-        caption: "Microphone",
+        caption: ts!("app.record.microphone"),
         icon: Icon::new(IconName::Mic),
         device: view.microphone,
         extra: Some(gain),
@@ -124,7 +133,7 @@ where
     };
     let system = SourceRow {
         id: "system",
-        caption: "System audio",
+        caption: ts!("app.record.system_audio"),
         icon: Icon::default().data(VOLUME_SVG),
         device: view.system,
         extra: Some(system_gain),
@@ -185,7 +194,7 @@ where
         button
             .danger()
             .icon(Icon::new(IconName::Square).xsmall())
-            .label("Stop recording")
+            .label(ts!("app.record.stop"))
     } else {
         button
             .primary()
@@ -195,7 +204,7 @@ where
                     .xsmall()
                     .text_color(cx.theme().danger),
             )
-            .label("Start recording")
+            .label(ts!("app.record.start"))
     };
     v_flex()
         .items_center()
@@ -245,7 +254,7 @@ fn status_chip(look: PhaseLook, cx: &App) -> impl IntoElement {
                 this.child(marker)
             }
         })
-        .child(look.label)
+        .child(ts!(look.label_key))
 }
 
 fn source_row(row: SourceRow, cx: &App) -> impl IntoElement {
@@ -280,7 +289,7 @@ fn source_row(row: SourceRow, cx: &App) -> impl IntoElement {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(row.caption),
+                                .child(row.caption.clone()),
                         )
                         .child(div().text_sm().font_semibold().truncate().child(name)),
                 )
@@ -297,17 +306,18 @@ fn source_row(row: SourceRow, cx: &App) -> impl IntoElement {
 
 fn device_control(
     id: &'static str,
-    caption: &'static str,
+    caption: SharedString,
     device: DeviceChoice,
     locked: bool,
 ) -> AnyElement {
     if locked {
+        let hint = ts!("app.record.locked_hint");
         return Button::new(SharedString::from(format!("{id}-locked")))
             .ghost()
             .small()
             .icon(Icon::default().data(LOCK_SVG))
-            .tooltip(LOCKED_HINT)
-            .accessibility_label(format!("{caption}: {LOCKED_HINT}"))
+            .tooltip(hint.clone())
+            .accessibility_label(format!("{caption}: {hint}"))
             .into_any_element();
     }
     let DeviceChoice {
@@ -318,9 +328,9 @@ fn device_control(
     Button::new(SharedString::from(format!("{id}-change")))
         .outline()
         .small()
-        .label("Change")
+        .label(ts!("app.record.change"))
         .dropdown_caret(true)
-        .accessibility_label(format!("Change {caption} device"))
+        .accessibility_label(t!("app.record.change_device", source = caption).into_owned())
         .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
             let menu = menu
                 .min_w(px(MENU_MIN_WIDTH))
@@ -350,7 +360,7 @@ fn device_control(
 fn gain_controls(
     gain: &Entity<SliderState>,
     gain_label: SharedString,
-    accessibility_label: &'static str,
+    accessibility_label: SharedString,
     saving: bool,
     cx: &App,
 ) -> impl IntoElement {
@@ -360,7 +370,7 @@ fn gain_controls(
         .flex_shrink_0()
         .text_xs()
         .text_color(cx.theme().muted_foreground)
-        .child("Gain")
+        .child(ts!("app.record.gain"))
         .child(
             Slider::new(gain)
                 .disabled(saving)
@@ -371,6 +381,7 @@ fn gain_controls(
 }
 
 fn notice_banner(notice: &'static str, cx: &App) -> impl IntoElement {
+    let text = localize(notice);
     let row = h_flex()
         .w_full()
         .min_h(px(NOTICE_SLOT_HEIGHT))
@@ -387,7 +398,7 @@ fn notice_banner(notice: &'static str, cx: &App) -> impl IntoElement {
             .bg(cx.theme().muted)
             .text_color(cx.theme().muted_foreground)
             .child(Icon::new(IconName::Info).small().flex_shrink_0())
-            .child(notice),
+            .child(text),
         NoticeTone::Warning => row
             .border_color(cx.theme().warning.opacity(0.5))
             .bg(cx.theme().warning.opacity(0.12))
@@ -397,13 +408,14 @@ fn notice_banner(notice: &'static str, cx: &App) -> impl IntoElement {
                     .flex_shrink_0()
                     .text_color(cx.theme().warning),
             )
-            .child(notice),
+            .child(text),
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PhaseLook {
-    label: &'static str,
+    /// Catalog key of the chip text.
+    label_key: &'static str,
     /// Stop is offered and the timer reads as running.
     active: bool,
     /// Capture is running, so the chip turns red and pulses.
@@ -411,15 +423,15 @@ struct PhaseLook {
 }
 
 fn phase_look(phase: RecordPhase) -> PhaseLook {
-    let (label, active, live) = match phase {
-        RecordPhase::Idle => ("Ready", false, false),
-        RecordPhase::Starting => ("Starting", true, false),
-        RecordPhase::Recording => ("Recording", true, true),
-        RecordPhase::Stopping => ("Saving", true, false),
-        RecordPhase::Error => ("Not recording", false, false),
+    let (label_key, active, live) = match phase {
+        RecordPhase::Idle => ("app.record.phase_ready", false, false),
+        RecordPhase::Starting => ("app.record.phase_starting", true, false),
+        RecordPhase::Recording => ("app.record.phase_recording", true, true),
+        RecordPhase::Stopping => ("app.record.phase_saving", true, false),
+        RecordPhase::Error => ("app.record.phase_not_recording", false, false),
     };
     PhaseLook {
-        label,
+        label_key,
         active,
         live,
     }

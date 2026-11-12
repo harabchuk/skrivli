@@ -9,7 +9,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -185,12 +185,30 @@ pub(crate) enum HostCommand {
     ShowRecording(RecordingId),
 }
 
+/// Text the tray shows, already in the user's language. The app replaces the shared
+/// value when the language changes; the tray thread reads it each time it builds a
+/// menu or a balloon, so the platform layer never looks up a translation itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TrayText {
+    pub(crate) show: String,
+    pub(crate) start_recording: String,
+    pub(crate) stop_recording: String,
+    pub(crate) open_recordings_folder: String,
+    pub(crate) settings: String,
+    pub(crate) exit: String,
+    pub(crate) balloon_title: String,
+    pub(crate) balloon_body: String,
+}
+
+pub(crate) type SharedTrayText = Arc<Mutex<TrayText>>;
+
 pub(crate) trait Tray: Send + Sync {
     fn run(
         &self,
         stop: Arc<AtomicBool>,
         recording: Arc<AtomicBool>,
         notices: Receiver<RecordingId>,
+        text: SharedTrayText,
         on_command: Box<dyn Fn(HostCommand) + Send>,
     ) -> Result<(), AppError>;
 }

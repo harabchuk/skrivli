@@ -6,6 +6,7 @@ pub(crate) mod chunk_plan;
 pub(crate) mod cut_plan;
 pub(crate) mod gain;
 pub(crate) mod ids;
+pub(crate) mod language;
 pub(crate) mod recording;
 pub(crate) mod theme;
 pub(crate) mod transcript;

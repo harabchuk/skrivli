@@ -57,7 +57,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 - Skrivli can stay available from the notification area.
 - Skrivli uses its own colorful feather icon on the taskbar, the window and the notification area.
 - Closing or minimizing the window can hide the app to the tray instead of quitting (configurable; first use explains this).
-- Tray actions: show/hide the window, start/stop recording, open recordings folder, Settings, Exit.
+- Tray actions: show/hide the window, start/stop recording, open recordings folder, Settings, Exit. The menu uses the interface language chosen in Settings.
 - While recording, the tray indicates that capture is active and can show elapsed time.
 - Exit is always an explicit choice. Hiding to the tray does **not** stop an in-progress recording.
 
@@ -170,7 +170,7 @@ Transcription runs **after** a recording is finished. It does not produce live c
 - The status bar always shows the current transcription model on the right (for example "Model: Nemotron 3.5 (Multilingual)"), "Downloading Nemotron 3.5 (Multilingual) 42%" during a download, or "No model installed · Choose…" when none is available; it shows nothing until the installed models are known. Clicking it opens the model dialog. The left of the status bar reads "Ready", "Recording 00:12:41", "Saving" or "Transcribing 42%", with any notice, and gives way first when the window is narrow.
 - Downloads happen only when the user starts them, with progress, cancel, and verification feedback. Corrupt or unsupported models are reported distinctly.
 - After installation, transcription works fully offline.
-- Six models are offered in three families, and all detect the language automatically, so there is no language setting; a language choice is a possible later addition:
+- Six models are offered in three families, and all detect the spoken language automatically, so there is no setting for the speech language (this is separate from the interface language in Settings → General); choosing the speech language is a possible later addition:
   - **Nemotron 3.5 (Multilingual)**, NVIDIA's Nemotron 3.5 ASR 0.6B, quantized to Q8_0, the default. A download of about 984 MB (938.1 MB as the app shows it). It covers 40 languages, including English and Swedish, and adds punctuation and capitalization itself.
   - **Parakeet TDT v3 (European)**, NVIDIA's Parakeet TDT 0.6B v3. It covers 25 European languages, including English and Swedish, and is offered as Q8_0 (about 941 MB), Compact Q6_K (about 813 MB) and Smallest Q4_K (about 675 MB); the smaller ones trade some accuracy for download size. It is licensed CC BY 4.0, and its notice ships with the app.
   - **Parakeet TDT v2 (English)**, NVIDIA's Parakeet TDT 0.6B v2, English only, offered as Q8_0 (about 904 MB) and Compact Q6_K (about 776 MB). It is licensed CC BY 4.0.
@@ -228,7 +228,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 
 ### Transcription
 
-- Selected model, language, and processing preferences (for example CPU thread count)
+- Selected model and processing preferences (for example CPU thread count). The spoken language is detected automatically; it is not a setting.
 - Optional voice-activity filtering when offered — off by default
 - Auto-transcribe after save — off by default
 
@@ -242,6 +242,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 ### Appearance and accessibility
 
 - Light, Dark, or System theme from the tab-bar control (System follows Windows)
+- **Language** (Settings → General): English or Svenska, shown under each language's own name. The default is English. A change applies at once, with no restart, to everything Skrivli itself shows: the window, dialogs and notices, the notification-area menu and its "Transcript ready" balloon, the text-field menus (Cut, Copy, Paste), and the model descriptions. Model names stay as they are. Dates, times and decimal numbers follow the language, so a Swedish library shows `12 nov.` and `38,0 MB` where English shows `Nov 12` and `38.0 MB`; times stay on the 24-hour clock in both. Text that comes from Windows, from file names, or from transcripts is not translated. Skrivli does not pick the language from Windows; the user chooses it.
 - Usable at common display scaling levels and on multiple monitors
 - Keyboard-focused operation for main flows
 - Clear error messages for permission, device, storage, and model problems
@@ -285,6 +286,7 @@ A new user can: unzip → launch → record microphone and system audio → stop
 - Recordings library with playback, rename, delete, open folder
 - Offline post-recording transcription with model install, progress, cancel, and copyable text
 - Tray lifecycle, single instance, essential settings, hotkey, and keyboard-accessible main flows
+- Interface in English and Swedish, chosen in Settings
 - Portable Windows distribution without bundled models
 
 ### Optional / deferrable without blocking core v1

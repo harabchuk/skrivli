@@ -43,14 +43,6 @@ impl MaxMeetingDuration {
     pub(crate) fn frames(self, sample_rate: u32) -> u64 {
         u64::from(self.hours) * 3_600 * u64::from(sample_rate)
     }
-
-    pub(crate) fn label(self) -> String {
-        if self.hours == 1 {
-            "1 hour".to_string()
-        } else {
-            format!("{} hours", self.hours)
-        }
-    }
 }
 
 impl Default for MaxMeetingDuration {
@@ -135,25 +127,6 @@ pub(crate) enum TranscriptStatus {
     Progress(u8),
     Ready,
     Failed,
-}
-
-impl TranscriptStatus {
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::None => "—",
-            Self::Queued => "Queued",
-            Self::Progress(_) => "%",
-            Self::Ready => "Ready",
-            Self::Failed => "Failed",
-        }
-    }
-
-    pub(crate) fn display(self) -> String {
-        match self {
-            Self::Progress(percent) => format!("{percent}%"),
-            other => other.label().to_string(),
-        }
-    }
 }
 
 /// Status after a job ends without a new transcript, or after a restart.
@@ -271,22 +244,6 @@ impl RecordingInfo {
     }
 }
 
-/// Format a byte size for the library Size column.
-pub(crate) fn format_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
 /// Format duration milliseconds as `HH:MM:SS` (or `MM:SS` under one hour).
 pub(crate) fn format_duration_ms(duration_ms: u64) -> String {
     let total = duration_ms / 1_000;
@@ -376,7 +333,7 @@ pub(crate) fn preserve_selection(
 mod tests {
     use super::MaxMeetingDuration;
     use super::{
-        format_duration_ms, format_size, preserve_selection, recording_day, synthetic_recording_id,
+        format_duration_ms, preserve_selection, recording_day, synthetic_recording_id,
         RecordingContainer, RecordingDay, RecordingFormat, RecordingInfo, SidecarState,
         TranscriptStatus,
     };
@@ -392,7 +349,6 @@ mod tests {
 
         // Assert
         assert_eq!(cap.hours(), 3);
-        assert_eq!(cap.label(), "3 hours");
     }
 
     #[test]
@@ -412,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn max_meeting_duration_converts_to_frames_and_labels() {
+    fn max_meeting_duration_converts_to_frames() {
         // Arrange
         let one = MaxMeetingDuration::from_hours(1).expect("one");
 
@@ -421,7 +377,6 @@ mod tests {
 
         // Assert
         assert_eq!(frames, 3_600 * 48_000);
-        assert_eq!(one.label(), "1 hour");
     }
 
     fn row(id: u64, name: &str, started: Option<u64>) -> RecordingInfo {
@@ -479,19 +434,6 @@ mod tests {
     }
 
     #[test]
-    fn transcript_progress_formats_percent() {
-        // Arrange
-        let status = TranscriptStatus::Progress(42);
-
-        // Act
-        let text = status.display();
-
-        // Assert
-        assert_eq!(text, "42%");
-        assert_eq!(TranscriptStatus::None.display(), "—");
-    }
-
-    #[test]
     fn synthetic_id_is_stable_for_same_stem() {
         // Arrange
         let stem = "Skrivli_2026-11-04_13-01-02";
@@ -524,8 +466,6 @@ mod tests {
         // Arrange / Act / Assert
         assert_eq!(format_duration_ms(65_000), "01:05");
         assert_eq!(format_duration_ms(3_661_000), "01:01:01");
-        assert_eq!(format_size(500), "500 B");
-        assert_eq!(format_size(2_048), "2.0 KB");
     }
 
     fn civil(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> CivilTime {

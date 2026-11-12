@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 const NATIVE_LIBS: [&str; 4] = ["parakeet", "ggml", "ggml-base", "ggml-cpu"];
 
 fn main() {
+    println!("cargo:rerun-if-changed=locales");
     println!("cargo:rerun-if-changed=resources/skrivli.ico");
     println!("cargo:rerun-if-changed=resources/skrivli.manifest");
     println!("cargo:rerun-if-changed=third_party/parakeet.cpp/CMakeLists.txt");

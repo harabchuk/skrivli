@@ -65,10 +65,6 @@ pub(crate) fn format_db(db: f32) -> String {
     }
 }
 
-pub(crate) fn format_gain(gain: f32) -> String {
-    format!("{:.1}×", clamp_slider_gain(gain))
-}
-
 /// Compress values outside [`LIMIT_KNEE`] toward ±1 without hard clipping.
 pub(crate) fn soft_limit(sample: f32) -> f32 {
     let x = if sample.is_finite() {

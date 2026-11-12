@@ -11,40 +11,61 @@ use gpui_kit::{
 };
 
 use crate::domain::ids::RecordingId;
-use crate::domain::recording::format_size;
+use crate::domain::language::Language;
 use crate::infrastructure::ai::models::ModelManifest;
 use crate::services::models::ModelPhase;
 use crate::ui::components::dialog_style::{dialog_footer, dialog_subtitle, DIALOG_WIDTH};
 use crate::ui::components::model_card::{
     model_card, ModelCardData, ModelCardProgress, ModelCardTag,
 };
+use rust_i18n::t;
 
+use super::format::size_text;
+use super::notices::localize;
 use super::state::{ModelInstallState, ModelStatus};
 
-const SUBTITLE: &str = "Runs on this PC. Your audio never leaves it.";
-
 /// Friendly text for one manifest entry.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ModelCopy<'a> {
     pub(crate) name: &'a str,
-    pub(crate) description: &'a str,
+    pub(crate) description: String,
     /// (speed, accuracy), each out of 3. General comparisons, not measured on this PC.
     pub(crate) ratings: Option<(u8, u8)>,
 }
 
-pub(crate) fn model_copy(id: &str) -> ModelCopy<'_> {
+/// The name stays as the manifest has it in every language.
+pub(crate) fn model_copy(id: &str, language: Language) -> ModelCopy<'_> {
     match bundled_manifest().and_then(|manifest| manifest.by_id(id)) {
         Some(entry) => ModelCopy {
             name: entry.name(),
-            description: entry.description(),
+            description: description_in(id, entry.description(), language),
             ratings: Some(entry.ratings()),
         },
         None => ModelCopy {
             name: id,
-            description: "",
+            description: String::new(),
             ratings: None,
         },
     }
+}
+
+/// The model's name, the same in every language.
+pub(crate) fn model_name(id: &str) -> &str {
+    bundled_manifest()
+        .and_then(|manifest| manifest.by_id(id))
+        .map_or(id, |entry| entry.name())
+}
+
+/// Catalog key of a model description. Dots and dashes in the id become underscores,
+/// because a dot would split the key.
+pub(crate) fn description_key(id: &str) -> String {
+    format!("app.model_description.{}", id.replace(['.', '-'], "_"))
+}
+
+/// The translated description, or the manifest text when the catalog has none.
+fn description_in(id: &str, manifest_text: &str, language: Language) -> String {
+    crate::_rust_i18n_try_translate(language.code(), description_key(id))
+        .map_or_else(|| manifest_text.to_string(), |text| text.into_owned())
 }
 
 /// Parsed once, because the status bar asks for model copy on every render.
@@ -89,28 +110,46 @@ pub(crate) fn model_footer(
     }
 }
 
-pub(crate) fn download_label(bytes: u64) -> String {
-    format!("Download {}", format_size(bytes))
+pub(crate) fn download_label(bytes: u64, language: Language) -> String {
+    t!(
+        "app.model.download",
+        locale = language.code(),
+        size = size_text(bytes, language)
+    )
+    .into_owned()
 }
 
-pub(crate) const USE_LABEL: &str = "Use selected model";
-
 /// The total comes from the manifest and the percent is whole, so the amount is approximate.
-pub(crate) fn download_progress_text(percent: u8, total_bytes: u64) -> (String, String) {
+pub(crate) fn download_progress_text(
+    percent: u8,
+    total_bytes: u64,
+    language: Language,
+) -> (String, String) {
     let done = total_bytes.saturating_mul(u64::from(percent.min(100))) / 100;
     (
-        format!("Downloading {percent}%"),
-        format!(
-            "About {} of {}",
-            format_size(done),
-            format_size(total_bytes)
-        ),
+        t!(
+            "app.model.downloading",
+            locale = language.code(),
+            percent = percent
+        )
+        .into_owned(),
+        t!(
+            "app.model.download_amount",
+            locale = language.code(),
+            done = size_text(done, language),
+            total = size_text(total_bytes, language)
+        )
+        .into_owned(),
     )
 }
 
 /// Builds a card's progress block from the worker's percent and the manifest size.
-pub(crate) fn card_progress(percent: u8, total_bytes: u64) -> ModelCardProgress {
-    let (left, right) = download_progress_text(percent, total_bytes);
+pub(crate) fn card_progress(
+    percent: u8,
+    total_bytes: u64,
+    language: Language,
+) -> ModelCardProgress {
+    let (left, right) = download_progress_text(percent, total_bytes, language);
     ModelCardProgress {
         percent,
         left: left.into(),
@@ -119,8 +158,8 @@ pub(crate) fn card_progress(percent: u8, total_bytes: u64) -> ModelCardProgress 
 }
 
 /// The size shows for every model, installed or not.
-pub(crate) fn row_meta(bytes: u64) -> String {
-    format_size(bytes)
+pub(crate) fn row_meta(bytes: u64, language: Language) -> String {
+    size_text(bytes, language)
 }
 
 pub(crate) fn row_tag(state: ModelInstallState) -> Option<ModelCardTag> {
@@ -133,16 +172,20 @@ pub(crate) fn row_tag(state: ModelInstallState) -> Option<ModelCardTag> {
 
 pub(crate) fn row_accessibility_label(copy: &ModelCopy<'_>, state: ModelInstallState) -> String {
     let status = match state {
-        ModelInstallState::InUse => "in use",
-        ModelInstallState::Installed => "installed",
-        ModelInstallState::NotInstalled => "not installed",
+        ModelInstallState::InUse => t!("app.model.state_in_use"),
+        ModelInstallState::Installed => t!("app.model.state_installed"),
+        ModelInstallState::NotInstalled => t!("app.model.state_not_installed"),
     };
     match copy.ratings {
-        Some((speed, accuracy)) => format!(
-            "{}, {status}, speed {speed} of 3, accuracy {accuracy} of 3",
-            copy.name
-        ),
-        None => format!("{}, {status}", copy.name),
+        Some((speed, accuracy)) => t!(
+            "app.model.accessibility_rated",
+            name = copy.name,
+            status = status,
+            speed = speed,
+            accuracy = accuracy
+        )
+        .into_owned(),
+        None => t!("app.model.accessibility", name = copy.name, status = status).into_owned(),
     }
 }
 
@@ -167,6 +210,7 @@ pub(crate) struct ModelPromptView {
     pub(crate) footer: ModelFooter,
     /// Size of the selected model, for the Download label.
     pub(crate) selected_bytes: Option<u64>,
+    pub(crate) language: Language,
 }
 
 /// What happens once a model is chosen and ready.
@@ -216,7 +260,7 @@ pub(crate) fn open_model_prompt(
         let mut body = v_flex()
             .w_full()
             .gap_2()
-            .child(dialog_subtitle(SUBTITLE, cx));
+            .child(dialog_subtitle(ts!("app.model.subtitle"), cx));
         for card in view.cards.clone() {
             let on_select = handlers.on_select.clone();
             let id = card.id.clone();
@@ -227,7 +271,7 @@ pub(crate) fn open_model_prompt(
             ));
         }
         dialog
-            .title("Transcription model")
+            .title(ts!("app.model.title"))
             .w(DIALOG_WIDTH)
             .close_button(can_close)
             .overlay_closable(can_close)
@@ -242,7 +286,7 @@ pub(crate) fn open_model_prompt(
 
 fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec<AnyElement> {
     let close = |primary: bool| {
-        let button = Button::new("model-close").label("Close");
+        let button = Button::new("model-close").label(ts!("app.model.close"));
         let button = if primary {
             button.primary()
         } else {
@@ -259,7 +303,7 @@ fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec
             let on_cancel = handlers.on_cancel.clone();
             vec![Button::new("model-cancel")
                 .outline()
-                .label("Cancel download")
+                .label(ts!("app.model.cancel_download"))
                 .on_click(move |event, window, cx| on_cancel(event, window, cx))
                 .into_any_element()]
         }
@@ -269,14 +313,14 @@ fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec
                 close(false),
                 Button::new("model-retry")
                     .primary()
-                    .label("Retry download")
+                    .label(ts!("app.model.retry_download"))
                     .on_click(move |event, window, cx| on_retry(event, window, cx))
                     .into_any_element(),
             ]
         }
         ModelFooter::Download => {
             let on_download = handlers.on_download.clone();
-            let label = download_label(view.selected_bytes.unwrap_or(0));
+            let label = download_label(view.selected_bytes.unwrap_or(0), view.language);
             vec![
                 close(false),
                 Button::new("model-download")
@@ -292,7 +336,7 @@ fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec
                 close(false),
                 Button::new("model-use")
                     .primary()
-                    .label(USE_LABEL)
+                    .label(ts!("app.model.use_selected"))
                     .on_click(move |event, window, cx| on_use(event, window, cx))
                     .into_any_element(),
             ]
@@ -304,7 +348,9 @@ fn footer_buttons(view: &ModelPromptView, handlers: &ModelPromptHandlers) -> Vec
 
 pub(crate) fn open_model_alert(window: &mut Window, cx: &mut App, message: &'static str) {
     window.open_alert_dialog(cx, move |alert, _, _| {
-        alert.title("Transcription model").description(message)
+        alert
+            .title(ts!("app.model.title"))
+            .description(localize(message))
     });
 }
 
@@ -312,11 +358,18 @@ pub(crate) fn open_model_alert(window: &mut Window, cx: &mut App, message: &'sta
 pub(crate) fn model_status_text(status: &ModelStatus) -> Option<String> {
     match status {
         ModelStatus::Checking => None,
-        ModelStatus::InUse { id } => Some(format!("Model: {}", model_copy(id).name)),
-        ModelStatus::Missing => Some("No model installed · Choose…".to_string()),
-        ModelStatus::Downloading { id, percent } => {
-            Some(format!("Downloading {} {percent}%", model_copy(id).name))
+        ModelStatus::InUse { id } => {
+            Some(t!("app.model.status_in_use", name = model_name(id)).into_owned())
         }
+        ModelStatus::Missing => Some(t!("app.model.status_missing").into_owned()),
+        ModelStatus::Downloading { id, percent } => Some(
+            t!(
+                "app.model.status_downloading",
+                name = model_name(id),
+                percent = percent
+            )
+            .into_owned(),
+        ),
     }
 }
 
@@ -334,11 +387,10 @@ pub(crate) fn model_status_item(
         }
     };
     let tooltip = match status {
-        ModelStatus::InUse { id } => format!(
-            "Transcription model: {}. Click to change.",
-            model_copy(id).name
-        ),
-        _ => "Choose a transcription model.".to_string(),
+        ModelStatus::InUse { id } => {
+            t!("app.model.status_tooltip", name = model_name(id)).into_owned()
+        }
+        _ => t!("app.model.status_tooltip_missing").into_owned(),
     };
     Some(
         Button::new("model-status")
@@ -361,11 +413,12 @@ pub(crate) fn model_status_item(
 #[cfg(test)]
 mod tests {
     use super::{
-        after_model_ready, download_label, download_progress_text, error_display, model_copy,
-        model_footer, model_status_text, row_accessibility_label, row_meta, row_tag,
-        AfterModelReady, ErrorDisplay, ModelFooter, USE_LABEL,
+        after_model_ready, description_in, download_label, download_progress_text, error_display,
+        model_copy, model_footer, model_status_text, row_accessibility_label, row_meta, row_tag,
+        AfterModelReady, ErrorDisplay, ModelFooter,
     };
     use crate::domain::ids::RecordingId;
+    use crate::domain::language::Language;
     use crate::infrastructure::ai::models::ModelManifest;
     use crate::services::models::ModelPhase;
     use crate::ui::components::model_card::ModelCardTag;
@@ -407,7 +460,7 @@ mod tests {
         let id = "nemotron-3.5-streaming-0.6b-q8_0";
 
         // Act
-        let copy = model_copy(id);
+        let copy = model_copy(id, Language::English);
 
         // Assert
         assert_eq!(copy.name, "Nemotron 3.5 (Multilingual)");
@@ -429,7 +482,11 @@ mod tests {
             .entries()
             .iter()
             .map(|entry| entry.id())
-            .filter(|id| !marks.iter().any(|mark| model_copy(id).name.ends_with(mark)))
+            .filter(|id| {
+                !marks
+                    .iter()
+                    .any(|mark| model_copy(id, Language::English).name.ends_with(mark))
+            })
             .collect();
 
         // Assert
@@ -446,7 +503,7 @@ mod tests {
             .entries()
             .iter()
             .map(|entry| entry.id())
-            .filter(|id| model_copy(id).ratings.is_none())
+            .filter(|id| model_copy(id, Language::English).ratings.is_none())
             .collect();
 
         // Assert
@@ -463,7 +520,7 @@ mod tests {
             .entries()
             .iter()
             .map(|entry| entry.id())
-            .filter(|id| model_copy(id).description.is_empty())
+            .filter(|id| model_copy(id, Language::English).description.is_empty())
             .collect();
 
         // Assert
@@ -476,9 +533,9 @@ mod tests {
         let total = 190_085_487;
 
         // Act
-        let (start, _) = download_progress_text(0, total);
-        let (left, right) = download_progress_text(42, total);
-        let (_, end) = download_progress_text(100, total);
+        let (start, _) = download_progress_text(0, total, Language::English);
+        let (left, right) = download_progress_text(42, total, Language::English);
+        let (_, end) = download_progress_text(100, total, Language::English);
 
         // Assert
         assert_eq!(start, "Downloading 0%");
@@ -488,12 +545,53 @@ mod tests {
     }
 
     #[test]
+    fn swedish_descriptions_come_from_the_catalog() {
+        // Arrange
+        let id = "parakeet-tdt-0.6b-v2-q8_0";
+
+        // Act
+        let english = model_copy(id, Language::English);
+        let swedish = model_copy(id, Language::Swedish);
+
+        // Assert
+        assert_eq!(english.description, "Fast and accurate, English only");
+        assert_eq!(swedish.description, "Snabb och noggrann, endast engelska");
+        assert_eq!(swedish.name, english.name);
+    }
+
+    #[test]
+    fn a_model_without_catalog_text_keeps_the_manifest_description() {
+        // Arrange
+        let id = "not-in-the-catalog";
+
+        // Act
+        let text = description_in(id, "From the manifest", Language::Swedish);
+
+        // Assert
+        assert_eq!(text, "From the manifest");
+    }
+
+    #[test]
+    fn swedish_labels_use_the_decimal_comma() {
+        // Arrange
+        let bytes = 190_085_487;
+
+        // Act
+        let download = download_label(bytes, Language::Swedish);
+        let (_, amount) = download_progress_text(42, bytes, Language::Swedish);
+
+        // Assert
+        assert_eq!(download, "Ladda ned 181,3 MB");
+        assert_eq!(amount, "Cirka 76,1 MB av 181,3 MB");
+    }
+
+    #[test]
     fn unknown_model_falls_back_to_its_id() {
         // Arrange
         let id = "large-v9";
 
         // Act
-        let copy = model_copy(id);
+        let copy = model_copy(id, Language::English);
 
         // Assert
         assert_eq!(copy.name, "large-v9");
@@ -554,11 +652,14 @@ mod tests {
         let bytes = 190_085_487;
 
         // Act
-        let download = download_label(bytes);
+        let download = download_label(bytes, Language::English);
 
         // Assert
         assert_eq!(download, "Download 181.3 MB");
-        assert_eq!(USE_LABEL, "Use selected model");
+        assert_eq!(
+            rust_i18n::t!("app.model.use_selected"),
+            "Use selected model"
+        );
     }
 
     #[test]
@@ -567,7 +668,7 @@ mod tests {
         let bytes = 32_152_673;
 
         // Act
-        let meta = row_meta(bytes);
+        let meta = row_meta(bytes, Language::English);
 
         // Assert
         assert_eq!(meta, "30.7 MB");
@@ -599,7 +700,7 @@ mod tests {
     #[test]
     fn accessibility_label_includes_the_state() {
         // Arrange
-        let copy = model_copy("nemotron-3.5-streaming-0.6b-q8_0");
+        let copy = model_copy("nemotron-3.5-streaming-0.6b-q8_0", Language::English);
 
         // Act
         let in_use = row_accessibility_label(&copy, ModelInstallState::InUse);

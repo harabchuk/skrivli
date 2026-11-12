@@ -11,6 +11,7 @@ use crate::services::ports::HostCommand;
 use crate::services::recording::RecordSnapshot;
 use crate::services::transcription::TranscriptionSnapshot;
 
+use super::notices::NOTICE_STILL_RUNNING;
 use super::state::{AppTab, Presentation};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,7 +181,7 @@ fn hide(state: &mut Presentation) -> Effect {
     let explain = !state.tray_explanation_seen();
     if explain {
         state.mark_tray_explanation_seen();
-        state.set_notice(Some("Skrivli is still running in the notification area."));
+        state.set_notice(Some(NOTICE_STILL_RUNNING));
     }
     Effect::Hide { explain }
 }

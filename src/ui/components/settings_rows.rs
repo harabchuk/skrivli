@@ -5,10 +5,11 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{div, AnyElement, App, IntoElement, ParentElement, SharedString, Styled};
 
 pub(crate) fn settings_section(
-    title: &'static str,
+    title: impl Into<SharedString>,
     rows: impl IntoIterator<Item = AnyElement>,
     cx: &App,
 ) -> impl IntoElement {
+    let title: SharedString = title.into();
     let border = cx.theme().border;
     v_flex()
         .w_full()

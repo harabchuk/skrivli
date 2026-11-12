@@ -47,17 +47,17 @@ pub(crate) fn model_tag(tag: ModelCardTag) -> impl IntoElement {
                 .gap_1()
                 .items_center()
                 .child(Icon::new(IconName::Check).xsmall())
-                .child("In use"),
+                .child(ts!("app.model.in_use")),
         ),
         ModelCardTag::Installed => Tag::success()
             .outline()
             .small()
             .rounded_full()
-            .child("Installed"),
+            .child(ts!("app.model.installed")),
     }
 }
 
-fn rating(label: &'static str, filled: u8, cx: &App) -> impl IntoElement {
+fn rating(label: SharedString, filled: u8, cx: &App) -> impl IntoElement {
     let on = cx.theme().foreground;
     let off = cx.theme().border;
     h_flex()
@@ -136,8 +136,8 @@ pub(crate) fn model_card(
                                             .gap_3()
                                             .text_xs()
                                             .text_color(muted)
-                                            .child(rating("Speed", speed, cx))
-                                            .child(rating("Accuracy", accuracy, cx)),
+                                            .child(rating(ts!("app.model.speed"), speed, cx))
+                                            .child(rating(ts!("app.model.accuracy"), accuracy, cx)),
                                     )
                                 }),
                         )

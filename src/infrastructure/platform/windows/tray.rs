@@ -34,10 +34,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::common::error::AppError;
 use crate::domain::ids::RecordingId;
-use crate::services::ports::{HostCommand, Tray};
-
-const BALLOON_TITLE: &str = "Transcript ready";
-const BALLOON_BODY: &str = "A recording has a transcript.";
+use crate::services::ports::{HostCommand, SharedTrayText, Tray, TrayText};
 
 /// Resource id `winresource` gives the embedded `resources/skrivli.ico`.
 const APP_ICON_RESOURCE: u16 = 1;
@@ -62,9 +59,10 @@ impl Tray for WindowsTray {
         stop: Arc<AtomicBool>,
         recording: Arc<AtomicBool>,
         notices: Receiver<RecordingId>,
+        text: SharedTrayText,
         on_command: Box<dyn Fn(HostCommand) + Send>,
     ) -> Result<(), AppError> {
-        run_tray(stop, recording, notices, on_command)
+        run_tray(stop, recording, notices, text, on_command)
     }
 }
 
@@ -85,6 +83,7 @@ struct TrayState {
     stop: Arc<AtomicBool>,
     recording: Arc<AtomicBool>,
     notices: Receiver<RecordingId>,
+    text: SharedTrayText,
     balloon_id: Option<RecordingId>,
     taskbar_created: u32,
     last_toggle: Instant,
@@ -99,6 +98,7 @@ fn run_tray(
     stop: Arc<AtomicBool>,
     recording: Arc<AtomicBool>,
     notices: Receiver<RecordingId>,
+    text: SharedTrayText,
     on_command: Box<dyn Fn(HostCommand) + Send>,
 ) -> Result<(), AppError> {
     let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
@@ -108,6 +108,7 @@ fn run_tray(
             stop: Arc::clone(&stop),
             recording,
             notices,
+            text,
             balloon_id: None,
             taskbar_created,
             last_toggle: Instant::now() - Duration::from_secs(1),
@@ -374,12 +375,28 @@ fn drain_notices(hwnd: HWND) {
     }
 }
 
+/// The current tray text. The app may replace it at any time, so it is read per use.
+fn current_text() -> Option<TrayText> {
+    TRAY.with(|slot| {
+        slot.borrow().as_ref().map(|state| {
+            state
+                .text
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        })
+    })
+}
+
 fn show_completion_balloon(hwnd: HWND) {
+    let Some(text) = current_text() else {
+        return;
+    };
     let mut data = icon_data(hwnd);
     data.uFlags |= NIF_INFO;
     data.dwInfoFlags = NIIF_INFO;
-    write_wide(&mut data.szInfoTitle, BALLOON_TITLE);
-    write_wide(&mut data.szInfo, BALLOON_BODY);
+    write_wide(&mut data.szInfoTitle, &text.balloon_title);
+    write_wide(&mut data.szInfo, &text.balloon_body);
     let shown = unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
     if !shown.as_bool() {
         tracing::warn!("completion balloon was not shown");
@@ -427,13 +444,14 @@ fn popup(hwnd: HWND) -> Option<HostCommand> {
             .as_ref()
             .is_some_and(|state| state.recording.load(Ordering::Acquire))
     });
+    let text = current_text()?;
     let menu = unsafe { CreatePopupMenu() }.ok()?;
-    append(menu, ID_SHOW, "Show Skrivli", false);
-    append(menu, ID_START, "Start recording", recording);
-    append(menu, ID_STOP, "Stop recording", !recording);
-    append(menu, ID_FOLDER, "Open recordings folder", false);
-    append(menu, ID_SETTINGS, "Settings", false);
-    append(menu, ID_EXIT, "Exit", false);
+    append(menu, ID_SHOW, &text.show, false);
+    append(menu, ID_START, &text.start_recording, recording);
+    append(menu, ID_STOP, &text.stop_recording, !recording);
+    append(menu, ID_FOLDER, &text.open_recordings_folder, false);
+    append(menu, ID_SETTINGS, &text.settings, false);
+    append(menu, ID_EXIT, &text.exit, false);
     let mut point = POINT::default();
     let _ = unsafe { GetCursorPos(&mut point) };
     let _ = unsafe { SetForegroundWindow(hwnd) };
