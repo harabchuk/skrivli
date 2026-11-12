@@ -48,7 +48,7 @@ After a model is installed, the record → save → transcribe → copy path wor
 
 - Resizable main window with two tabs: **Record** and **Recordings**.
 - Remembers size and position across launches (restored safely on the available display).
-- The status bar is shared by both tabs and reads the same on each: recording state, elapsed time, notices (including "Saved." after a recording), transcription progress, and the selected model. Warnings also appear as a banner on the Record tab.
+- The status bar is shared by both tabs and reads the same on each: recording state, elapsed time, notices (including "Saved." after a recording), transcription progress, and the selected model. Recording and device warnings also appear as a banner on the Record tab. Transcription results and failures appear only in the status bar and on the Recordings tab, never on the Record tab.
 - A Settings gear on the tab bar opens Settings; Settings shows the transcription model in use (with its description and size) and a Change model button that opens the model dialog on top (Choose model when none is installed), the close-to-tray switch with a one-line explanation, and the app version in its footer, followed by a "© 2026 Alexis Harabchuk" link that opens https://github.com/harabchuk/skrivli in the default browser. Opening the recordings folder and Exit remain available from the Recordings tab and the tray.
 - A theme button next to Settings cycles theme preference. Order is System → opposite of Windows → the other palette → System (light OS: System, Dark, Light; dark OS: System, Light, Dark). The icon and tooltip name the current choice; the preference is remembered across launches.
 
