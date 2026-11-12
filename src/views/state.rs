@@ -3,13 +3,28 @@
 use crate::domain::ids::{JobId, RecordingId};
 use crate::domain::recording::{settled_transcript_status, TranscriptStatus};
 use crate::services::models::{ModelFile, ModelPhase, ModelSnapshot};
-use crate::services::transcription::{JobPhase, TranscriptionSnapshot, NOTICE_FAILED};
+use crate::services::transcription::{
+    JobPhase, TranscriptionSnapshot, NOTICE_CANCELLED, NOTICE_DONE, NOTICE_FAILED, NOTICE_MODEL,
+};
 
 pub(crate) use crate::domain::recording::RecordPhase;
 
 /// Shown when a re-run fails and the earlier transcript is still on disk.
 pub(crate) const NOTICE_FAILED_KEPT: &str =
     "Transcription failed. Your previous transcript is unchanged.";
+
+/// True for notices that report a transcription result. They belong in the status bar and on
+/// the Recordings tab, never in the Record tab banner.
+pub(crate) fn is_transcription_notice(notice: &str) -> bool {
+    [
+        NOTICE_DONE,
+        NOTICE_FAILED,
+        NOTICE_CANCELLED,
+        NOTICE_MODEL,
+        NOTICE_FAILED_KEPT,
+    ]
+    .contains(&notice)
+}
 
 /// The status-bar notice for a job update. A plain failure becomes the "previous transcript
 /// is unchanged" notice when a transcript file already exists.

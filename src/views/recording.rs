@@ -20,6 +20,7 @@ use gpui_kit::{
 use crate::domain::recording::RecordPhase;
 use crate::services::recording::NOTICE_SAVED;
 use crate::ui::components::level_meter::level_meter;
+use crate::views::state::is_transcription_notice;
 
 const COLUMN_MAX_WIDTH: f32 = 520.;
 const ACTION_WIDTH: f32 = 200.;
@@ -438,9 +439,12 @@ fn notice_tone(notice: &str) -> NoticeTone {
     }
 }
 
-/// Good news ("Saved.") lives in the shared status bar; only warnings get the banner.
+/// Good news ("Saved.") and transcription results live in the shared status bar; only
+/// recording and device warnings get the banner.
 pub(crate) fn banner_notice(notice: Option<&'static str>) -> Option<&'static str> {
-    notice.filter(|notice| notice_tone(notice) == NoticeTone::Warning)
+    notice.filter(|notice| {
+        notice_tone(notice) == NoticeTone::Warning && !is_transcription_notice(notice)
+    })
 }
 
 /// A separator sits after the Windows default and before the last option
@@ -460,6 +464,14 @@ fn selected_index<T: PartialEq>(choices: &[T], current: &T) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::recording::{
+        NOTICE_FALLBACK, NOTICE_FORMAT, NOTICE_MIC, NOTICE_MIC_MISSING, NOTICE_NO_SOURCES,
+        NOTICE_PRIVACY, NOTICE_STALL, NOTICE_SYSTEM_FALLBACK, NOTICE_SYSTEM_MISSING, NOTICE_WORKER,
+    };
+    use crate::services::transcription::{
+        NOTICE_CANCELLED, NOTICE_DONE, NOTICE_FAILED, NOTICE_MODEL,
+    };
+    use crate::views::state::NOTICE_FAILED_KEPT;
 
     const PHASES: [RecordPhase; 5] = [
         RecordPhase::Idle,
@@ -519,6 +531,47 @@ mod tests {
 
         // Assert
         assert_eq!(shown, (None, Some(failure), None));
+    }
+
+    #[test]
+    fn transcription_notices_stay_out_of_the_banner() {
+        // Arrange
+        let transcription = [
+            NOTICE_DONE,
+            NOTICE_FAILED,
+            NOTICE_CANCELLED,
+            NOTICE_MODEL,
+            NOTICE_FAILED_KEPT,
+        ];
+
+        // Act
+        let shown = transcription.map(|notice| banner_notice(Some(notice)));
+
+        // Assert
+        assert_eq!(shown, [None; 5]);
+    }
+
+    #[test]
+    fn device_warnings_stay_in_the_banner() {
+        // Arrange
+        let warnings = [
+            NOTICE_MIC,
+            NOTICE_FORMAT,
+            NOTICE_NO_SOURCES,
+            NOTICE_FALLBACK,
+            NOTICE_SYSTEM_FALLBACK,
+            NOTICE_SYSTEM_MISSING,
+            NOTICE_MIC_MISSING,
+            NOTICE_STALL,
+            NOTICE_WORKER,
+            NOTICE_PRIVACY,
+        ];
+
+        // Act
+        let shown = warnings.map(|notice| banner_notice(Some(notice)));
+
+        // Assert
+        assert_eq!(shown, warnings.map(Some));
     }
 
     #[test]
