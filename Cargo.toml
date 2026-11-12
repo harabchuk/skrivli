@@ -24,6 +24,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ureq = "2"
 windows-core = "0.58"
 jiff = "0.2.39"
+icu = "2.4"
+rust-i18n = "4.2"
 flac-codec = "1.3"
 
 [build-dependencies]

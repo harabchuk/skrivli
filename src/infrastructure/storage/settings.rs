@@ -9,9 +9,10 @@ use crate::domain::audio::{EndpointChoice, EndpointId};
 use crate::domain::recording::MaxMeetingDuration;
 use crate::infrastructure::platform;
 
+pub(crate) use crate::domain::language::Language;
 pub(crate) use crate::domain::theme::ThemePreference;
 
-pub(crate) const SCHEMA_VERSION: u32 = 4;
+pub(crate) const SCHEMA_VERSION: u32 = 5;
 
 /// Default transcription model variant id (manifest `nemotron-3.5-streaming-0.6b-q8_0`).
 pub(crate) const DEFAULT_MODEL_ID: &str = "nemotron-3.5-streaming-0.6b-q8_0";
@@ -149,6 +150,9 @@ pub(crate) struct Settings {
     /// Hours before a forgotten recording stops. Older files omit the field.
     #[serde(default = "default_max_meeting_hours")]
     max_meeting_hours: u32,
+    /// Interface language. Older files omit the field and read as English.
+    #[serde(default)]
+    language: Language,
 }
 
 impl Settings {
@@ -175,6 +179,7 @@ impl Settings {
             auto_transcribe: default_auto_transcribe(),
             notify_on_transcript: default_notify_on_transcript(),
             max_meeting_hours: default_max_meeting_hours(),
+            language: Language::default(),
         })
     }
 
@@ -292,6 +297,14 @@ impl Settings {
         self.max_meeting_hours = duration.hours();
     }
 
+    pub(crate) fn language(&self) -> Language {
+        self.language
+    }
+
+    pub(crate) fn set_language(&mut self, language: Language) {
+        self.language = language;
+    }
+
     pub(crate) fn set_recordings_directory(&mut self, directory: PathBuf) -> Result<(), AppError> {
         if directory.as_os_str().is_empty() {
             return Err(AppError::message(
@@ -400,8 +413,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        Settings, StoredEndpoint, StoredWindowBounds, ThemePreference, DEFAULT_MODEL_ID,
-        SCHEMA_VERSION,
+        Language, Settings, StoredEndpoint, StoredWindowBounds, ThemePreference,
+        DEFAULT_MODEL_ID, SCHEMA_VERSION,
     };
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
@@ -738,6 +751,47 @@ mod tests {
         assert_eq!(from_old.max_meeting_duration().hours(), 3);
         assert_eq!(from_bad.max_meeting_duration().hours(), 3);
         assert_eq!(from_bad.recordings_directory(), meetings.as_path());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn settings_round_trip_keeps_language() {
+        // Arrange
+        let dir = temp_dir("language");
+        let path = dir.join("settings.json");
+        let mut settings = sample(&dir);
+        let default_language = settings.language();
+        settings.set_language(Language::Swedish);
+
+        // Act
+        settings.save(&path).expect("save");
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert_eq!(default_language, Language::English);
+        assert_eq!(loaded.language(), Language::Swedish);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn older_settings_without_language_read_as_english() {
+        // Arrange
+        let dir = temp_dir("language-legacy");
+        let path = dir.join("settings.json");
+        let escaped = dir.join("Meetings").display().to_string().replace('\\', "\\\\");
+        fs::write(
+            &path,
+            format!(r#"{{"schema_version":4,"recordings_directory":"{escaped}","close_to_tray":true,"start_hidden":false,"theme":"system"}}"#),
+        )
+        .expect("write");
+
+        // Act
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert_eq!(loaded.language(), Language::English);
+        assert_eq!(loaded.schema_version, SCHEMA_VERSION);
+        assert_eq!(SCHEMA_VERSION, 5);
         let _ = fs::remove_dir_all(dir);
     }
 
