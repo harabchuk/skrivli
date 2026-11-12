@@ -464,7 +464,10 @@ fn selected_index<T: PartialEq>(choices: &[T], current: &T) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::recording::NOTICE_MIC;
+    use crate::services::recording::{
+        NOTICE_FALLBACK, NOTICE_FORMAT, NOTICE_MIC, NOTICE_MIC_MISSING, NOTICE_NO_SOURCES,
+        NOTICE_PRIVACY, NOTICE_STALL, NOTICE_SYSTEM_FALLBACK, NOTICE_SYSTEM_MISSING, NOTICE_WORKER,
+    };
     use crate::services::transcription::{
         NOTICE_CANCELLED, NOTICE_DONE, NOTICE_FAILED, NOTICE_MODEL,
     };
@@ -543,11 +546,32 @@ mod tests {
 
         // Act
         let shown = transcription.map(|notice| banner_notice(Some(notice)));
-        let warning = banner_notice(Some(NOTICE_MIC));
 
         // Assert
         assert_eq!(shown, [None; 5]);
-        assert_eq!(warning, Some(NOTICE_MIC));
+    }
+
+    #[test]
+    fn device_warnings_stay_in_the_banner() {
+        // Arrange
+        let warnings = [
+            NOTICE_MIC,
+            NOTICE_FORMAT,
+            NOTICE_NO_SOURCES,
+            NOTICE_FALLBACK,
+            NOTICE_SYSTEM_FALLBACK,
+            NOTICE_SYSTEM_MISSING,
+            NOTICE_MIC_MISSING,
+            NOTICE_STALL,
+            NOTICE_WORKER,
+            NOTICE_PRIVACY,
+        ];
+
+        // Act
+        let shown = warnings.map(|notice| banner_notice(Some(notice)));
+
+        // Assert
+        assert_eq!(shown, warnings.map(Some));
     }
 
     #[test]
