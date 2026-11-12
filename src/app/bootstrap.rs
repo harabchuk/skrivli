@@ -4,7 +4,7 @@
 
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use gpui_kit::{
@@ -14,6 +14,7 @@ use gpui_kit::{
 use crate::common::error::AppError;
 use crate::common::logging;
 use crate::common::paths::AppPaths;
+use crate::domain::language::Language;
 use crate::domain::window_frame::{restore_window_bounds, LogicalRect};
 use crate::infrastructure::ai::fetch::UreqModelSource;
 use crate::infrastructure::ai::parakeet::ParakeetInference;
@@ -29,7 +30,7 @@ use crate::services::level_monitor::{spawn_level_monitor, MonitorTargets};
 use crate::services::library::LibraryHost;
 use crate::services::models::ModelHost;
 use crate::services::playback::PlayerHost;
-use crate::services::ports::{ActivationWatch, HostCommand, InstanceAcquire};
+use crate::services::ports::{ActivationWatch, HostCommand, InstanceAcquire, SharedTrayText};
 use crate::services::recording::{spawn_recording_host, RecordingEngine, RecordingHost};
 use crate::services::transcription::TranscriptionHost;
 use crate::ui::theme::apply_theme;
@@ -37,6 +38,7 @@ use crate::views::actions::{AppCommand, BridgeMessage};
 use crate::views::hooks::ShellHooks;
 use crate::views::main_window::MainWindow;
 use crate::views::state::Presentation;
+use crate::views::tray_text::tray_text;
 
 use super::bridge::{spawn_shell_producer, SHELL_PULSE_INTERVAL};
 use super::menus::register;
@@ -101,6 +103,9 @@ pub(crate) fn run() -> i32 {
         defaults
     };
 
+    init_localization(settings.language());
+    let tray_text: SharedTrayText = Arc::new(Mutex::new(tray_text(settings.language())));
+
     let shutdown = ShutdownController::new();
     let (tx, rx) = mpsc::channel();
     let writer = SettingsWriter::spawn(settings_path, &shutdown);
@@ -120,6 +125,7 @@ pub(crate) fn run() -> i32 {
         Arc::clone(&system_gain),
         Arc::clone(&lease),
         Arc::clone(&targets),
+        Arc::clone(&tray_text),
         paths.models_dir(),
         settings.recordings_directory().to_path_buf(),
         settings.notify_on_transcript(),
@@ -145,6 +151,7 @@ pub(crate) fn run() -> i32 {
         mic_gain,
         system_gain,
         targets,
+        tray_text,
         Arc::clone(&host.shell),
     );
     shutdown.join();
@@ -173,6 +180,7 @@ fn spawn_workers(
     system_gain: Arc<GainControl>,
     lease: Arc<EndpointLease>,
     targets: Arc<MonitorTargets>,
+    tray_text: SharedTrayText,
     models_dir: std::path::PathBuf,
     recordings_dir: std::path::PathBuf,
     notify_on_transcript: bool,
@@ -313,6 +321,7 @@ fn spawn_workers(
             tray_stop,
             recording_flag,
             notice_rx,
+            tray_text,
             Box::new(move |command: HostCommand| {
                 let _ = sender.send(BridgeMessage::Command(AppCommand::from(command)));
             }),
@@ -329,6 +338,14 @@ fn spawn_workers(
         model_host,
         models_dir,
     }
+}
+
+/// Loads the translations before any text is shown. Kit's own controls read the same
+/// locale, and the `gpui_component.` entries in our catalog override their text.
+fn init_localization(language: Language) {
+    use gpui_kit::component as gpui_component;
+    rust_i18n::extend!(gpui_component);
+    gpui_kit::component::set_locale(language.code());
 }
 
 /// Share one performance-counter implementation with `RecordingEngine`'s `Box` slot.
@@ -366,6 +383,7 @@ fn open_shell(
     mic_gain: Arc<GainControl>,
     system_gain: Arc<GainControl>,
     targets: Arc<MonitorTargets>,
+    tray_text: SharedTrayText,
     shell: Arc<dyn crate::services::ports::DesktopShell>,
 ) {
     let theme = settings.theme();
@@ -404,6 +422,7 @@ fn open_shell(
                     })
                 },
                 shutdown.flag(),
+                tray_text,
             );
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 window.set_window_title("Skrivli");

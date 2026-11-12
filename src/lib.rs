@@ -1,5 +1,16 @@
 //! Skrivli application library. The GPUI thread must not block on audio, disk, or inference.
 
+// Translations live in `locales/ui.json`. App text is under `app.`; Swedish text for
+// Kit's own controls is under `gpui_component.` (see `app::bootstrap`).
+rust_i18n::i18n!("locales", fallback = "en");
+
+/// Translated text for the active language, as a GPUI `SharedString`.
+macro_rules! ts {
+    ($($args:tt)*) => {
+        gpui_kit::SharedString::from(rust_i18n::t!($($args)*).into_owned())
+    };
+}
+
 pub(crate) mod app;
 
 /// Process entry used by the binary. Returns a process exit code.

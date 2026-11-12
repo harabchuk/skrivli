@@ -5,7 +5,22 @@ use crate::domain::recording::{settled_transcript_status, TranscriptStatus};
 use crate::services::models::{ModelFile, ModelPhase, ModelSnapshot};
 use crate::services::transcription::{JobPhase, TranscriptionSnapshot, NOTICE_FAILED};
 
+use rust_i18n::t;
+
+use super::notices::localize;
+
 pub(crate) use crate::domain::recording::RecordPhase;
+
+/// Short text for a transcript state, for the detail line and the status bar.
+fn status_text(status: TranscriptStatus) -> String {
+    match status {
+        TranscriptStatus::None => "—".to_string(),
+        TranscriptStatus::Queued => t!("app.status.queued").into_owned(),
+        TranscriptStatus::Progress(percent) => format!("{percent}%"),
+        TranscriptStatus::Ready => t!("app.status.transcript_ready").into_owned(),
+        TranscriptStatus::Failed => t!("app.status.failed").into_owned(),
+    }
+}
 
 /// Shown when a re-run fails and the earlier transcript is still on disk.
 pub(crate) const NOTICE_FAILED_KEPT: &str =
@@ -215,8 +230,7 @@ impl Presentation {
                 .detail
                 .unwrap_or("Transcription failed.")
                 .to_string(),
-            TranscriptStatus::Ready => TranscriptStatus::Ready.display(),
-            other => other.display(),
+            other => status_text(other),
         };
         if let Some(notice) = snapshot.notice {
             self.notice = Some(settled_notice(snapshot.phase, notice, has_transcript_file));
@@ -320,25 +334,29 @@ impl Presentation {
     /// Same text on every tab: activity, notice, then transcription progress.
     pub(crate) fn status_line(&self, elapsed: &str) -> String {
         let activity = match self.record_phase {
-            RecordPhase::Starting => Some("Starting".to_string()),
-            RecordPhase::Recording => Some(format!("Recording {elapsed}")),
-            RecordPhase::Stopping => Some("Saving".to_string()),
+            RecordPhase::Starting => Some(t!("app.status.starting").into_owned()),
+            RecordPhase::Recording => {
+                Some(t!("app.status.recording", elapsed = elapsed).into_owned())
+            }
+            RecordPhase::Stopping => Some(t!("app.status.saving").into_owned()),
             RecordPhase::Idle | RecordPhase::Error => None,
         };
         let transcription = self
             .transcript_status
             .filter(|_| self.transcription_active())
             .map(|status| match status {
-                TranscriptStatus::Progress(percent) => format!("Transcribing {percent}%"),
-                other => other.display().to_string(),
+                TranscriptStatus::Progress(percent) => {
+                    t!("app.status.transcribing", percent = percent).into_owned()
+                }
+                other => status_text(other),
             });
         let parts: Vec<String> = activity
             .into_iter()
-            .chain(self.notice.map(str::to_string))
+            .chain(self.notice.map(|notice| localize(notice).to_string()))
             .chain(transcription)
             .collect();
         if parts.is_empty() {
-            "Ready".to_string()
+            t!("app.status.ready").into_owned()
         } else {
             parts.join(" · ")
         }

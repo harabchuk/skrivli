@@ -14,6 +14,7 @@ use icu::locale::Locale;
 use icu::time::Time;
 
 use crate::domain::audio::CivilTime;
+use crate::domain::gain::clamp_slider_gain;
 use crate::domain::language::Language;
 
 struct Formatters {
@@ -101,6 +102,12 @@ pub(crate) fn size_text(bytes: u64, language: Language) -> String {
     format!("{} {unit}", one_decimal(tenths, language))
 }
 
+/// A gain factor with one decimal, for example `1.7×` or `1,7×`.
+pub(crate) fn gain_text(gain: f32, language: Language) -> String {
+    let tenths = (clamp_slider_gain(gain) * 10.0).round() as i64;
+    format!("{}×", one_decimal(tenths, language))
+}
+
 /// `tenths` is the value times ten, shown with exactly one fraction digit.
 fn one_decimal(tenths: i64, language: Language) -> String {
     let mut value = Decimal::from(tenths);
@@ -113,7 +120,7 @@ fn one_decimal(tenths: i64, language: Language) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{clock_text, month_day_text, size_text};
+    use super::{clock_text, gain_text, month_day_text, size_text};
     use crate::domain::audio::CivilTime;
     use crate::domain::language::Language;
 
@@ -195,5 +202,20 @@ mod tests {
         assert_eq!(text, "38,0 MB");
         assert_eq!(size_text(500, Language::Swedish), "500 B");
         assert_eq!(size_text(983_696_512, Language::Swedish), "938,1 MB");
+    }
+
+    #[test]
+    fn gain_follows_the_language_decimal_mark() {
+        // Arrange
+        let gain = 1.7;
+
+        // Act
+        let english = gain_text(gain, Language::English);
+        let swedish = gain_text(gain, Language::Swedish);
+
+        // Assert
+        assert_eq!(english, "1.7×");
+        assert_eq!(swedish, "1,7×");
+        assert_eq!(gain_text(9.0, Language::English), "4.0×");
     }
 }

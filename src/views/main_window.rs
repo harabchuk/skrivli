@@ -23,8 +23,9 @@ use gpui_kit::{
 };
 
 use crate::domain::audio::format_elapsed;
-use crate::domain::gain::{db_fs, format_gain};
+use crate::domain::gain::db_fs;
 use crate::domain::ids::RecordingId;
+use crate::domain::language::Language;
 use crate::domain::recording::{
     settled_transcript_status, MaxMeetingDuration, RecordPhase, RecordingContainer,
     TranscriptStatus,
@@ -54,11 +55,13 @@ use crate::views::actions::{drain_bridge, AppCommand, BridgeMessage, Effect};
 use crate::views::hooks::ShellHooks;
 use crate::views::state::{model_install_state, AppTab, ModelStatus, Presentation};
 
+use super::format::gain_text;
 use super::model_prompt::{
-    after_model_ready, card_progress, error_display, model_copy, model_footer, model_status_item,
-    open_model_alert, open_model_prompt, row_accessibility_label, row_meta, row_tag,
-    AfterModelReady, ErrorDisplay, ModelPromptHandlers, ModelPromptView,
+    after_model_ready, card_progress, error_display, model_copy, model_footer, model_name,
+    model_status_item, open_model_alert, open_model_prompt, row_accessibility_label, row_meta,
+    row_tag, AfterModelReady, ErrorDisplay, ModelPromptHandlers, ModelPromptView,
 };
+use super::notices::{localize, NOTICE_RECORDING_NOT_FOUND};
 use super::recording::{banner_notice, record_tab, DeviceChoice, RecordView};
 use super::recordings::{
     can_transcribe_again, default_selection, failure_reason, is_narrow, item_index_of,
@@ -73,6 +76,7 @@ use super::settings::{
     open_about, open_exit_while_recording, open_settings, open_tray_explanation,
     settings_model_row, SettingsHandlers, SettingsView,
 };
+use super::tray_text::tray_text;
 
 const BOUNDS_DEBOUNCE: Duration = Duration::from_millis(400);
 
@@ -169,14 +173,11 @@ impl MainWindow {
         let focus = cx.focus_handle().tab_stop(true);
         window.focus(&focus, cx);
         let labels = vec![
-            SharedString::from("Default communications"),
-            SharedString::from(DISABLED_LABEL),
+            ts!("app.record.default_communications"),
+            ts!("app.record.disabled"),
         ];
         let choices = vec![StoredEndpoint::Default, StoredEndpoint::Disabled];
-        let system_labels = vec![
-            SharedString::from("Default output device"),
-            SharedString::from(DISABLED_LABEL),
-        ];
+        let system_labels = vec![ts!("app.record.default_output"), ts!("app.record.disabled")];
         let system_choices = vec![StoredEndpoint::Default, StoredEndpoint::Disabled];
         let gain_slider = cx.new(|_| {
             SliderState::new()
@@ -371,6 +372,21 @@ impl MainWindow {
     ) {
         self.settings.set_max_meeting_duration(duration);
         self.hooks.save_settings(self.settings.clone());
+        cx.notify();
+    }
+
+    /// Applies at once: the catalog, the library rows, the device menus and the tray follow.
+    pub(crate) fn set_language(&mut self, language: Language, cx: &mut Context<Self>) {
+        if self.settings.language() == language {
+            return;
+        }
+        self.settings.set_language(language);
+        self.hooks.save_settings(self.settings.clone());
+        gpui_kit::component::set_locale(language.code());
+        self.hooks.set_tray_text(tray_text(language));
+        self.relabel_devices();
+        self.rebuild_library_rows();
+        cx.refresh_windows();
         cx.notify();
     }
 
@@ -571,11 +587,15 @@ impl MainWindow {
                 let watched = session.clone();
                 let model_entity = session.clone();
                 let duration_entity = session.clone();
+                let language_entity = session.clone();
                 let on_max_duration =
                     move |duration: MaxMeetingDuration, _: &mut Window, cx: &mut App| {
                         duration_entity
                             .update(cx, |view, cx| view.set_max_meeting_duration(duration, cx));
                     };
+                let on_language = move |language: Language, _: &mut Window, cx: &mut App| {
+                    language_entity.update(cx, |view, cx| view.set_language(language, cx));
+                };
                 let on_change = move |checked: &bool, _: &mut Window, cx: &mut App| {
                     session.update(cx, |view, cx| view.set_close_to_tray(*checked, cx));
                 };
@@ -592,6 +612,7 @@ impl MainWindow {
                     SettingsHandlers {
                         on_close_to_tray: on_change,
                         on_max_duration,
+                        on_language,
                         on_change_model,
                     },
                 );
@@ -861,7 +882,7 @@ impl MainWindow {
     ) {
         let Some(entry) = self.library_catalog.find(recording_id) else {
             self.presentation
-                .set_notice(Some("Could not find that recording."));
+                .set_notice(Some(NOTICE_RECORDING_NOT_FOUND));
             return;
         };
         self.enqueue_transcription(recording_id, entry.audio_path.clone(), window, cx);
@@ -1174,7 +1195,8 @@ impl MainWindow {
         SettingsView {
             close_to_tray: self.close_to_tray(),
             max_duration: self.settings.max_meeting_duration(),
-            model: settings_model_row(&status, bytes),
+            language: self.settings.language(),
+            model: settings_model_row(&status, bytes, self.settings.language()),
         }
     }
 
@@ -1186,8 +1208,10 @@ impl MainWindow {
                 cards: Vec::new(),
                 footer: model_footer(None, phase, None),
                 selected_bytes: None,
+                language: self.settings.language(),
             };
         };
+        let language = self.settings.language();
         let state_of = |id: &str| {
             model_install_state(
                 id,
@@ -1206,14 +1230,14 @@ impl MainWindow {
                 .map(|entry| {
                     let id = entry.id();
                     let state = state_of(id);
-                    let copy = model_copy(id);
+                    let copy = model_copy(id, language);
                     let is_selected = selected.is_some_and(|chosen| chosen.id() == id);
                     let downloading_this = busy && target == Some(id);
                     ModelCardData {
                         id: SharedString::from(id),
                         name: SharedString::from(copy.name.to_string()),
-                        description: SharedString::from(copy.description.to_string()),
-                        meta: SharedString::from(row_meta(entry.bytes())),
+                        description: SharedString::from(copy.description.clone()),
+                        meta: SharedString::from(row_meta(entry.bytes(), language)),
                         tag: row_tag(state),
                         ratings: copy.ratings,
                         selected: is_selected,
@@ -1222,12 +1246,12 @@ impl MainWindow {
                             .presentation
                             .model_progress()
                             .filter(|_| downloading_this)
-                            .map(|percent| card_progress(percent, entry.bytes())),
+                            .map(|percent| card_progress(percent, entry.bytes(), language)),
                         failure: self
                             .presentation
                             .model_failure()
                             .filter(|_| !busy && failure_id == Some(id))
-                            .map(SharedString::from),
+                            .map(localize),
                         accessibility_label: SharedString::from(row_accessibility_label(
                             &copy, state,
                         )),
@@ -1240,6 +1264,7 @@ impl MainWindow {
                 target,
             ),
             selected_bytes: selected.map(|entry| entry.bytes()),
+            language,
         }
     }
 
@@ -1260,21 +1285,7 @@ impl MainWindow {
         if let Some(notice) = snapshot.notice {
             self.presentation.set_notice(Some(notice));
         }
-        self.library_rows = rows_from_catalog(&self.library_catalog);
-        if let Some((id, status)) = self
-            .presentation
-            .transcript_recording()
-            .zip(self.presentation.transcript_status())
-        {
-            let _ = set_row_status(&mut self.library_rows, id, status);
-        }
-        self.library_items = library_items(&self.library_rows);
-        self.library_item_sizes = Rc::new(
-            self.library_items
-                .iter()
-                .map(|item| size(px(1.), px(item.height_px())))
-                .collect(),
-        );
+        self.rebuild_library_rows();
         cx.notify();
         if selection_changed {
             self.load_selected_transcript(window, cx);
@@ -1438,7 +1449,7 @@ impl MainWindow {
         if !can_transcribe_again(status, self.job_active_for(Some(id))) {
             return;
         }
-        let model_name = SharedString::from(model_copy(self.settings.selected_model()).name);
+        let model_name = SharedString::from(model_name(self.settings.selected_model()));
         let entity = cx.entity();
         open_transcribe_again_dialog(window, cx, model_name, move |window, cx| {
             entity.update(cx, |view, cx| {
@@ -1464,12 +1475,49 @@ impl MainWindow {
         });
     }
 
+    /// Rows hold text already written in the active language, so they are built again
+    /// from the catalog when the library changes or the language does.
+    fn rebuild_library_rows(&mut self) {
+        self.library_rows = rows_from_catalog(&self.library_catalog, self.settings.language());
+        if let Some((id, status)) = self
+            .presentation
+            .transcript_recording()
+            .zip(self.presentation.transcript_status())
+        {
+            let _ = set_row_status(&mut self.library_rows, id, status);
+        }
+        self.library_items = library_items(&self.library_rows);
+        self.library_item_sizes = Rc::new(
+            self.library_items
+                .iter()
+                .map(|item| size(px(1.), px(item.height_px())))
+                .collect(),
+        );
+    }
+
+    /// The Windows default and Disabled entries are the first and last label of each list.
+    fn relabel_devices(&mut self) {
+        let first_and_last = |labels: &mut Vec<SharedString>, first: SharedString| {
+            if let Some(slot) = labels.first_mut() {
+                *slot = first;
+            }
+            if let Some(slot) = labels.last_mut() {
+                *slot = ts!("app.record.disabled");
+            }
+        };
+        first_and_last(
+            &mut self.mic_labels,
+            ts!("app.record.default_communications"),
+        );
+        first_and_last(&mut self.system_labels, ts!("app.record.default_output"));
+    }
+
     fn apply_devices(&mut self, catalog: DeviceCatalog) {
         if self.presentation.inputs_locked() {
             self.recording.devices_changed();
         }
         self.catalog = catalog;
-        let mut labels = vec![SharedString::from("Default communications")];
+        let mut labels = vec![ts!("app.record.default_communications")];
         let mut choices = vec![StoredEndpoint::Default];
         for device in &self.catalog.capture {
             if !device.is_active() {
@@ -1482,7 +1530,7 @@ impl MainWindow {
             labels.push(SharedString::from(label));
             choices.push(StoredEndpoint::explicit(device.id().as_str()));
         }
-        labels.push(SharedString::from(DISABLED_LABEL));
+        labels.push(ts!("app.record.disabled"));
         choices.push(StoredEndpoint::Disabled);
         if !choices.contains(self.settings.microphone()) {
             self.presentation.set_notice(Some(NOTICE_FALLBACK));
@@ -1491,7 +1539,7 @@ impl MainWindow {
         }
         self.mic_labels = labels;
         self.mic_choices = choices;
-        let mut system_labels = vec![SharedString::from("Default output device")];
+        let mut system_labels = vec![ts!("app.record.default_output")];
         let mut system_choices = vec![StoredEndpoint::Default];
         for device in &self.catalog.render {
             if !device.is_active() {
@@ -1507,7 +1555,7 @@ impl MainWindow {
             system_labels.push(SharedString::from(label));
             system_choices.push(StoredEndpoint::explicit(device.id().as_str()));
         }
-        system_labels.push(SharedString::from(DISABLED_LABEL));
+        system_labels.push(ts!("app.record.disabled"));
         system_choices.push(StoredEndpoint::Disabled);
         if !system_choices.contains(self.settings.system_audio()) {
             self.presentation.set_notice(Some(NOTICE_SYSTEM_FALLBACK));
@@ -1620,8 +1668,13 @@ fn resolve_model_path(
     Ok((path, entry.id().to_string()))
 }
 
-/// Menu label for a source that is turned off.
-const DISABLED_LABEL: &str = "Disabled";
+fn theme_tooltip(theme: ThemePreference) -> SharedString {
+    match theme {
+        ThemePreference::System => ts!("app.window.theme_system"),
+        ThemePreference::Light => ts!("app.window.theme_light"),
+        ThemePreference::Dark => ts!("app.window.theme_dark"),
+    }
+}
 
 /// The monitor target for a choice. `None` means the source is turned off.
 fn endpoint_token(choice: &StoredEndpoint) -> Option<String> {
@@ -1682,6 +1735,7 @@ impl Render for MainWindow {
         };
         let locked = self.presentation.inputs_locked();
         let phase = self.presentation.record_phase();
+        let language = self.settings.language();
         let elapsed = format_elapsed(
             self.started
                 .map(|started| started.elapsed())
@@ -1714,9 +1768,12 @@ impl Render for MainWindow {
                         }),
                     ),
                     gain: &self.gain_slider,
-                    gain_label: SharedString::from(format_gain(self.settings.mic_gain())),
+                    gain_label: SharedString::from(gain_text(self.settings.mic_gain(), language)),
                     system_gain: &self.system_gain_slider,
-                    system_gain_label: SharedString::from(format_gain(self.settings.system_gain())),
+                    system_gain_label: SharedString::from(gain_text(
+                        self.settings.system_gain(),
+                        language,
+                    )),
                     locked,
                     phase,
                     elapsed: SharedString::from(elapsed),
@@ -1779,7 +1836,7 @@ impl Render for MainWindow {
                 });
                 let playing = self.snapshot_is_selected()
                     && self.player_snapshot.phase == PlayerPhase::Playing;
-                let error = self.library_catalog.error.map(SharedString::from);
+                let error = self.library_catalog.error.map(localize);
                 let selected_id = self.library_selected;
                 let status = selected_id
                     .map(|id| self.row_transcript_status(id))
@@ -1789,12 +1846,13 @@ impl Render for MainWindow {
                     self.presentation.detail_text(),
                     self.presentation.transcript_recording(),
                     selected_id,
-                );
+                )
+                .map(|reason| localize(reason.as_ref()));
                 let pane = transcript_pane(
                     status,
                     job_active,
                     failure,
-                    self.transcript_error.map(SharedString::from),
+                    self.transcript_error.map(localize),
                 );
                 let can_again = selected_id.is_some() && can_transcribe_again(status, job_active);
                 let transcript_list =
@@ -1920,7 +1978,7 @@ impl Render for MainWindow {
         let settings_entity = entity.clone();
         let theme_entity = entity.clone();
         let theme = self.settings.theme();
-        let theme_label = theme.tooltip();
+        let theme_label = theme_tooltip(theme);
         v_flex()
             .id("skrivli-shell")
             .track_focus(&self.focus)
@@ -1939,8 +1997,8 @@ impl Render for MainWindow {
                 TabBar::new("shell-tabs")
                     .px_2()
                     .selected_index(selected)
-                    .child(Tab::new().label("Record"))
-                    .child(Tab::new().label("Recordings"))
+                    .child(Tab::new().label(ts!("app.window.record")))
+                    .child(Tab::new().label(ts!("app.window.recordings")))
                     .suffix(
                         h_flex()
                             .gap_1()
@@ -1949,7 +2007,7 @@ impl Render for MainWindow {
                                 Button::new("cycle-theme")
                                     .ghost()
                                     .icon(theme_icon(theme))
-                                    .tooltip(theme_label)
+                                    .tooltip(theme_label.clone())
                                     .accessibility_label(theme_label)
                                     .on_click(move |_event, window, cx| {
                                         theme_entity.update(cx, |view, cx| {
@@ -1961,7 +2019,7 @@ impl Render for MainWindow {
                                 Button::new("open-settings")
                                     .ghost()
                                     .icon(IconName::Settings)
-                                    .accessibility_label("Settings")
+                                    .accessibility_label(ts!("app.window.settings"))
                                     .on_click(move |_event, window, cx| {
                                         settings_entity.update(cx, |view, cx| {
                                             view.handle(AppCommand::OpenSettings, window, cx);

@@ -30,14 +30,6 @@ impl ThemePreference {
             }
         }
     }
-
-    pub(crate) fn tooltip(self) -> &'static str {
-        match self {
-            Self::System => "System theme",
-            Self::Light => "Light theme",
-            Self::Dark => "Dark theme",
-        }
-    }
 }
 
 #[cfg(test)]
@@ -74,13 +66,5 @@ mod tests {
         assert_eq!(light, ThemePreference::Light);
         assert_eq!(dark, ThemePreference::Dark);
         assert_eq!(system, ThemePreference::System);
-    }
-
-    #[test]
-    fn tooltips_name_the_preference() {
-        // Arrange / Act / Assert
-        assert_eq!(ThemePreference::System.tooltip(), "System theme");
-        assert_eq!(ThemePreference::Light.tooltip(), "Light theme");
-        assert_eq!(ThemePreference::Dark.tooltip(), "Dark theme");
     }
 }
