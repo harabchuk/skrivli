@@ -413,8 +413,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        Language, Settings, StoredEndpoint, StoredWindowBounds, ThemePreference,
-        DEFAULT_MODEL_ID, SCHEMA_VERSION,
+        Language, Settings, StoredEndpoint, StoredWindowBounds, ThemePreference, DEFAULT_MODEL_ID,
+        SCHEMA_VERSION,
     };
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
@@ -778,7 +778,11 @@ mod tests {
         // Arrange
         let dir = temp_dir("language-legacy");
         let path = dir.join("settings.json");
-        let escaped = dir.join("Meetings").display().to_string().replace('\\', "\\\\");
+        let escaped = dir
+            .join("Meetings")
+            .display()
+            .to_string()
+            .replace('\\', "\\\\");
         fs::write(
             &path,
             format!(r#"{{"schema_version":4,"recordings_directory":"{escaped}","close_to_tray":true,"start_hidden":false,"theme":"system"}}"#),
