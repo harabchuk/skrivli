@@ -58,6 +58,7 @@ Skrivli begins as a new Rust application. Design, implement, and test each subsy
 | Recording | `flac-codec` 1.3 `FlacSampleWriter`, PCM16 stereo 48 kHz, level 5 | Streamed straight to `.flac.partial`; renamed to `.flac` on finalize. FLAC is the only container |
 | Transcription | parakeet.cpp v0.6.1 (submodule, C API declared by hand, built by `build.rs`) | Local CPU inference of short pieces (offline `transcribe_pcm_batch_json`, D-34); static `/MT` build, no GPU backends (D-33) |
 | Default model | Nemotron 3.5 ASR 0.6B, Q8_0 GGUF, verified against the manifest hash (Parakeet TDT v3 0.6B Q8_0 is the second choice) | Model isn't shipped; download only after user confirmation |
+| Localization | `rust-i18n` 4.x for text, `icu` (ICU4X) 2.4 for dates, times and decimal numbers | Catalog `locales/ui.json`; Kit's own strings come from `gpui_kit::component::set_locale` and `extend!`; D-36 |
 | Persistent settings | `serde` + `serde_json` under `%APPDATA%\Skrivli\settings.json` | Atomic replacement and validation |
 | Recordings/metadata | Filesystem + JSON sidecars | Avoid DB for v1 |
 | Async work | Dedicated audio threads and one transcription worker; channels to UI | GPUI foreground tasks only for UI-coordinating work |
@@ -219,6 +220,7 @@ skrivli/
 ├── build.rs                        # only for Windows resources/native build
 ├── assets/                         # bundled non-Win32 UI assets
 ├── resources/                      # .ico, Windows manifest, resource script
+├── locales/ui.json                 # translations (en, sv); app text under `app.`, Kit overrides under `gpui_component.`
 ├── .specs/                         # additional design/ADR documents
 ├── src/
 │   ├── main.rs                     # entry point
@@ -235,6 +237,7 @@ skrivli/
 │   │   ├── mod.rs
 │   │   ├── audio.rs                # formats, AudioBlock, endpoints
 │   │   ├── chunk_plan.rs           # QPC session timeline (48 kHz); transcript windows live in transcript.rs
+│   │   ├── language.rs             # Language (interface language), codes and native names
 │   │   ├── recording.rs            # metadata + RecordPhase
 │   │   ├── theme.rs                # ThemePreference
 │   │   └── transcript.rs           # segments, text formatting
@@ -299,7 +302,10 @@ skrivli/
 │   │   ├── mod.rs
 │   │   ├── actions.rs              # AppCommand, bridge drain
 │   │   ├── state.rs                # Presentation
-│   │   ├── hooks.rs                # save/exit hooks from app
+│   │   ├── hooks.rs                # save/exit/tray-text hooks from app
+│   │   ├── format.rs               # ICU4X clock, month-day, size and gain text
+│   │   ├── notices.rs              # English service/AppError sentences shown in the active language
+│   │   ├── tray_text.rs            # TrayText for a language
 │   │   ├── main_window.rs
 │   │   ├── recording.rs
 │   │   ├── recordings.rs
@@ -530,11 +536,16 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 
 **Model prompt:** `views/model_prompt.rs`, opened from the Recordings detail pane. The body uses the shared `DIALOG_WIDTH` (520px, `ui/components/dialog_style.rs`, which also holds the subtitle, footer and footer-note helpers). It always lists the manifest variants as `model_card`s (`ui/components/model_card.rs`: a `ListItem` with a `Radio` keyboard stop, name and `model_tag`, description from `model_copy`, Speed/Accuracy dots, size or "On this PC", and an optional Kit `Progress` block and danger-coloured failure text for the card's model). `ModelPromptView` carries plain `ModelCardData`; `download_progress_text` computes the approximate amount from the manifest size and whole percent. Other cards are disabled and dimmed while downloading. The network note shows in the footer only for `ModelFooter::Download`. The footer shows only the buttons that apply, chosen by `model_footer` (Close + Download with size, Close + Use name, Done, Cancel download, Close + Retry download). A pure `error_display(dialog_open)` sends distinct model errors inline (danger text in the dialog) while the dialog is open and to a Kit alert otherwise. Download, cancel, and retry are `AppCommand` effects the window hands to `ModelHost` off `render`; Download sends the selected variant id, and Retry repeats that id. Clicking a row only highlights it (`select_prompt_model`); `AppCommand::UseModel` (a Use button, enabled for an installed model that is not in use) or a finished download saves the selection. `Presentation` records the `download_target` (set by `begin_download`, which marks the phase Downloading immediately) and hands it over once through `take_installed_target` when the phase is Ready and the file is listed; `model_install_state` is the single rule for in use / installed / not installed. The window asks the model worker for the installed list at startup (`model_files_known` separates unchecked from empty). The dialog is closable (Close, X, Escape, backdrop) whenever no download is running; `on_close` clears `model_prompt_open`, the download target and any pending transcription, and `on_ok` returns false so Enter does not dismiss. Each opening resets the highlight to the saved model. A missing-model Transcribe stores `pending_transcription`; `after_model_ready` closes the dialog and starts that job when a model is chosen, and does nothing when there is none. Retry is offered only when the highlighted model is the download target. Verification errors use Kit alerts only when the dialog is not open.
 
-**Settings:** recording directory, default endpoints, microphone gain, system audio gain, optional stems; transcription model, language, CPU threads, VAD, auto-transcribe; close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
+**Settings:** recording directory, default endpoints, microphone gain, system audio gain, optional stems; transcription model, CPU threads, VAD, auto-transcribe; interface language, close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
+
+**Language row (Settings → General):** a dropdown like `max_duration_menu`, listing `Language::native_name()` with the current one checked. `SettingsView` carries `language` and `SettingsHandlers` has `on_language`. `MainWindow::set_language` updates `Settings` (schema 5, field `language`, unknown values read as English), saves through the hooks, calls `gpui_kit::component::set_locale`, replaces the tray text through `ShellHooks::set_tray_text`, relabels the device menus, rebuilds the library rows (they hold text already written in the language) and calls `cx.refresh_windows()`. All of this is cheap and runs on the GPUI thread.
+
+**Localization:** `rust_i18n::i18n!("locales", fallback = "en")` sits at the crate root (`lib.rs`), with a `ts!` helper that returns a `SharedString`. `app::bootstrap` calls `rust_i18n::extend!(gpui_component)` and `set_locale` once, before the window opens. Catalog keys are `app.<area>.<name>`; each value is a whole message with named arguments, never sentences glued together, and counts that need a plural have separate `_one` and `_other` keys. Pure functions that must be tested in both languages take a `Language` and pass `locale = language.code()` to `t!`, so tests do not change the process-wide locale. Services and `AppError` keep their English sentences, which several places compare; `views/notices.rs` maps the known sentences to `app.notice.*` keys where they are shown, and passes anything else through unchanged. `domain/` carries no user text. `tests/locales.rs` checks that every `app.` key has every language with the same placeholders, that every key used in `src/` exists, and that every manifest model has a description key.
 
 ### 8.5 System tray (native Windows integration)
 
 - The tray is **not a GPUI widget**: implement Windows `Shell_NotifyIconW` behind `infrastructure/platform/windows/tray.rs`, potentially using a supported tray crate if it fulfills shell lifecycle requirements.
+- Menu and balloon text come from a `TrayText` value (`services/ports.rs`) that the app builds for the chosen language (`views/tray_text.rs`) and shares with the tray thread as `Arc<Mutex<TrayText>>`. The tray reads it each time it builds a menu or balloon, so a language change applies at once and the platform layer never looks up a translation.
 - Idle/recording icons and tooltip `Recording HH:MM:SS`.
 - Left click toggles window visibility. Right-click menu: **Show Skrivli**, **Start/Stop recording**, **Open recordings folder**, **Settings**, **Exit**.
 - Minimize hides to tray. Close hides to tray by default (configurable), with a one-time message explaining the app is still running. Exit is explicit.
