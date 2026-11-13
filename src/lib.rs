@@ -1,6 +1,6 @@
 //! Skrivli application library. The GPUI thread must not block on audio, disk, or inference.
 
-// Translations live in `locales/ui.json`. App text is under `app.`; Swedish text for
+// Translations live in `locales/ui.json`. App text is under `app.`; Swedish and German text for
 // Kit's own controls is under `gpui_component.` (see `app::bootstrap`).
 rust_i18n::i18n!("locales", fallback = "en");
 

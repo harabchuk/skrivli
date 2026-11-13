@@ -455,6 +455,22 @@ mod tests {
     }
 
     #[test]
+    fn german_hours_plural() {
+        // Arrange
+        let one = MaxMeetingDuration::from_hours(1).expect("one");
+        let three = MaxMeetingDuration::default();
+
+        // Act
+        let german = (
+            duration_label(one, Language::German),
+            duration_label(three, Language::German),
+        );
+
+        // Assert
+        assert_eq!(german, ("1 Stunde".to_string(), "3 Stunden".to_string()));
+    }
+
+    #[test]
     fn settings_view_shows_the_current_language() {
         // Arrange
         let selected = Language::Swedish;
@@ -475,6 +491,11 @@ mod tests {
                     label: "Svenska",
                     language: Language::Swedish,
                     checked: true,
+                },
+                LanguageChoice {
+                    label: "Deutsch",
+                    language: Language::German,
+                    checked: false,
                 },
             ]
         );

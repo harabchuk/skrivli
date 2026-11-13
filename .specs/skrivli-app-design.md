@@ -220,7 +220,7 @@ skrivli/
 ├── build.rs                        # only for Windows resources/native build
 ├── assets/                         # bundled non-Win32 UI assets
 ├── resources/                      # .ico, Windows manifest, resource script
-├── locales/ui.json                 # translations (en, sv); app text under `app.`, Kit overrides under `gpui_component.`
+├── locales/ui.json                 # translations (en, sv, de); app text under `app.`, Kit overrides under `gpui_component.`
 ├── .specs/                         # additional design/ADR documents
 ├── src/
 │   ├── main.rs                     # entry point
