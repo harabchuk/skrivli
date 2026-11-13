@@ -23,8 +23,10 @@ use crate::infrastructure::audio::flex_capture::{FlexMicCapture, FlexSystemCaptu
 use crate::infrastructure::audio::levels::{GainControl, LevelSnapshot};
 use crate::infrastructure::audio::sonora_steps::SonoraPipelineFactory;
 use crate::infrastructure::files::player::RodioOutput;
+use crate::infrastructure::locale::SysLocale;
 use crate::infrastructure::platform::{self, PlatformHost};
 use crate::infrastructure::storage::settings::Settings;
+use crate::services::language::system_language;
 use crate::services::lease::EndpointLease;
 use crate::services::level_monitor::{spawn_level_monitor, MonitorTargets};
 use crate::services::library::LibraryHost;
@@ -103,8 +105,11 @@ pub(crate) fn run() -> i32 {
         defaults
     };
 
-    init_localization(settings.language());
-    let tray_text: SharedTrayText = Arc::new(Mutex::new(tray_text(settings.language())));
+    // Windows is asked once; picking System default later reuses this answer.
+    let system_language = system_language(&SysLocale);
+    let language = settings.language_preference().with_system(system_language);
+    init_localization(language);
+    let tray_text: SharedTrayText = Arc::new(Mutex::new(tray_text(language)));
 
     let shutdown = ShutdownController::new();
     let (tx, rx) = mpsc::channel();
@@ -143,6 +148,7 @@ pub(crate) fn run() -> i32 {
     );
     open_shell(
         settings,
+        system_language,
         rx,
         writer,
         shutdown.clone(),
@@ -375,6 +381,7 @@ fn listen_for_activation(
 #[allow(clippy::too_many_arguments)]
 fn open_shell(
     settings: Settings,
+    system_language: Language,
     commands: mpsc::Receiver<BridgeMessage>,
     writer: SettingsWriter,
     shutdown: ShutdownController,
@@ -430,6 +437,7 @@ fn open_shell(
                     MainWindow::new(
                         presentation,
                         settings,
+                        system_language,
                         hooks,
                         commands,
                         window_shell,

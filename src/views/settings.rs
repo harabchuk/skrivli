@@ -10,7 +10,7 @@ use gpui_kit::{Anchor, App, ClickEvent, IntoElement, ParentElement, SharedString
 use icu::plurals::PluralCategory;
 use rust_i18n::t;
 
-use crate::domain::language::Language;
+use crate::domain::language::{Language, LanguagePreference};
 use crate::domain::recording::MaxMeetingDuration;
 use crate::ui::components::dialog_style::DIALOG_WIDTH;
 use crate::ui::components::model_card::{model_tag, ModelCardTag};
@@ -109,7 +109,11 @@ pub(crate) fn duration_choices(
 pub(crate) struct SettingsView {
     pub(crate) close_to_tray: bool,
     pub(crate) max_duration: MaxMeetingDuration,
+    /// The language the interface is showing now.
     pub(crate) language: Language,
+    pub(crate) language_preference: LanguagePreference,
+    /// What Windows resolved to at startup.
+    pub(crate) system_language: Language,
     pub(crate) model: SettingsModelRow,
 }
 
@@ -132,22 +136,41 @@ pub(crate) fn version_text() -> String {
     format!("Skrivli {}", env!("CARGO_PKG_VERSION"))
 }
 
-/// Languages listed in the Language menu, each under its own name, with the current one checked.
+/// The Language menu: System default first, then each language under its own
+/// name, with the current choice checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LanguageChoice {
-    pub(crate) label: &'static str,
-    pub(crate) language: Language,
+    pub(crate) label: String,
+    pub(crate) preference: LanguagePreference,
     pub(crate) checked: bool,
 }
 
-pub(crate) fn language_choices(selected: Language) -> Vec<LanguageChoice> {
-    Language::ALL
-        .iter()
-        .map(|language| LanguageChoice {
-            label: language.native_name(),
-            language: *language,
-            checked: *language == selected,
-        })
+/// `system` is the language Windows resolved to; `ui` is the language the
+/// "System default" label is written in.
+pub(crate) fn language_choices(
+    selected: LanguagePreference,
+    system: Language,
+    ui: Language,
+) -> Vec<LanguageChoice> {
+    let system_default = LanguageChoice {
+        label: t!(
+            "app.settings.language_system",
+            locale = ui.code(),
+            language = system.native_name()
+        )
+        .into_owned(),
+        preference: LanguagePreference::System,
+        checked: selected == LanguagePreference::System,
+    };
+    std::iter::once(system_default)
+        .chain(Language::ALL.iter().map(|language| {
+            let preference = LanguagePreference::Fixed(*language);
+            LanguageChoice {
+                label: language.native_name().to_string(),
+                preference,
+                checked: preference == selected,
+            }
+        }))
         .collect()
 }
 
@@ -158,7 +181,7 @@ pub(crate) fn open_settings(
     handlers: SettingsHandlers<
         impl Fn(&bool, &mut Window, &mut App) + Clone + 'static,
         impl Fn(MaxMeetingDuration, &mut Window, &mut App) + Clone + 'static,
-        impl Fn(Language, &mut Window, &mut App) + Clone + 'static,
+        impl Fn(LanguagePreference, &mut Window, &mut App) + Clone + 'static,
         impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
     >,
 ) {
@@ -170,7 +193,7 @@ pub(crate) fn open_settings(
     } = handlers;
     window.open_dialog(cx, move |dialog, _, cx| {
         let view = read(cx);
-        let model = view.model;
+        let model = view.model.clone();
         let model_title = h_flex()
             .gap_2()
             .items_center()
@@ -219,7 +242,7 @@ pub(crate) fn open_settings(
                             settings_row(
                                 ts!("app.settings.language_title"),
                                 ts!("app.settings.language_description"),
-                                language_menu(view.language, on_language.clone()),
+                                language_menu(&view, on_language.clone()),
                                 cx,
                             ),
                             settings_row(
@@ -273,24 +296,33 @@ fn max_duration_menu(
 }
 
 fn language_menu(
-    selected: Language,
-    on_pick: impl Fn(Language, &mut Window, &mut App) + Clone + 'static,
+    view: &SettingsView,
+    on_pick: impl Fn(LanguagePreference, &mut Window, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
-    let choices = language_choices(selected);
+    let choices = language_choices(
+        view.language_preference,
+        view.system_language,
+        view.language,
+    );
+    let current = choices
+        .iter()
+        .find(|choice| choice.checked)
+        .map(|choice| choice.label.clone())
+        .unwrap_or_default();
     Button::new("settings-language")
         .outline()
         .small()
-        .label(selected.native_name())
+        .label(SharedString::from(current))
         .dropdown_caret(true)
         .accessibility_label(ts!("app.settings.language_title"))
         .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _window, _cx| {
             choices.iter().fold(menu, |menu, choice| {
                 let pick = on_pick.clone();
-                let language = choice.language;
+                let preference = choice.preference;
                 menu.item(
-                    PopupMenuItem::new(choice.label)
+                    PopupMenuItem::new(SharedString::from(choice.label.clone()))
                         .checked(choice.checked)
-                        .on_click(move |_event, window, cx| pick(language, window, cx)),
+                        .on_click(move |_event, window, cx| pick(preference, window, cx)),
                 )
             })
         })
@@ -352,9 +384,9 @@ pub(crate) fn open_exit_while_recording(
 mod tests {
     use super::{
         copyright_text, duration_label, language_choices, settings_model_row, version_text,
-        LanguageChoice, SettingsModelRow, REPO_URL,
+        SettingsModelRow, REPO_URL,
     };
-    use crate::domain::language::Language;
+    use crate::domain::language::{Language, LanguagePreference};
     use crate::domain::recording::MaxMeetingDuration;
     use crate::views::state::ModelStatus;
 
@@ -484,14 +516,19 @@ mod tests {
     #[test]
     fn settings_view_shows_the_current_language() {
         // Arrange
-        let selected = Language::Swedish;
+        let selected = LanguagePreference::Fixed(Language::Swedish);
 
         // Act
-        let choices = language_choices(selected);
+        let choices = language_choices(selected, Language::English, Language::English);
 
         // Assert
+        let rest: Vec<_> = choices
+            .iter()
+            .skip(1)
+            .map(|c| (c.label.as_str(), c.preference, c.checked))
+            .collect();
         assert_eq!(
-            choices,
+            rest,
             vec![
                 LanguageChoice {
                     label: "English",
@@ -510,6 +547,24 @@ mod tests {
                 },
             ]
         );
+        assert!(!choices[0].checked);
+    }
+
+    #[test]
+    fn language_menu_lists_system_default_first() {
+        // Arrange
+        let selected = LanguagePreference::System;
+
+        // Act
+        let english = language_choices(selected, Language::Swedish, Language::English);
+        let swedish = language_choices(selected, Language::Swedish, Language::Swedish);
+
+        // Assert
+        assert_eq!(english[0].label, "System default (Svenska)");
+        assert_eq!(swedish[0].label, "Systemstandard (Svenska)");
+        assert_eq!(english[0].preference, LanguagePreference::System);
+        assert!(english[0].checked);
+        assert!(english[1..].iter().all(|choice| !choice.checked));
     }
 
     #[test]

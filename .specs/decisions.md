@@ -408,7 +408,7 @@ The default recordings folder is now `%LOCALAPPDATA%\Skrivli\recordings`, next t
 
 ## D-36 — Interface language: rust-i18n and ICU4X (issue #29)
 
-**Outcome:** the interface is translated into English and Swedish and the user picks the language in Settings → General (default English, applies at once, stored as `language` in settings schema 5; older files read as English, and an unknown stored value also reads as English). It follows the [Kit i18n guide](https://gpui-kit.com/docs/i18n/). Detecting the Windows language is left to a later ticket.
+**Outcome:** the interface is translated into multiple languages and the user picks the language in Settings → General (default English, applies at once, stored as `language` in settings schema 5; older files read as English, and an unknown stored value also reads as English). It follows the [Kit i18n guide](https://gpui-kit.com/docs/i18n/). Detecting the Windows language is left to a later ticket.
 
 - **Catalog:** `locales/ui.json` (`_version: 2`), JSON rather than YAML so `tests/locales.rs` can read it with the existing `serde_json`. App text is under `app.`; Swedish text for Kit's own controls (dialog OK and Cancel, text-field Cut, Copy, Paste, Select All, Clear) is under `gpui_component.` and reaches Kit through `rust_i18n::extend!(gpui_component)`. Kit's key names are copied from its 0.9.0 `locales/ui.yml`. Kit ships `en`, `it`, `pt-BR`, `ru` and `zh-*` but no `sv`.
 - **Kit API:** `gpui_kit::component::{set_locale, locale}` already exists in the pinned `gpui-kit` 0.9.0, so there is no Kit bump. `rust-i18n` 4.2.4 was already in `Cargo.lock`; `Cargo.toml` asks for `rust-i18n = "4.2"` and `icu = "2.4"` (2.4.0 is the locked release).
