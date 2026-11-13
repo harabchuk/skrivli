@@ -9,7 +9,7 @@ use crate::domain::audio::{EndpointChoice, EndpointId};
 use crate::domain::recording::MaxMeetingDuration;
 use crate::infrastructure::platform;
 
-pub(crate) use crate::domain::language::Language;
+pub(crate) use crate::domain::language::LanguagePreference;
 pub(crate) use crate::domain::theme::ThemePreference;
 
 pub(crate) const SCHEMA_VERSION: u32 = 5;
@@ -150,9 +150,10 @@ pub(crate) struct Settings {
     /// Hours before a forgotten recording stops. Older files omit the field.
     #[serde(default = "default_max_meeting_hours")]
     max_meeting_hours: u32,
-    /// Interface language. Older files omit the field and read as English.
+    /// Interface language: `"system"` or a pinned language. Files saved before
+    /// the field existed omit it and follow Windows.
     #[serde(default)]
-    language: Language,
+    language: LanguagePreference,
 }
 
 impl Settings {
@@ -179,7 +180,7 @@ impl Settings {
             auto_transcribe: default_auto_transcribe(),
             notify_on_transcript: default_notify_on_transcript(),
             max_meeting_hours: default_max_meeting_hours(),
-            language: Language::default(),
+            language: LanguagePreference::default(),
         })
     }
 
@@ -297,12 +298,12 @@ impl Settings {
         self.max_meeting_hours = duration.hours();
     }
 
-    pub(crate) fn language(&self) -> Language {
+    pub(crate) fn language_preference(&self) -> LanguagePreference {
         self.language
     }
 
-    pub(crate) fn set_language(&mut self, language: Language) {
-        self.language = language;
+    pub(crate) fn set_language_preference(&mut self, preference: LanguagePreference) {
+        self.language = preference;
     }
 
     pub(crate) fn set_recordings_directory(&mut self, directory: PathBuf) -> Result<(), AppError> {
@@ -412,9 +413,11 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use crate::domain::language::Language;
+
     use super::{
-        Language, Settings, StoredEndpoint, StoredWindowBounds, ThemePreference, DEFAULT_MODEL_ID,
-        SCHEMA_VERSION,
+        LanguagePreference, Settings, StoredEndpoint, StoredWindowBounds, ThemePreference,
+        DEFAULT_MODEL_ID, SCHEMA_VERSION,
     };
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
@@ -755,26 +758,98 @@ mod tests {
     }
 
     #[test]
+    fn new_settings_follow_windows() {
+        // Arrange
+        let dir = temp_dir("language-new");
+
+        // Act
+        let settings = sample(&dir);
+
+        // Assert
+        assert_eq!(settings.language_preference(), LanguagePreference::System);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn settings_round_trip_keeps_language() {
         // Arrange
         let dir = temp_dir("language");
         let path = dir.join("settings.json");
         let mut settings = sample(&dir);
-        let default_language = settings.language();
-        settings.set_language(Language::Swedish);
+        settings.set_language_preference(LanguagePreference::Fixed(Language::Swedish));
 
         // Act
         settings.save(&path).expect("save");
         let loaded = Settings::load(&path, sample(&dir));
 
         // Assert
-        assert_eq!(default_language, Language::English);
-        assert_eq!(loaded.language(), Language::Swedish);
+        assert_eq!(
+            loaded.language_preference(),
+            LanguagePreference::Fixed(Language::Swedish)
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn older_settings_without_language_read_as_english() {
+    fn system_preference_round_trips() {
+        // Arrange
+        let dir = temp_dir("language-system");
+        let path = dir.join("settings.json");
+        let mut settings = sample(&dir);
+        settings.set_language_preference(LanguagePreference::Fixed(Language::Swedish));
+        settings.set_language_preference(LanguagePreference::System);
+
+        // Act
+        settings.save(&path).expect("save");
+        let loaded = Settings::load(&path, sample(&dir));
+
+        // Assert
+        assert!(fs::read_to_string(&path)
+            .expect("read")
+            .contains(r#""language": "system""#));
+        assert_eq!(loaded.language_preference(), LanguagePreference::System);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn saved_language_stays_pinned() {
+        // Arrange
+        let dir = temp_dir("language-pinned");
+        let escaped = dir
+            .join("Meetings")
+            .display()
+            .to_string()
+            .replace('\\', "\\\\");
+        let write = |name: &str, language: &str| {
+            let path = dir.join(name);
+            fs::write(
+                &path,
+                format!(r#"{{"schema_version":5,"recordings_directory":"{escaped}","close_to_tray":true,"start_hidden":false,"theme":"system","language":"{language}"}}"#),
+            )
+            .expect("write");
+            path
+        };
+        let english = write("english.json", "english");
+        let swedish = write("swedish.json", "swedish");
+
+        // Act
+        let loaded_english = Settings::load(&english, sample(&dir));
+        let loaded_swedish = Settings::load(&swedish, sample(&dir));
+
+        // Assert
+        assert_eq!(
+            loaded_english.language_preference(),
+            LanguagePreference::Fixed(Language::English)
+        );
+        assert_eq!(
+            loaded_swedish.language_preference(),
+            LanguagePreference::Fixed(Language::Swedish)
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn settings_without_language_follow_windows() {
         // Arrange
         let dir = temp_dir("language-legacy");
         let path = dir.join("settings.json");
@@ -793,7 +868,7 @@ mod tests {
         let loaded = Settings::load(&path, sample(&dir));
 
         // Assert
-        assert_eq!(loaded.language(), Language::English);
+        assert_eq!(loaded.language_preference(), LanguagePreference::System);
         assert_eq!(loaded.schema_version, SCHEMA_VERSION);
         assert_eq!(SCHEMA_VERSION, 5);
         let _ = fs::remove_dir_all(dir);

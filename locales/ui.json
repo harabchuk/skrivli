@@ -740,6 +740,10 @@
         "en": "Language",
         "sv": "Språk"
       },
+      "language_system": {
+        "en": "System default (%{language})",
+        "sv": "Systemstandard (%{language})"
+      },
       "language_description": {
         "en": "The language of menus, messages, dates and numbers.",
         "sv": "Språket för menyer, meddelanden, datum och tal."

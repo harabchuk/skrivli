@@ -294,6 +294,13 @@ pub(crate) trait InferencePort: Send {
     fn transcribe(&mut self, samples_16k_mono: &[f32]) -> Result<Vec<InferenceSegment>, AppError>;
 }
 
+/// The machine's display-language list, so services never read live OS state.
+pub(crate) trait SystemLocale: Send {
+    /// BCP 47 tags (for example `sv-SE`) in the user's preference order. Empty
+    /// when detection fails.
+    fn preferred_tags(&self) -> Vec<String>;
+}
+
 /// Byte source for a user-initiated model download.
 /// Production uses HTTP. Tests supply an in-memory reader. `cargo test` must not call the network.
 pub(crate) trait ModelSource: Send {

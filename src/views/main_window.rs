@@ -25,7 +25,7 @@ use gpui_kit::{
 use crate::domain::audio::format_elapsed;
 use crate::domain::gain::db_fs;
 use crate::domain::ids::RecordingId;
-use crate::domain::language::Language;
+use crate::domain::language::{Language, LanguagePreference};
 use crate::domain::recording::{
     settled_transcript_status, MaxMeetingDuration, RecordPhase, RecordingContainer,
     TranscriptStatus,
@@ -84,6 +84,8 @@ pub(crate) struct MainWindow {
     focus: FocusHandle,
     presentation: Presentation,
     settings: Settings,
+    /// What Windows resolved to at startup. Never read again while running.
+    system_language: Language,
     hooks: ShellHooks,
     commands: Receiver<BridgeMessage>,
     shell: Arc<dyn DesktopShell>,
@@ -154,6 +156,7 @@ impl MainWindow {
     pub(crate) fn new(
         presentation: Presentation,
         settings: Settings,
+        system_language: Language,
         hooks: ShellHooks,
         commands: Receiver<BridgeMessage>,
         shell: Arc<dyn DesktopShell>,
@@ -295,6 +298,7 @@ impl MainWindow {
             focus,
             presentation,
             settings,
+            system_language,
             hooks,
             commands,
             shell,
@@ -375,12 +379,24 @@ impl MainWindow {
         cx.notify();
     }
 
+    /// The language the interface shows: the pinned one, or what Windows gave at startup.
+    fn language(&self) -> Language {
+        self.settings
+            .language_preference()
+            .with_system(self.system_language)
+    }
+
     /// Applies at once: the catalog, the library rows, the device menus and the tray follow.
-    pub(crate) fn set_language(&mut self, language: Language, cx: &mut Context<Self>) {
-        if self.settings.language() == language {
+    pub(crate) fn set_language_preference(
+        &mut self,
+        preference: LanguagePreference,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings.language_preference() == preference {
             return;
         }
-        self.settings.set_language(language);
+        self.settings.set_language_preference(preference);
+        let language = self.language();
         self.hooks.save_settings(self.settings.clone());
         gpui_kit::component::set_locale(language.code());
         self.hooks.set_tray_text(tray_text(language));
@@ -593,9 +609,11 @@ impl MainWindow {
                         duration_entity
                             .update(cx, |view, cx| view.set_max_meeting_duration(duration, cx));
                     };
-                let on_language = move |language: Language, _: &mut Window, cx: &mut App| {
-                    language_entity.update(cx, |view, cx| view.set_language(language, cx));
-                };
+                let on_language =
+                    move |preference: LanguagePreference, _: &mut Window, cx: &mut App| {
+                        language_entity
+                            .update(cx, |view, cx| view.set_language_preference(preference, cx));
+                    };
                 let on_change = move |checked: &bool, _: &mut Window, cx: &mut App| {
                     session.update(cx, |view, cx| view.set_close_to_tray(*checked, cx));
                 };
@@ -1195,8 +1213,10 @@ impl MainWindow {
         SettingsView {
             close_to_tray: self.close_to_tray(),
             max_duration: self.settings.max_meeting_duration(),
-            language: self.settings.language(),
-            model: settings_model_row(&status, bytes, self.settings.language()),
+            language: self.language(),
+            language_preference: self.settings.language_preference(),
+            system_language: self.system_language,
+            model: settings_model_row(&status, bytes, self.language()),
         }
     }
 
@@ -1208,10 +1228,10 @@ impl MainWindow {
                 cards: Vec::new(),
                 footer: model_footer(None, phase, None),
                 selected_bytes: None,
-                language: self.settings.language(),
+                language: self.language(),
             };
         };
-        let language = self.settings.language();
+        let language = self.language();
         let state_of = |id: &str| {
             model_install_state(
                 id,
@@ -1478,7 +1498,7 @@ impl MainWindow {
     /// Rows hold text already written in the active language, so they are built again
     /// from the catalog when the library changes or the language does.
     fn rebuild_library_rows(&mut self) {
-        self.library_rows = rows_from_catalog(&self.library_catalog, self.settings.language());
+        self.library_rows = rows_from_catalog(&self.library_catalog, self.language());
         if let Some((id, status)) = self
             .presentation
             .transcript_recording()
@@ -1735,7 +1755,7 @@ impl Render for MainWindow {
         };
         let locked = self.presentation.inputs_locked();
         let phase = self.presentation.record_phase();
-        let language = self.settings.language();
+        let language = self.language();
         let elapsed = format_elapsed(
             self.started
                 .map(|started| started.elapsed())
