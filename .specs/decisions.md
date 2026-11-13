@@ -426,3 +426,14 @@ The default recordings folder is now `%LOCALAPPDATA%\Skrivli\recordings`, next t
 - **Matching:** `sys_locale::get_locales()` in order, primary subtag compared case-insensitively against `Language::code()` (`sv-SE`, `sv_FI` and `SV` give Svenska), first supported language wins, English if none or if detection fails. New languages are picked up through `Language::ALL`.
 - **Detection once.** It runs in `bootstrap` through the `SystemLocale` port; choosing System default later reuses that result. A Windows language change shows after a restart.
 - **Dependency:** `sys-locale = "0.3"` is now direct (locked 0.3.2, already in `Cargo.lock` through GPUI). The adapter is `infrastructure/locale.rs` and is not unit-tested because it reads live machine state.
+
+## D-38 — More interface languages (issue #44)
+
+**Outcome:** Settings → General → Language also offers Español, Русский and Українська, and System default picks them up through `Language::ALL`.
+
+- **Codes and stored names:** `es`, `ru`, `uk`; stored as `"spanish"`, `"russian"`, `"ukrainian"` (the serde `snake_case` name, produced by one `storage_name()` that both deserializers read through `Language::ALL`). An older build reads them as English (D-37), so there is no schema bump. Settings lists System default, English, Español, Svenska, Русский, Українська.
+- **Plural keys:** counted text has one key per form, `_one`, `_few`, `_many`, `_other`, chosen with ICU4X cardinal `PluralRules` (`views::format::plural_suffix`). A language without a text for its form falls back to `_other`; `tests/locales.rs` therefore skips `_few` and `_many` in the every-language check. Only the Maximum meeting duration menu is counted today (`1 час`, `3 часа`, `6 часов`; `1 година`, `3 години`, `12 годин`).
+- **Size units** come from `app.units.{b,kb,mb,gb}`: Russian and Ukrainian show `38,0 МБ`, `2,0 КБ`, `500 Б`; Spanish keeps `MB`. The clock stays 24-hour in every language (ICU `es`, `ru`, `uk`; dates such as `12 nov`, `12 нояб.`, `12 лист.`).
+- **Lazy formatters:** `views/format.rs` builds a language's ICU4X formatters on first use and keeps them in one per-thread cache, so startup does not load every language.
+- **Kit texts:** Kit 0.9.0 has `ru` for Dialog OK/Cancel and Input Cut/Copy/Paste/Select All/Clear but no `es` or `uk`. Its `ru` text is copied into our catalog so the catalog is the single source and `tests/locales.rs` checks every non-English language the same way.
+- **Copy:** the Spanish, Russian and Ukrainian text was drafted by the agent and still needs a native speaker's review.
