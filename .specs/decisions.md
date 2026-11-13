@@ -416,3 +416,13 @@ The default recordings folder is now `%LOCALAPPDATA%\Skrivli\recordings`, next t
 - **Dates and numbers (ICU4X):** English uses the locale `en-u-hc-h23`, which gives `Nov 12` and `14:32` as before. Swedish uses `sv`: `12 nov.`, `14:32`, and a decimal comma for sizes and gain (`38,0 MB`, `1,7×`). `CivilTime` is converted to ICU `Date` and `Time` by hand. ICU4X formatters hold `Rc` data and are not `Send`, so `views/format.rs` caches one set per language per thread.
 - **Not translated:** the English sentences that services and `AppError` produce stay English in the code, because several places compare them. `views/notices.rs` translates the known ones when they are shown. Text that comes from Windows, I/O errors, file names and transcript contents is shown as it is.
 - **Swedish copy** was drafted by the agent and still needs a native speaker's review.
+
+## D-37 — Interface language follows Windows (issue #34)
+
+**Outcome:** Settings → General → Language gets a first entry, "System default (<native name>)", and it is the default. Skrivli reads the Windows display languages once at startup and uses the first one it is translated into, otherwise English. This supersedes the last sentence of D-36's outcome.
+
+- **Saved values stay pinned.** The `language` field now holds a preference: `"system"`, `"english"` or `"swedish"`. A stored `english` or `swedish` stays pinned (no migration), so only new installs and files with no `language` field (saved before v0.1.8) follow Windows. An unknown value still reads as English.
+- **No schema bump.** `SCHEMA_VERSION` stays 5. A bump would make an older build ignore the whole file, because `Settings::load` returns defaults for newer schemas; an older build that reads `"system"` shows English, which is harmless.
+- **Matching:** `sys_locale::get_locales()` in order, primary subtag compared case-insensitively against `Language::code()` (`sv-SE`, `sv_FI` and `SV` give Svenska), first supported language wins, English if none or if detection fails. New languages are picked up through `Language::ALL`.
+- **Detection once.** It runs in `bootstrap` through the `SystemLocale` port; choosing System default later reuses that result. A Windows language change shows after a restart.
+- **Dependency:** `sys-locale = "0.3"` is now direct (locked 0.3.2, already in `Cargo.lock` through GPUI). The adapter is `infrastructure/locale.rs` and is not unit-tested because it reads live machine state.
