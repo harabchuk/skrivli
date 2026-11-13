@@ -29,6 +29,7 @@ impl Formatters {
         let tag = match language {
             Language::English => "en-u-hc-h23",
             Language::Swedish => "sv",
+            Language::Spanish => "es",
         };
         let locale: Locale = tag.parse().unwrap_or(Locale::UNKNOWN);
         Self {
@@ -44,12 +45,14 @@ impl Formatters {
 thread_local! {
     static ENGLISH: Rc<Formatters> = Rc::new(Formatters::new(Language::English));
     static SWEDISH: Rc<Formatters> = Rc::new(Formatters::new(Language::Swedish));
+    static SPANISH: Rc<Formatters> = Rc::new(Formatters::new(Language::Spanish));
 }
 
 fn with_formatters<R>(language: Language, use_formatters: impl FnOnce(&Formatters) -> R) -> R {
     match language {
         Language::English => ENGLISH.with(|formatters| use_formatters(formatters)),
         Language::Swedish => SWEDISH.with(|formatters| use_formatters(formatters)),
+        Language::Spanish => SPANISH.with(|formatters| use_formatters(formatters)),
     }
 }
 
@@ -217,5 +220,43 @@ mod tests {
         assert_eq!(english, "1.7×");
         assert_eq!(swedish, "1,7×");
         assert_eq!(gain_text(9.0, Language::English), "4.0×");
+    }
+
+    #[test]
+    fn spanish_clock_is_24_hour() {
+        // Arrange
+        let time = nov_12();
+
+        // Act
+        let text = clock_text(time, Language::Spanish);
+
+        // Assert
+        assert_eq!(text, "14:32");
+    }
+
+    #[test]
+    fn spanish_month_day() {
+        // Arrange
+        let time = nov_12();
+
+        // Act
+        let text = month_day_text(time, Language::Spanish);
+
+        // Assert
+        assert_eq!(text, "12 nov");
+    }
+
+    #[test]
+    fn spanish_size_uses_decimal_comma() {
+        // Arrange
+        let bytes = 39_845_888;
+
+        // Act
+        let text = size_text(bytes, Language::Spanish);
+        let gain = gain_text(1.7, Language::Spanish);
+
+        // Assert
+        assert_eq!(text, "38,0 MB");
+        assert_eq!(gain, "1,7×");
     }
 }

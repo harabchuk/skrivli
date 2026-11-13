@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-const LANGUAGES: [&str; 2] = ["en", "sv"];
+const LANGUAGES: [&str; 3] = ["en", "sv", "es"];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -183,7 +183,7 @@ fn every_key_the_code_asks_for_exists() {
 }
 
 #[test]
-fn swedish_overrides_for_kit_controls_are_present() {
+fn kit_control_overrides_are_present_for_languages_kit_lacks() {
     // Arrange
     let leaves = all_leaves();
     let wanted = [
@@ -196,15 +196,17 @@ fn swedish_overrides_for_kit_controls_are_present() {
     ];
 
     // Act
-    let missing: Vec<&str> = wanted
+    let missing: Vec<String> = ["sv", "es"]
         .into_iter()
-        .filter(|key| {
+        .flat_map(|language| wanted.iter().map(move |key| (language, *key)))
+        .filter(|(language, key)| {
             !leaves
                 .iter()
-                .any(|(name, texts)| name == key && texts.contains_key("sv"))
+                .any(|(name, texts)| name == key && texts.contains_key(*language))
         })
+        .map(|(language, key)| format!("{key} [{language}]"))
         .collect();
 
     // Assert
-    assert!(missing.is_empty(), "no Swedish text for {missing:?}");
+    assert!(missing.is_empty(), "no Kit override for {missing:?}");
 }

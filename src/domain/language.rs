@@ -9,17 +9,19 @@ pub(crate) enum Language {
     #[default]
     English,
     Swedish,
+    Spanish,
 }
 
 impl Language {
     /// Every language, in the order Settings lists them.
-    pub(crate) const ALL: [Language; 2] = [Language::English, Language::Swedish];
+    pub(crate) const ALL: [Language; 3] = [Language::English, Language::Swedish, Language::Spanish];
 
     /// BCP 47 code used for the translation catalog and for ICU4X.
     pub(crate) fn code(self) -> &'static str {
         match self {
             Self::English => "en",
             Self::Swedish => "sv",
+            Self::Spanish => "es",
         }
     }
 
@@ -29,6 +31,7 @@ impl Language {
         match self {
             Self::English => "English",
             Self::Swedish => "Svenska",
+            Self::Spanish => "Español",
         }
     }
 }
@@ -40,6 +43,7 @@ impl<'de> Deserialize<'de> for Language {
         let text = String::deserialize(deserializer)?;
         Ok(match text.as_str() {
             "swedish" => Self::Swedish,
+            "spanish" => Self::Spanish,
             _ => Self::English,
         })
     }
@@ -59,8 +63,8 @@ mod tests {
         let names: Vec<_> = languages.iter().map(|l| l.native_name()).collect();
 
         // Assert
-        assert_eq!(codes, ["en", "sv"]);
-        assert_eq!(names, ["English", "Svenska"]);
+        assert_eq!(codes, ["en", "sv", "es"]);
+        assert_eq!(names, ["English", "Svenska", "Español"]);
         assert_eq!(Language::default(), Language::English);
     }
 
@@ -80,6 +84,22 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Language::Swedish).expect("serialize"),
             known
+        );
+    }
+
+    #[test]
+    fn spanish_in_settings_round_trips() {
+        // Arrange
+        let stored = r#""spanish""#;
+
+        // Act
+        let spanish: Language = serde_json::from_str(stored).expect("known");
+
+        // Assert
+        assert_eq!(spanish, Language::Spanish);
+        assert_eq!(
+            serde_json::to_string(&Language::Spanish).expect("serialize"),
+            stored
         );
     }
 }

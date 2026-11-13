@@ -64,4 +64,19 @@ mod tests {
         assert_eq!(text.balloon_title, "Transkriptionen är klar");
         assert_ne!(text, tray_text(Language::English));
     }
+
+    #[test]
+    fn tray_text_for_spanish() {
+        // Arrange
+        let language = Language::Spanish;
+
+        // Act
+        let text = tray_text(language);
+
+        // Assert
+        assert_eq!(text.show, "Mostrar Skrivli");
+        assert_eq!(text.exit, "Salir");
+        assert_eq!(text.balloon_title, "Transcripción lista");
+        assert_ne!(text, tray_text(Language::English));
+    }
 }

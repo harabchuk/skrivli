@@ -455,6 +455,18 @@ mod tests {
     }
 
     #[test]
+    fn spanish_hours_plural() {
+        // Arrange
+        let hours = |count| MaxMeetingDuration::from_hours(count).expect("hours");
+
+        // Act
+        let labels = [1, 3, 12].map(|count| duration_label(hours(count), Language::Spanish));
+
+        // Assert
+        assert_eq!(labels, ["1 hora", "3 horas", "12 horas"]);
+    }
+
+    #[test]
     fn settings_view_shows_the_current_language() {
         // Arrange
         let selected = Language::Swedish;
@@ -475,6 +487,11 @@ mod tests {
                     label: "Svenska",
                     language: Language::Swedish,
                     checked: true,
+                },
+                LanguageChoice {
+                    label: "Español",
+                    language: Language::Spanish,
+                    checked: false,
                 },
             ]
         );
