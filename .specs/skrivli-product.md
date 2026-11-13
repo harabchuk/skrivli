@@ -242,7 +242,7 @@ Preferences persist across restarts. Hazardous options are disabled while record
 ### Appearance and accessibility
 
 - Light, Dark, or System theme from the tab-bar control (System follows Windows)
-- **Language** (Settings → General): English or Svenska, shown under each language's own name. The default is English. A change applies at once, with no restart, to everything Skrivli itself shows: the window, dialogs and notices, the notification-area menu and its "Transcript ready" balloon, the text-field menus (Cut, Copy, Paste), and the model descriptions. Model names stay as they are. Dates, times and decimal numbers follow the language, so a Swedish library shows `12 nov.` and `38,0 MB` where English shows `Nov 12` and `38.0 MB`; times stay on the 24-hour clock in both. Text that comes from Windows, from file names, or from transcripts is not translated. Skrivli does not pick the language from Windows; the user chooses it.
+- **Language** (Settings → General): English, Svenska or Русский, shown under each language's own name. The default is English. A change applies at once, with no restart, to everything Skrivli itself shows: the window, dialogs and notices, the notification-area menu and its "Transcript ready" balloon, the text-field menus (Cut, Copy, Paste), and the model descriptions. Model names stay as they are. Dates, times and decimal numbers follow the language, so a Swedish library shows `12 nov.` and `38,0 MB` (Russian `12 нояб.` and `38,0 MB`) where English shows `Nov 12` and `38.0 MB`; times stay on the 24-hour clock in both. Text that comes from Windows, from file names, or from transcripts is not translated. Skrivli does not pick the language from Windows; the user chooses it.
 - Usable at common display scaling levels and on multiple monitors
 - Keyboard-focused operation for main flows
 - Clear error messages for permission, device, storage, and model problems
@@ -286,7 +286,7 @@ A new user can: unzip → launch → record microphone and system audio → stop
 - Recordings library with playback, rename, delete, open folder
 - Offline post-recording transcription with model install, progress, cancel, and copyable text
 - Tray lifecycle, single instance, essential settings, hotkey, and keyboard-accessible main flows
-- Interface in English and Swedish, chosen in Settings
+- Interface in English, Swedish and Russian, chosen in Settings
 - Portable Windows distribution without bundled models
 
 ### Optional / deferrable without blocking core v1
