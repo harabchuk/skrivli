@@ -11,6 +11,7 @@ use icu::datetime::FixedCalendarDateTimeFormatter;
 use icu::decimal::input::Decimal;
 use icu::decimal::DecimalFormatter;
 use icu::locale::Locale;
+use icu::plurals::{PluralCategory, PluralRules};
 use icu::time::Time;
 
 use crate::domain::audio::CivilTime;
@@ -21,6 +22,7 @@ struct Formatters {
     clock: Option<FixedCalendarDateTimeFormatter<Gregorian, T>>,
     month_day: Option<FixedCalendarDateTimeFormatter<Gregorian, MD>>,
     number: Option<DecimalFormatter>,
+    plurals: Option<PluralRules>,
 }
 
 impl Formatters {
@@ -29,9 +31,11 @@ impl Formatters {
         let tag = match language {
             Language::English => "en-u-hc-h23",
             Language::Swedish => "sv",
+            Language::Ukrainian => "uk",
         };
         let locale: Locale = tag.parse().unwrap_or(Locale::UNKNOWN);
         Self {
+            plurals: PluralRules::try_new_cardinal((&locale).into()).ok(),
             clock: FixedCalendarDateTimeFormatter::try_new((&locale).into(), T::hm()).ok(),
             month_day: FixedCalendarDateTimeFormatter::try_new((&locale).into(), MD::medium()).ok(),
             number: DecimalFormatter::try_new((&locale).into(), Default::default()).ok(),
@@ -44,13 +48,26 @@ impl Formatters {
 thread_local! {
     static ENGLISH: Rc<Formatters> = Rc::new(Formatters::new(Language::English));
     static SWEDISH: Rc<Formatters> = Rc::new(Formatters::new(Language::Swedish));
+    static UKRAINIAN: Rc<Formatters> = Rc::new(Formatters::new(Language::Ukrainian));
 }
 
 fn with_formatters<R>(language: Language, use_formatters: impl FnOnce(&Formatters) -> R) -> R {
     match language {
         Language::English => ENGLISH.with(|formatters| use_formatters(formatters)),
         Language::Swedish => SWEDISH.with(|formatters| use_formatters(formatters)),
+        Language::Ukrainian => UKRAINIAN.with(|formatters| use_formatters(formatters)),
     }
+}
+
+/// The CLDR plural category of a whole `count` in `language`, for choosing between
+/// the `_one`, `_few`, `_many` and `_other` forms of a translation.
+pub(crate) fn plural_category(count: u64, language: Language) -> PluralCategory {
+    with_formatters(language, |formatters| {
+        formatters
+            .plurals
+            .as_ref()
+            .map_or(PluralCategory::Other, |rules| rules.category_for(count))
+    })
 }
 
 /// Hour and minute, for example `14:32`.
@@ -120,9 +137,10 @@ fn one_decimal(tenths: i64, language: Language) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{clock_text, gain_text, month_day_text, size_text};
+    use super::{clock_text, gain_text, month_day_text, plural_category, size_text};
     use crate::domain::audio::CivilTime;
     use crate::domain::language::Language;
+    use icu::plurals::PluralCategory;
 
     fn nov_12() -> CivilTime {
         CivilTime::new(2026, 11, 12, 14, 32, 0).expect("valid civil time")
@@ -150,6 +168,82 @@ mod tests {
 
         // Assert
         assert_eq!(text, "14:32");
+    }
+
+    #[test]
+    fn ukrainian_clock_is_24_hour() {
+        // Arrange
+        let time = nov_12();
+
+        // Act
+        let text = clock_text(time, Language::Ukrainian);
+
+        // Assert
+        assert_eq!(text, "14:32");
+    }
+
+    #[test]
+    fn ukrainian_month_day() {
+        // Arrange
+        let time = nov_12();
+
+        // Act
+        let text = month_day_text(time, Language::Ukrainian);
+
+        // Assert
+        assert_eq!(text, "12 лист.");
+    }
+
+    #[test]
+    fn ukrainian_size_uses_decimal_comma() {
+        // Arrange
+        let bytes = 39_845_888;
+
+        // Act
+        let size = size_text(bytes, Language::Ukrainian);
+        let gain = gain_text(1.7, Language::Ukrainian);
+
+        // Assert
+        assert_eq!(size, "38,0 MB");
+        assert_eq!(gain, "1,7×");
+    }
+
+    #[test]
+    fn plural_category_follows_cldr_rules() {
+        // Arrange
+        let counts = [1, 2, 4, 6, 12];
+
+        // Act
+        let ukrainian: Vec<_> = counts
+            .iter()
+            .map(|count| plural_category(*count, Language::Ukrainian))
+            .collect();
+        let english: Vec<_> = counts
+            .iter()
+            .map(|count| plural_category(*count, Language::English))
+            .collect();
+
+        // Assert
+        assert_eq!(
+            ukrainian,
+            [
+                PluralCategory::One,
+                PluralCategory::Few,
+                PluralCategory::Few,
+                PluralCategory::Many,
+                PluralCategory::Many
+            ]
+        );
+        assert_eq!(
+            english,
+            [
+                PluralCategory::One,
+                PluralCategory::Other,
+                PluralCategory::Other,
+                PluralCategory::Other,
+                PluralCategory::Other
+            ]
+        );
     }
 
     #[test]

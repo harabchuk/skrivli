@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-const LANGUAGES: [&str; 2] = ["en", "sv"];
+const LANGUAGES: [&str; 3] = ["en", "sv", "uk"];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -183,7 +183,7 @@ fn every_key_the_code_asks_for_exists() {
 }
 
 #[test]
-fn swedish_overrides_for_kit_controls_are_present() {
+fn kit_overrides_exist_for_languages_kit_lacks() {
     // Arrange
     let leaves = all_leaves();
     let wanted = [
@@ -193,18 +193,21 @@ fn swedish_overrides_for_kit_controls_are_present() {
         "gpui_component.Input.Copy",
         "gpui_component.Input.Paste",
         "gpui_component.Input.Select All",
+        "gpui_component.Input.Clear",
     ];
 
     // Act
-    let missing: Vec<&str> = wanted
+    let missing: Vec<String> = ["sv", "uk"]
         .into_iter()
-        .filter(|key| {
+        .flat_map(|language| wanted.into_iter().map(move |key| (language, key)))
+        .filter(|(language, key)| {
             !leaves
                 .iter()
-                .any(|(name, texts)| name == key && texts.contains_key("sv"))
+                .any(|(name, texts)| name == key && texts.contains_key(*language))
         })
+        .map(|(language, key)| format!("{key} [{language}]"))
         .collect();
 
     // Assert
-    assert!(missing.is_empty(), "no Swedish text for {missing:?}");
+    assert!(missing.is_empty(), "no Kit override for {missing:?}");
 }

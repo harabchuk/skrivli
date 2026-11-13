@@ -7,6 +7,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{Anchor, App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window};
+use icu::plurals::PluralCategory;
 use rust_i18n::t;
 
 use crate::domain::language::Language;
@@ -15,7 +16,7 @@ use crate::ui::components::dialog_style::DIALOG_WIDTH;
 use crate::ui::components::model_card::{model_tag, ModelCardTag};
 use crate::ui::components::settings_rows::{settings_row, settings_section};
 
-use super::format::size_text;
+use super::format::{plural_category, size_text};
 use super::model_prompt::model_copy;
 use super::state::ModelStatus;
 
@@ -70,10 +71,13 @@ pub(crate) fn settings_model_row(
 
 /// "1 hour", "3 hours" and the like, with the plural the language needs.
 pub(crate) fn duration_label(duration: MaxMeetingDuration, language: Language) -> String {
-    let key = if duration.hours() == 1 {
-        "app.settings.hours_one"
-    } else {
-        "app.settings.hours_other"
+    let key = match plural_category(u64::from(duration.hours()), language) {
+        PluralCategory::One => "app.settings.hours_one",
+        PluralCategory::Few => "app.settings.hours_few",
+        PluralCategory::Many => "app.settings.hours_many",
+        PluralCategory::Zero | PluralCategory::Two | PluralCategory::Other => {
+            "app.settings.hours_other"
+        }
     };
     t!(key, locale = language.code(), count = duration.hours()).into_owned()
 }
@@ -455,6 +459,29 @@ mod tests {
     }
 
     #[test]
+    fn ukrainian_hours_use_three_plural_forms() {
+        // Arrange
+        let hours = [1, 2, 4, 6, 12];
+
+        // Act
+        let labels: Vec<_> = hours
+            .iter()
+            .map(|h| {
+                duration_label(
+                    MaxMeetingDuration::from_hours(*h).expect("choice"),
+                    Language::Ukrainian,
+                )
+            })
+            .collect();
+
+        // Assert
+        assert_eq!(
+            labels,
+            ["1 година", "2 години", "4 години", "6 годин", "12 годин"]
+        );
+    }
+
+    #[test]
     fn settings_view_shows_the_current_language() {
         // Arrange
         let selected = Language::Swedish;
@@ -475,6 +502,11 @@ mod tests {
                     label: "Svenska",
                     language: Language::Swedish,
                     checked: true,
+                },
+                LanguageChoice {
+                    label: "Українська",
+                    language: Language::Ukrainian,
+                    checked: false,
                 },
             ]
         );

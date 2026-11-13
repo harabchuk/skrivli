@@ -51,6 +51,20 @@ mod tests {
     }
 
     #[test]
+    fn tray_text_for_ukrainian() {
+        // Arrange
+        let language = Language::Ukrainian;
+
+        // Act
+        let text = tray_text(language);
+
+        // Assert
+        assert_eq!(text.show, "Показати Skrivli");
+        assert_eq!(text.balloon_title, "Транскрипція готова");
+        assert_ne!(text, tray_text(Language::English));
+    }
+
+    #[test]
     fn tray_text_for_swedish() {
         // Arrange
         let language = Language::Swedish;

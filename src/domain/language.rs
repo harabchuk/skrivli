@@ -9,17 +9,20 @@ pub(crate) enum Language {
     #[default]
     English,
     Swedish,
+    Ukrainian,
 }
 
 impl Language {
     /// Every language, in the order Settings lists them.
-    pub(crate) const ALL: [Language; 2] = [Language::English, Language::Swedish];
+    pub(crate) const ALL: [Language; 3] =
+        [Language::English, Language::Swedish, Language::Ukrainian];
 
     /// BCP 47 code used for the translation catalog and for ICU4X.
     pub(crate) fn code(self) -> &'static str {
         match self {
             Self::English => "en",
             Self::Swedish => "sv",
+            Self::Ukrainian => "uk",
         }
     }
 
@@ -29,6 +32,7 @@ impl Language {
         match self {
             Self::English => "English",
             Self::Swedish => "Svenska",
+            Self::Ukrainian => "Українська",
         }
     }
 }
@@ -40,6 +44,7 @@ impl<'de> Deserialize<'de> for Language {
         let text = String::deserialize(deserializer)?;
         Ok(match text.as_str() {
             "swedish" => Self::Swedish,
+            "ukrainian" => Self::Ukrainian,
             _ => Self::English,
         })
     }
@@ -59,9 +64,23 @@ mod tests {
         let names: Vec<_> = languages.iter().map(|l| l.native_name()).collect();
 
         // Assert
-        assert_eq!(codes, ["en", "sv"]);
-        assert_eq!(names, ["English", "Svenska"]);
+        assert_eq!(codes, ["en", "sv", "uk"]);
+        assert_eq!(names, ["English", "Svenska", "Українська"]);
         assert_eq!(Language::default(), Language::English);
+    }
+
+    #[test]
+    fn ukrainian_in_settings_round_trips() {
+        // Arrange
+        let stored = r#""ukrainian""#;
+
+        // Act
+        let read: Language = serde_json::from_str(stored).expect("known");
+        let written = serde_json::to_string(&Language::Ukrainian).expect("serialize");
+
+        // Assert
+        assert_eq!(read, Language::Ukrainian);
+        assert_eq!(written, stored);
     }
 
     #[test]
