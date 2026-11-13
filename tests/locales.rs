@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-const LANGUAGES: [&str; 4] = ["en", "es", "sv", "ru"];
+const LANGUAGES: [&str; 5] = ["en", "es", "sv", "ru", "uk"];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -11,15 +11,17 @@ pub(crate) enum Language {
     Spanish,
     Swedish,
     Russian,
+    Ukrainian,
 }
 
 impl Language {
     /// Every language, in the order Settings lists them.
-    pub(crate) const ALL: [Language; 4] = [
+    pub(crate) const ALL: [Language; 5] = [
         Language::English,
         Language::Spanish,
         Language::Swedish,
         Language::Russian,
+        Language::Ukrainian,
     ];
 
     /// BCP 47 code used for the translation catalog and for ICU4X.
@@ -29,6 +31,7 @@ impl Language {
             Self::Spanish => "es",
             Self::Swedish => "sv",
             Self::Russian => "ru",
+            Self::Ukrainian => "uk",
         }
     }
 
@@ -40,6 +43,7 @@ impl Language {
             Self::Spanish => "Español",
             Self::Swedish => "Svenska",
             Self::Russian => "Русский",
+            Self::Ukrainian => "Українська",
         }
     }
 }
@@ -52,6 +56,7 @@ impl Language {
             Self::Spanish => "spanish",
             Self::Swedish => "swedish",
             Self::Russian => "russian",
+            Self::Ukrainian => "ukrainian",
         }
     }
 
@@ -234,8 +239,11 @@ mod tests {
         let names: Vec<_> = languages.iter().map(|l| l.native_name()).collect();
 
         // Assert
-        assert_eq!(codes, ["en", "es", "sv", "ru"]);
-        assert_eq!(names, ["English", "Español", "Svenska", "Русский"]);
+        assert_eq!(codes, ["en", "es", "sv", "ru", "uk"]);
+        assert_eq!(
+            names,
+            ["English", "Español", "Svenska", "Русский", "Українська"]
+        );
         assert_eq!(Language::default(), Language::English);
     }
 
@@ -245,6 +253,7 @@ mod tests {
         let cases = [
             ("\"spanish\"", Language::Spanish),
             ("\"russian\"", Language::Russian),
+            ("\"ukrainian\"", Language::Ukrainian),
         ];
 
         // Act / Assert
@@ -261,7 +270,11 @@ mod tests {
     #[test]
     fn system_tags_pick_the_new_languages() {
         // Arrange
-        let cases = [("es-419", Language::Spanish), ("ru-RU", Language::Russian)];
+        let cases = [
+            ("es-419", Language::Spanish),
+            ("ru-RU", Language::Russian),
+            ("uk_UA", Language::Ukrainian),
+        ];
 
         // Act / Assert
         for (tag, language) in cases {

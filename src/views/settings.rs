@@ -509,6 +509,11 @@ mod tests {
 
         // Assert
         assert_eq!(russian, ["1 час", "3 часа", "6 часов"]);
+        let ukrainian: Vec<_> = [1, 3, 12]
+            .into_iter()
+            .map(|n| duration_label(hours(n), Language::Ukrainian))
+            .collect();
+        assert_eq!(ukrainian, ["1 година", "3 години", "12 годин"]);
     }
 
     #[test]
@@ -546,6 +551,11 @@ mod tests {
                 (
                     "Русский",
                     LanguagePreference::Fixed(Language::Russian),
+                    false
+                ),
+                (
+                    "Українська",
+                    LanguagePreference::Fixed(Language::Ukrainian),
                     false
                 ),
             ]

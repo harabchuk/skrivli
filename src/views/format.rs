@@ -36,6 +36,7 @@ impl Formatters {
             Language::Spanish => "es",
             Language::Swedish => "sv",
             Language::Russian => "ru",
+            Language::Ukrainian => "uk",
         };
         let locale: Locale = tag.parse().unwrap_or(Locale::UNKNOWN);
         Self {
@@ -274,6 +275,24 @@ mod tests {
     }
 
     #[test]
+    fn ukrainian_clock_date_and_numbers() {
+        // Arrange
+        let time = nov_12();
+
+        // Act
+        let clock = clock_text(time, Language::Ukrainian);
+        let date = month_day_text(time, Language::Ukrainian);
+        let size = size_text(39_845_888, Language::Ukrainian);
+        let gain = gain_text(1.7, Language::Ukrainian);
+
+        // Assert
+        assert_eq!(clock, "14:32");
+        assert_eq!(date, "12 лист.");
+        assert_eq!(size, "38,0 МБ");
+        assert_eq!(gain, "1,7×");
+    }
+
+    #[test]
     fn plural_suffix_follows_the_language_rules() {
         // Arrange
         let counts = [1, 2, 3, 4, 6, 8, 12];
@@ -300,10 +319,15 @@ mod tests {
             .iter()
             .map(|n| plural_suffix(*n, Language::Russian))
             .collect();
+        let ukrainian: Vec<_> = counts
+            .iter()
+            .map(|n| plural_suffix(*n, Language::Ukrainian))
+            .collect();
         assert_eq!(
             russian,
             ["one", "few", "few", "few", "many", "many", "many"]
         );
+        assert_eq!(ukrainian, russian);
     }
 
     #[test]
