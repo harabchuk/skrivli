@@ -72,11 +72,18 @@ pub(crate) fn settings_model_row(
 pub(crate) fn duration_label(duration: MaxMeetingDuration, language: Language) -> String {
     let hours = duration.hours();
     let locale = language.code();
-    match plural_suffix(hours, language) {
+    let plural = match plural_suffix(hours, language) {
         "one" => t!("app.settings.hours_one", locale = locale, count = hours),
+        "few" => t!("app.settings.hours_few", locale = locale, count = hours),
+        "many" => t!("app.settings.hours_many", locale = locale, count = hours),
         _ => t!("app.settings.hours_other", locale = locale, count = hours),
+    };
+    // A language without a text for its form (the catalog has no `hours_few`
+    // for English, say) falls back to the "other" text.
+    if plural.contains("settings.hours_") {
+        return t!("app.settings.hours_other", locale = locale, count = hours).into_owned();
     }
-    .into_owned()
+    plural.into_owned()
 }
 
 /// One entry of the Maximum meeting duration menu.
@@ -490,6 +497,21 @@ mod tests {
     }
 
     #[test]
+    fn duration_labels_use_slavic_plurals() {
+        // Arrange
+        let hours = |n| MaxMeetingDuration::from_hours(n).expect("choice");
+
+        // Act
+        let russian: Vec<_> = [1, 3, 6]
+            .into_iter()
+            .map(|n| duration_label(hours(n), Language::Russian))
+            .collect();
+
+        // Assert
+        assert_eq!(russian, ["1 час", "3 часа", "6 часов"]);
+    }
+
+    #[test]
     fn settings_view_shows_the_current_language() {
         // Arrange
         let selected = LanguagePreference::Fixed(Language::Swedish);
@@ -520,6 +542,11 @@ mod tests {
                     "Svenska",
                     LanguagePreference::Fixed(Language::Swedish),
                     true
+                ),
+                (
+                    "Русский",
+                    LanguagePreference::Fixed(Language::Russian),
+                    false
                 ),
             ]
         );
