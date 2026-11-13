@@ -806,6 +806,24 @@
         "en": "Smaller download, English only",
         "sv": "Mindre nedladdning, endast engelska"
       }
+    },
+    "units": {
+      "b": {
+        "en": "B",
+        "sv": "B"
+      },
+      "kb": {
+        "en": "KB",
+        "sv": "KB"
+      },
+      "mb": {
+        "en": "MB",
+        "sv": "MB"
+      },
+      "gb": {
+        "en": "GB",
+        "sv": "GB"
+      }
     }
   },
   "gpui_component": {

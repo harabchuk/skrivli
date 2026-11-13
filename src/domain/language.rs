@@ -3,7 +3,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Languages the interface is translated into.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Language {
     #[default]
@@ -34,6 +34,21 @@ impl Language {
 }
 
 impl Language {
+    /// The name stored in settings. It matches the serde `snake_case` name.
+    fn storage_name(self) -> &'static str {
+        match self {
+            Self::English => "english",
+            Self::Swedish => "swedish",
+        }
+    }
+
+    /// The language stored under `name`, if this build knows it.
+    fn from_storage_name(name: &str) -> Option<Language> {
+        Self::ALL
+            .into_iter()
+            .find(|language| language.storage_name() == name)
+    }
+
     /// The supported language for a locale tag such as `sv-SE`, `sv_FI` or `SV`.
     /// Only the primary subtag counts.
     pub(crate) fn from_tag(tag: &str) -> Option<Language> {
@@ -88,8 +103,7 @@ impl<'de> Deserialize<'de> for LanguagePreference {
         let text = String::deserialize(deserializer)?;
         Ok(match text.as_str() {
             "system" => Self::System,
-            "swedish" => Self::Fixed(Language::Swedish),
-            _ => Self::Fixed(Language::English),
+            name => Self::Fixed(Language::from_storage_name(name).unwrap_or_default()),
         })
     }
 }
@@ -99,10 +113,7 @@ impl<'de> Deserialize<'de> for LanguagePreference {
 impl<'de> Deserialize<'de> for Language {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        Ok(match text.as_str() {
-            "swedish" => Self::Swedish,
-            _ => Self::English,
-        })
+        Ok(Self::from_storage_name(&text).unwrap_or_default())
     }
 }
 

@@ -15,7 +15,7 @@ use crate::ui::components::dialog_style::DIALOG_WIDTH;
 use crate::ui::components::model_card::{model_tag, ModelCardTag};
 use crate::ui::components::settings_rows::{settings_row, settings_section};
 
-use super::format::size_text;
+use super::format::{plural_suffix, size_text};
 use super::model_prompt::model_copy;
 use super::state::ModelStatus;
 
@@ -70,12 +70,13 @@ pub(crate) fn settings_model_row(
 
 /// "1 hour", "3 hours" and the like, with the plural the language needs.
 pub(crate) fn duration_label(duration: MaxMeetingDuration, language: Language) -> String {
-    let key = if duration.hours() == 1 {
-        "app.settings.hours_one"
-    } else {
-        "app.settings.hours_other"
-    };
-    t!(key, locale = language.code(), count = duration.hours()).into_owned()
+    let hours = duration.hours();
+    let locale = language.code();
+    match plural_suffix(hours, language) {
+        "one" => t!("app.settings.hours_one", locale = locale, count = hours),
+        _ => t!("app.settings.hours_other", locale = locale, count = hours),
+    }
+    .into_owned()
 }
 
 /// One entry of the Maximum meeting duration menu.
