@@ -33,6 +33,7 @@ impl Formatters {
         // English stays on the 24-hour clock the library has always shown.
         let tag = match language {
             Language::English => "en-u-hc-h23",
+            Language::Spanish => "es",
             Language::Swedish => "sv",
         };
         let locale: Locale = tag.parse().unwrap_or(Locale::UNKNOWN);
@@ -234,6 +235,24 @@ mod tests {
     }
 
     #[test]
+    fn spanish_clock_date_and_numbers() {
+        // Arrange
+        let time = nov_12();
+
+        // Act
+        let clock = clock_text(time, Language::Spanish);
+        let date = month_day_text(time, Language::Spanish);
+        let size = size_text(39_845_888, Language::Spanish);
+        let gain = gain_text(1.7, Language::Spanish);
+
+        // Assert
+        assert_eq!(clock, "14:32");
+        assert_eq!(date, "12 nov");
+        assert_eq!(size, "38,0 MB");
+        assert_eq!(gain, "1,7×");
+    }
+
+    #[test]
     fn plural_suffix_follows_the_language_rules() {
         // Arrange
         let counts = [1, 2, 3, 4, 6, 8, 12];
@@ -254,6 +273,8 @@ mod tests {
             ["one", "other", "other", "other", "other", "other", "other"]
         );
         assert_eq!(swedish, english);
+        assert_eq!(plural_suffix(1, Language::Spanish), "one");
+        assert_eq!(plural_suffix(3, Language::Spanish), "other");
     }
 
     #[test]

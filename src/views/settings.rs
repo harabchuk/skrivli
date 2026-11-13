@@ -485,6 +485,8 @@ mod tests {
         // Assert
         assert_eq!(english, ("1 hour".to_string(), "3 hours".to_string()));
         assert_eq!(swedish, ("1 timme".to_string(), "3 timmar".to_string()));
+        assert_eq!(duration_label(one, Language::Spanish), "1 hora");
+        assert_eq!(duration_label(three, Language::Spanish), "3 horas");
     }
 
     #[test]
@@ -507,6 +509,11 @@ mod tests {
                 (
                     "English",
                     LanguagePreference::Fixed(Language::English),
+                    false
+                ),
+                (
+                    "Español",
+                    LanguagePreference::Fixed(Language::Spanish),
                     false
                 ),
                 (

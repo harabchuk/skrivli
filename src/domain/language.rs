@@ -8,17 +8,19 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub(crate) enum Language {
     #[default]
     English,
+    Spanish,
     Swedish,
 }
 
 impl Language {
     /// Every language, in the order Settings lists them.
-    pub(crate) const ALL: [Language; 2] = [Language::English, Language::Swedish];
+    pub(crate) const ALL: [Language; 3] = [Language::English, Language::Spanish, Language::Swedish];
 
     /// BCP 47 code used for the translation catalog and for ICU4X.
     pub(crate) fn code(self) -> &'static str {
         match self {
             Self::English => "en",
+            Self::Spanish => "es",
             Self::Swedish => "sv",
         }
     }
@@ -28,6 +30,7 @@ impl Language {
     pub(crate) fn native_name(self) -> &'static str {
         match self {
             Self::English => "English",
+            Self::Spanish => "Español",
             Self::Swedish => "Svenska",
         }
     }
@@ -38,6 +41,7 @@ impl Language {
     fn storage_name(self) -> &'static str {
         match self {
             Self::English => "english",
+            Self::Spanish => "spanish",
             Self::Swedish => "swedish",
         }
     }
@@ -221,9 +225,37 @@ mod tests {
         let names: Vec<_> = languages.iter().map(|l| l.native_name()).collect();
 
         // Assert
-        assert_eq!(codes, ["en", "sv"]);
-        assert_eq!(names, ["English", "Svenska"]);
+        assert_eq!(codes, ["en", "es", "sv"]);
+        assert_eq!(names, ["English", "Español", "Svenska"]);
         assert_eq!(Language::default(), Language::English);
+    }
+
+    #[test]
+    fn new_languages_round_trip_in_settings() {
+        // Arrange
+        let cases = [("\"spanish\"", Language::Spanish)];
+
+        // Act / Assert
+        for (text, language) in cases {
+            let read: Language = serde_json::from_str(text).expect("read language");
+            let preference: LanguagePreference = serde_json::from_str(text).expect("read choice");
+            assert_eq!(read, language);
+            assert_eq!(preference, LanguagePreference::Fixed(language));
+            assert_eq!(serde_json::to_string(&language).expect("write"), text);
+            assert_eq!(serde_json::to_string(&preference).expect("write"), text);
+        }
+    }
+
+    #[test]
+    fn system_tags_pick_the_new_languages() {
+        // Arrange
+        let cases = [("es-419", Language::Spanish)];
+
+        // Act / Assert
+        for (tag, language) in cases {
+            let resolved = LanguagePreference::System.resolve(&tags(&[tag]));
+            assert_eq!(resolved, language);
+        }
     }
 
     #[test]
