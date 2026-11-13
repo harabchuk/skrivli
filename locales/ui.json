@@ -4,834 +4,1484 @@
     "recordings": {
       "today": {
         "en": "Today",
-        "sv": "I dag"
+        "es": "Hoy",
+        "sv": "I dag",
+        "ru": "Сегодня",
+        "uk": "Сьогодні"
       },
       "yesterday": {
         "en": "Yesterday",
-        "sv": "I går"
+        "es": "Ayer",
+        "sv": "I går",
+        "ru": "Вчера",
+        "uk": "Учора"
       },
       "earlier": {
         "en": "Earlier",
-        "sv": "Tidigare"
+        "es": "Anteriores",
+        "sv": "Tidigare",
+        "ru": "Ранее",
+        "uk": "Раніше"
       },
       "today_at": {
         "en": "Today, %{time}",
-        "sv": "I dag, %{time}"
+        "es": "Hoy, %{time}",
+        "sv": "I dag, %{time}",
+        "ru": "Сегодня, %{time}",
+        "uk": "Сьогодні, %{time}"
       },
       "yesterday_at": {
         "en": "Yesterday, %{time}",
-        "sv": "I går, %{time}"
+        "es": "Ayer, %{time}",
+        "sv": "I går, %{time}",
+        "ru": "Вчера, %{time}",
+        "uk": "Учора, %{time}"
       },
       "date_at": {
         "en": "%{date}, %{time}",
-        "sv": "%{date}, %{time}"
+        "es": "%{date}, %{time}",
+        "sv": "%{date}, %{time}",
+        "ru": "%{date}, %{time}",
+        "uk": "%{date}, %{time}"
       },
       "note_sidecar_missing": {
         "en": "Recording details are missing. The name and times come from the audio file.",
-        "sv": "Uppgifter om inspelningen saknas. Namn och tider hämtas från ljudfilen."
+        "es": "Faltan los detalles de la grabación. El nombre y las horas proceden del archivo de audio.",
+        "sv": "Uppgifter om inspelningen saknas. Namn och tider hämtas från ljudfilen.",
+        "ru": "Сведения о записи отсутствуют. Название и время взяты из аудиофайла.",
+        "uk": "Відомостей про запис немає. Назву й час взято з аудіофайлу."
       },
       "note_sidecar_malformed": {
         "en": "Recording details could not be read. The name and times come from the audio file.",
-        "sv": "Uppgifter om inspelningen kunde inte läsas. Namn och tider hämtas från ljudfilen."
+        "es": "No se pudieron leer los detalles de la grabación. El nombre y las horas proceden del archivo de audio.",
+        "sv": "Uppgifter om inspelningen kunde inte läsas. Namn och tider hämtas från ljudfilen.",
+        "ru": "Не удалось прочитать сведения о записи. Название и время взяты из аудиофайла.",
+        "uk": "Не вдалося прочитати відомості про запис. Назву й час взято з аудіофайлу."
       },
       "note_problems": {
         "en": "Problems occurred while recording. Parts of the audio may be missing.",
-        "sv": "Problem uppstod under inspelningen. Delar av ljudet kan saknas."
+        "es": "Se produjeron problemas durante la grabación. Puede que falten partes del audio.",
+        "sv": "Problem uppstod under inspelningen. Delar av ljudet kan saknas.",
+        "ru": "Во время записи возникли проблемы. Часть аудио может отсутствовать.",
+        "uk": "Під час запису виникли проблеми. Частини аудіо може бракувати."
       },
       "transcript": {
         "en": "Transcript",
-        "sv": "Transkription"
+        "es": "Transcripción",
+        "sv": "Transkription",
+        "ru": "Расшифровка",
+        "uk": "Розшифровка"
       },
       "queued": {
         "en": "Queued",
-        "sv": "Köad"
+        "es": "En cola",
+        "sv": "Köad",
+        "ru": "В очереди",
+        "uk": "У черзі"
       },
       "failed": {
         "en": "Failed",
-        "sv": "Misslyckades"
+        "es": "Error",
+        "sv": "Misslyckades",
+        "ru": "Ошибка",
+        "uk": "Помилка"
       },
       "pause": {
         "en": "Pause",
-        "sv": "Pausa"
+        "es": "Pausar",
+        "sv": "Pausa",
+        "ru": "Пауза",
+        "uk": "Пауза"
       },
       "play": {
         "en": "Play",
-        "sv": "Spela upp"
+        "es": "Reproducir",
+        "sv": "Spela upp",
+        "ru": "Воспроизвести",
+        "uk": "Відтворити"
       },
       "seek": {
         "en": "Seek",
-        "sv": "Spola"
+        "es": "Desplazar",
+        "sv": "Spola",
+        "ru": "Перемотка",
+        "uk": "Перемотування"
       },
       "rename": {
         "en": "Rename recording",
-        "sv": "Byt namn på inspelningen"
+        "es": "Cambiar el nombre de la grabación",
+        "sv": "Byt namn på inspelningen",
+        "ru": "Переименовать запись",
+        "uk": "Перейменувати запис"
       },
       "delete": {
         "en": "Delete recording",
-        "sv": "Ta bort inspelningen"
+        "es": "Eliminar la grabación",
+        "sv": "Ta bort inspelningen",
+        "ru": "Удалить запись",
+        "uk": "Видалити запис"
       },
       "more": {
         "en": "More",
-        "sv": "Mer"
+        "es": "Más",
+        "sv": "Mer",
+        "ru": "Ещё",
+        "uk": "Ще"
       },
       "more_actions": {
         "en": "More actions",
-        "sv": "Fler åtgärder"
+        "es": "Más acciones",
+        "sv": "Fler åtgärder",
+        "ru": "Другие действия",
+        "uk": "Інші дії"
       },
       "transcribe_again": {
         "en": "Transcribe again…",
-        "sv": "Transkribera igen…"
+        "es": "Transcribir de nuevo…",
+        "sv": "Transkribera igen…",
+        "ru": "Расшифровать заново…",
+        "uk": "Розшифрувати знову…"
       },
       "show_in_folder": {
         "en": "Show in folder",
-        "sv": "Visa i mappen"
+        "es": "Mostrar en la carpeta",
+        "sv": "Visa i mappen",
+        "ru": "Показать в папке",
+        "uk": "Показати в папці"
       },
       "cancel": {
         "en": "Cancel",
-        "sv": "Avbryt"
+        "es": "Cancelar",
+        "sv": "Avbryt",
+        "ru": "Отмена",
+        "uk": "Скасувати"
       },
       "no_transcript": {
         "en": "No transcript yet",
-        "sv": "Ingen transkription än"
+        "es": "Aún no hay transcripción",
+        "sv": "Ingen transkription än",
+        "ru": "Расшифровки пока нет",
+        "uk": "Розшифровки ще немає"
       },
       "runs_locally": {
         "en": "Runs on this PC. Your audio never leaves it.",
-        "sv": "Körs på den här datorn. Ditt ljud lämnar den aldrig."
+        "es": "Se ejecuta en este PC. Tu audio nunca sale de él.",
+        "sv": "Körs på den här datorn. Ditt ljud lämnar den aldrig.",
+        "ru": "Работает на этом компьютере. Ваше аудио никуда не передаётся.",
+        "uk": "Працює на цьому комп’ютері. Ваше аудіо нікуди не передається."
       },
       "transcribe": {
         "en": "Transcribe",
-        "sv": "Transkribera"
+        "es": "Transcribir",
+        "sv": "Transkribera",
+        "ru": "Расшифровать",
+        "uk": "Розшифрувати"
       },
       "queued_hint": {
         "en": "Starts when the current transcription finishes.",
-        "sv": "Startar när den pågående transkriberingen är klar."
+        "es": "Empieza cuando termine la transcripción en curso.",
+        "sv": "Startar när den pågående transkriberingen är klar.",
+        "ru": "Начнётся, когда завершится текущая расшифровка.",
+        "uk": "Розпочнеться, коли завершиться поточна розшифровка."
       },
       "transcribing": {
         "en": "Transcribing",
-        "sv": "Transkriberar"
+        "es": "Transcribiendo",
+        "sv": "Transkriberar",
+        "ru": "Расшифровка",
+        "uk": "Розшифрування"
       },
       "transcription_progress": {
         "en": "Transcription progress",
-        "sv": "Transkriberingens förlopp"
+        "es": "Progreso de la transcripción",
+        "sv": "Transkriberingens förlopp",
+        "ru": "Ход расшифровки",
+        "uk": "Перебіг розшифрування"
       },
       "transcription_failed": {
         "en": "Transcription failed",
-        "sv": "Transkriberingen misslyckades"
+        "es": "La transcripción ha fallado",
+        "sv": "Transkriberingen misslyckades",
+        "ru": "Не удалось выполнить расшифровку",
+        "uk": "Не вдалося розшифрувати"
       },
       "recording_intact": {
         "en": "The recording itself is intact.",
-        "sv": "Själva inspelningen är orörd."
+        "es": "La grabación en sí está intacta.",
+        "sv": "Själva inspelningen är orörd.",
+        "ru": "Сама запись не повреждена.",
+        "uk": "Сам запис не пошкоджено."
       },
       "retry": {
         "en": "Retry",
-        "sv": "Försök igen"
+        "es": "Reintentar",
+        "sv": "Försök igen",
+        "ru": "Повторить",
+        "uk": "Повторити"
       },
       "transcript_unreadable": {
         "en": "Could not open the transcript",
-        "sv": "Kunde inte öppna transkriptionen"
+        "es": "No se pudo abrir la transcripción",
+        "sv": "Kunde inte öppna transkriptionen",
+        "ru": "Не удалось открыть расшифровку",
+        "uk": "Не вдалося відкрити розшифровку"
       },
       "copy_transcript": {
         "en": "Copy transcript",
-        "sv": "Kopiera transkriptionen"
+        "es": "Copiar la transcripción",
+        "sv": "Kopiera transkriptionen",
+        "ru": "Копировать расшифровку",
+        "uk": "Копіювати розшифровку"
       },
       "unavailable": {
         "en": "Recordings unavailable",
-        "sv": "Inspelningarna är inte tillgängliga"
+        "es": "Grabaciones no disponibles",
+        "sv": "Inspelningarna är inte tillgängliga",
+        "ru": "Записи недоступны",
+        "uk": "Записи недоступні"
       },
       "select_one": {
         "en": "Select a recording",
-        "sv": "Välj en inspelning"
+        "es": "Selecciona una grabación",
+        "sv": "Välj en inspelning",
+        "ru": "Выберите запись",
+        "uk": "Виберіть запис"
       },
       "select_one_hint": {
         "en": "Choose a row to play, rename, or delete.",
-        "sv": "Välj en rad för att spela upp, byta namn eller ta bort."
+        "es": "Elige una fila para reproducirla, cambiarle el nombre o eliminarla.",
+        "sv": "Välj en rad för att spela upp, byta namn eller ta bort.",
+        "ru": "Выберите строку, чтобы воспроизвести, переименовать или удалить запись.",
+        "uk": "Виберіть рядок, щоб відтворити, перейменувати або видалити запис."
       },
       "title": {
         "en": "Recordings",
-        "sv": "Inspelningar"
+        "es": "Grabaciones",
+        "sv": "Inspelningar",
+        "ru": "Записи",
+        "uk": "Записи"
       },
       "refresh": {
         "en": "Refresh",
-        "sv": "Uppdatera"
+        "es": "Actualizar",
+        "sv": "Uppdatera",
+        "ru": "Обновить",
+        "uk": "Оновити"
       },
       "refresh_recordings": {
         "en": "Refresh recordings",
-        "sv": "Uppdatera inspelningarna"
+        "es": "Actualizar las grabaciones",
+        "sv": "Uppdatera inspelningarna",
+        "ru": "Обновить записи",
+        "uk": "Оновити записи"
       },
       "open_folder": {
         "en": "Open recordings folder",
-        "sv": "Öppna inspelningsmappen"
+        "es": "Abrir la carpeta de grabaciones",
+        "sv": "Öppna inspelningsmappen",
+        "ru": "Открыть папку с записями",
+        "uk": "Відкрити теку із записами"
       },
       "empty_title": {
         "en": "No recordings yet",
-        "sv": "Inga inspelningar än"
+        "es": "Aún no hay grabaciones",
+        "sv": "Inga inspelningar än",
+        "ru": "Записей пока нет",
+        "uk": "Записів ще немає"
       },
       "empty_hint": {
         "en": "Recordings you make appear here, newest first.",
-        "sv": "Inspelningar du gör visas här, de nyaste först."
+        "es": "Las grabaciones que hagas aparecen aquí, las más recientes primero.",
+        "sv": "Inspelningar du gör visas här, de nyaste först.",
+        "ru": "Ваши записи появятся здесь, новые сверху.",
+        "uk": "Ваші записи з’являться тут, найновіші зверху."
       },
       "start_recording": {
         "en": "Start recording",
-        "sv": "Starta inspelning"
+        "es": "Iniciar grabación",
+        "sv": "Starta inspelning",
+        "ru": "Начать запись",
+        "uk": "Почати запис"
       },
       "name_placeholder": {
         "en": "Recording name",
-        "sv": "Inspelningens namn"
+        "es": "Nombre de la grabación",
+        "sv": "Inspelningens namn",
+        "ru": "Название записи",
+        "uk": "Назва запису"
       },
       "rename_confirm": {
         "en": "Rename",
-        "sv": "Byt namn"
+        "es": "Cambiar nombre",
+        "sv": "Byt namn",
+        "ru": "Переименовать",
+        "uk": "Перейменувати"
       },
       "delete_title": {
         "en": "Delete recording?",
-        "sv": "Ta bort inspelningen?"
+        "es": "¿Eliminar la grabación?",
+        "sv": "Ta bort inspelningen?",
+        "ru": "Удалить запись?",
+        "uk": "Видалити запис?"
       },
       "delete_body": {
         "en": "Send “%{name}” and its related files to the Recycle Bin?",
-        "sv": "Flytta ”%{name}” och tillhörande filer till Papperskorgen?"
+        "es": "¿Enviar «%{name}» y sus archivos relacionados a la Papelera de reciclaje?",
+        "sv": "Flytta ”%{name}” och tillhörande filer till Papperskorgen?",
+        "ru": "Переместить «%{name}» и связанные файлы в корзину?",
+        "uk": "Перемістити «%{name}» і пов’язані файли до кошика?"
       },
       "delete_confirm": {
         "en": "Delete",
-        "sv": "Ta bort"
+        "es": "Eliminar",
+        "sv": "Ta bort",
+        "ru": "Удалить",
+        "uk": "Видалити"
       },
       "replace_title": {
         "en": "Replace this transcript?",
-        "sv": "Ersätta den här transkriptionen?"
+        "es": "¿Reemplazar esta transcripción?",
+        "sv": "Ersätta den här transkriptionen?",
+        "ru": "Заменить эту расшифровку?",
+        "uk": "Замінити цю розшифровку?"
       },
       "replace_body": {
         "en": "The current transcript stays until the new one is ready, then it is replaced. Transcribing uses the %{model} model and runs on this PC.",
-        "sv": "Den nuvarande transkriptionen finns kvar tills den nya är klar och ersätts då. Transkriberingen använder modellen %{model} och körs på den här datorn."
+        "es": "La transcripción actual se conserva hasta que la nueva esté lista y entonces se reemplaza. La transcripción usa el modelo %{model} y se ejecuta en este PC.",
+        "sv": "Den nuvarande transkriptionen finns kvar tills den nya är klar och ersätts då. Transkriberingen använder modellen %{model} och körs på den här datorn.",
+        "ru": "Текущая расшифровка останется, пока не будет готова новая, а затем будет заменена. Для расшифровки используется модель %{model}, она работает на этом компьютере.",
+        "uk": "Поточна розшифровка залишиться, доки не буде готова нова, а тоді її буде замінено. Для розшифрування використовується модель %{model}, вона працює на цьому комп’ютері."
       },
       "replace_confirm": {
         "en": "Replace",
-        "sv": "Ersätt"
+        "es": "Reemplazar",
+        "sv": "Ersätt",
+        "ru": "Заменить",
+        "uk": "Замінити"
       }
     },
     "notice": {
       "recording_saved": {
         "en": "Recording saved.",
-        "sv": "Inspelningen sparades."
+        "es": "Grabación guardada.",
+        "sv": "Inspelningen sparades.",
+        "ru": "Запись сохранена.",
+        "uk": "Запис збережено."
       },
       "microphone_privacy": {
         "en": "Microphone access is turned off in Windows privacy settings.",
-        "sv": "Mikrofonåtkomst är avstängd i Windows sekretessinställningar."
+        "es": "El acceso al micrófono está desactivado en la configuración de privacidad de Windows.",
+        "sv": "Mikrofonåtkomst är avstängd i Windows sekretessinställningar.",
+        "ru": "Доступ к микрофону отключён в параметрах конфиденциальности Windows.",
+        "uk": "Доступ до мікрофона вимкнено в параметрах конфіденційності Windows."
       },
       "microphone_unavailable": {
         "en": "The microphone is not available.",
-        "sv": "Mikrofonen är inte tillgänglig."
+        "es": "El micrófono no está disponible.",
+        "sv": "Mikrofonen är inte tillgänglig.",
+        "ru": "Микрофон недоступен.",
+        "uk": "Мікрофон недоступний."
       },
       "no_sources": {
         "en": "Turn on the microphone or system audio to record.",
-        "sv": "Slå på mikrofonen eller systemljudet för att spela in."
+        "es": "Activa el micrófono o el audio del sistema para grabar.",
+        "sv": "Slå på mikrofonen eller systemljudet för att spela in.",
+        "ru": "Для записи включите микрофон или системный звук.",
+        "uk": "Щоб записувати, увімкніть мікрофон або системний звук."
       },
       "microphone_format": {
         "en": "The microphone format is not supported.",
-        "sv": "Mikrofonens format stöds inte."
+        "es": "El formato del micrófono no es compatible.",
+        "sv": "Mikrofonens format stöds inte.",
+        "ru": "Формат микрофона не поддерживается.",
+        "uk": "Формат мікрофона не підтримується."
       },
       "start_failed": {
         "en": "Could not start recording.",
-        "sv": "Det gick inte att starta inspelningen."
+        "es": "No se pudo iniciar la grabación.",
+        "sv": "Det gick inte att starta inspelningen.",
+        "ru": "Не удалось начать запись.",
+        "uk": "Не вдалося почати запис."
       },
       "folder_not_writable": {
         "en": "The recordings folder is not writable.",
-        "sv": "Det går inte att skriva till inspelningsmappen."
+        "es": "No se puede escribir en la carpeta de grabaciones.",
+        "sv": "Det går inte att skriva till inspelningsmappen.",
+        "ru": "В папку с записями нельзя записывать.",
+        "uk": "У теку із записами не можна записувати."
       },
       "disk_full": {
         "en": "There is not enough free disk space to record.",
-        "sv": "Det finns inte tillräckligt med ledigt diskutrymme för att spela in."
+        "es": "No hay suficiente espacio libre en el disco para grabar.",
+        "sv": "Det finns inte tillräckligt med ledigt diskutrymme för att spela in.",
+        "ru": "Недостаточно свободного места на диске для записи.",
+        "uk": "На диску недостатньо вільного місця для запису."
       },
       "disk_low": {
         "en": "Recording stopped because free disk space is low.",
-        "sv": "Inspelningen stoppades eftersom det lediga diskutrymmet är lågt."
+        "es": "La grabación se detuvo porque queda poco espacio libre en el disco.",
+        "sv": "Inspelningen stoppades eftersom det lediga diskutrymmet är lågt.",
+        "ru": "Запись остановлена: на диске мало свободного места.",
+        "uk": "Запис зупинено: на диску мало вільного місця."
       },
       "save_failed": {
         "en": "Could not save the recording.",
-        "sv": "Det gick inte att spara inspelningen."
+        "es": "No se pudo guardar la grabación.",
+        "sv": "Det gick inte att spara inspelningen.",
+        "ru": "Не удалось сохранить запись.",
+        "uk": "Не вдалося зберегти запис."
       },
       "limit_reached": {
         "en": "Recording stopped because it reached the maximum meeting duration.",
-        "sv": "Inspelningen stoppades eftersom den nådde den längsta mötestiden."
+        "es": "La grabación se detuvo porque alcanzó la duración máxima de la reunión.",
+        "sv": "Inspelningen stoppades eftersom den nådde den längsta mötestiden.",
+        "ru": "Запись остановлена: достигнута максимальная длительность встречи.",
+        "uk": "Запис зупинено: досягнуто максимальної тривалості зустрічі."
       },
       "microphone_fallback": {
         "en": "The selected microphone is unavailable. Using the Windows default.",
-        "sv": "Den valda mikrofonen är inte tillgänglig. Windows standardenhet används."
+        "es": "El micrófono seleccionado no está disponible. Se usa el predeterminado de Windows.",
+        "sv": "Den valda mikrofonen är inte tillgänglig. Windows standardenhet används.",
+        "ru": "Выбранный микрофон недоступен. Используется устройство Windows по умолчанию.",
+        "uk": "Вибраний мікрофон недоступний. Використовується пристрій Windows за замовчуванням."
       },
       "output_fallback": {
         "en": "The selected output is unavailable. Using the Windows default.",
-        "sv": "Den valda utgången är inte tillgänglig. Windows standardenhet används."
+        "es": "La salida seleccionada no está disponible. Se usa la predeterminada de Windows.",
+        "sv": "Den valda utgången är inte tillgänglig. Windows standardenhet används.",
+        "ru": "Выбранное устройство вывода недоступно. Используется устройство Windows по умолчанию.",
+        "uk": "Вибраний пристрій виведення недоступний. Використовується пристрій Windows за замовчуванням."
       },
       "system_missing": {
         "en": "System audio is unavailable. Recording the microphone with silence on that side.",
-        "sv": "Systemljudet är inte tillgängligt. Mikrofonen spelas in med tystnad på den sidan."
+        "es": "El audio del sistema no está disponible. Se graba el micrófono con silencio en ese lado.",
+        "sv": "Systemljudet är inte tillgängligt. Mikrofonen spelas in med tystnad på den sidan.",
+        "ru": "Системный звук недоступен. Записывается микрофон, а на системной стороне будет тишина.",
+        "uk": "Системний звук недоступний. Записується мікрофон, а на системному боці буде тиша."
       },
       "microphone_missing": {
         "en": "The microphone is unavailable. Recording system audio with silence on that side.",
-        "sv": "Mikrofonen är inte tillgänglig. Systemljudet spelas in med tystnad på den sidan."
+        "es": "El micrófono no está disponible. Se graba el audio del sistema con silencio en ese lado.",
+        "sv": "Mikrofonen är inte tillgänglig. Systemljudet spelas in med tystnad på den sidan.",
+        "ru": "Микрофон недоступен. Записывается системный звук, а на стороне микрофона будет тишина.",
+        "uk": "Мікрофон недоступний. Записується системний звук, а на боці мікрофона буде тиша."
       },
       "worker_failed": {
         "en": "Recording stopped because a capture worker failed.",
-        "sv": "Inspelningen stoppades eftersom en inspelningsprocess misslyckades."
+        "es": "La grabación se detuvo porque falló un proceso de captura.",
+        "sv": "Inspelningen stoppades eftersom en inspelningsprocess misslyckades.",
+        "ru": "Запись остановлена: произошёл сбой в процессе захвата.",
+        "uk": "Запис зупинено: стався збій у процесі захоплення."
       },
       "capture_stalled": {
         "en": "Audio capture appears stalled.",
-        "sv": "Ljudinspelningen verkar ha fastnat."
+        "es": "La captura de audio parece haberse bloqueado.",
+        "sv": "Ljudinspelningen verkar ha fastnat.",
+        "ru": "Похоже, захват звука завис.",
+        "uk": "Схоже, захоплення звуку зависло."
       },
       "transcript_ready": {
         "en": "Transcript ready.",
-        "sv": "Transkriptionen är klar."
+        "es": "Transcripción lista.",
+        "sv": "Transkriptionen är klar.",
+        "ru": "Расшифровка готова.",
+        "uk": "Розшифровка готова."
       },
       "transcription_failed": {
         "en": "Transcription failed.",
-        "sv": "Transkriberingen misslyckades."
+        "es": "La transcripción ha fallado.",
+        "sv": "Transkriberingen misslyckades.",
+        "ru": "Не удалось выполнить расшифровку.",
+        "uk": "Не вдалося розшифрувати."
       },
       "transcription_cancelled": {
         "en": "Transcription cancelled.",
-        "sv": "Transkriberingen avbröts."
+        "es": "Transcripción cancelada.",
+        "sv": "Transkriberingen avbröts.",
+        "ru": "Расшифровка отменена.",
+        "uk": "Розшифрування скасовано."
       },
       "model_missing_or_unsupported": {
         "en": "The transcription model file is missing or unsupported.",
-        "sv": "Transkriptionsmodellens fil saknas eller stöds inte."
+        "es": "El archivo del modelo de transcripción falta o no es compatible.",
+        "sv": "Transkriptionsmodellens fil saknas eller stöds inte.",
+        "ru": "Файл модели расшифровки отсутствует или не поддерживается.",
+        "uk": "Файл моделі розшифрування відсутній або не підтримується."
       },
       "transcription_failed_kept": {
         "en": "Transcription failed. Your previous transcript is unchanged.",
-        "sv": "Transkriberingen misslyckades. Din tidigare transkription är oförändrad."
+        "es": "La transcripción ha fallado. La transcripción anterior no ha cambiado.",
+        "sv": "Transkriberingen misslyckades. Din tidigare transkription är oförändrad.",
+        "ru": "Не удалось выполнить расшифровку. Предыдущая расшифровка не изменилась.",
+        "uk": "Не вдалося розшифрувати. Попередня розшифровка не змінилася."
       },
       "recording_not_found": {
         "en": "Could not find that recording.",
-        "sv": "Det gick inte att hitta inspelningen."
+        "es": "No se encontró esa grabación.",
+        "sv": "Det gick inte att hitta inspelningen.",
+        "ru": "Не удалось найти эту запись.",
+        "uk": "Не вдалося знайти цей запис."
       },
       "still_running": {
         "en": "Skrivli is still running in the notification area.",
-        "sv": "Skrivli körs fortfarande i aviseringsfältet."
+        "es": "Skrivli sigue ejecutándose en el área de notificaciones.",
+        "sv": "Skrivli körs fortfarande i aviseringsfältet.",
+        "ru": "Skrivli продолжает работать в области уведомлений.",
+        "uk": "Skrivli досі працює в області сповіщень."
       },
       "recording_changed": {
         "en": "The recording changed before the transcript was saved.",
-        "sv": "Inspelningen ändrades innan transkriptionen sparades."
+        "es": "La grabación cambió antes de que se guardara la transcripción.",
+        "sv": "Inspelningen ändrades innan transkriptionen sparades.",
+        "ru": "Запись изменилась до сохранения расшифровки.",
+        "uk": "Запис змінився до збереження розшифровки."
       },
       "related_files_not_renamed": {
         "en": "Some related files were not renamed.",
-        "sv": "Vissa tillhörande filer fick inte nytt namn."
+        "es": "No se cambió el nombre de algunos archivos relacionados.",
+        "sv": "Vissa tillhörande filer fick inte nytt namn.",
+        "ru": "Некоторые связанные файлы не были переименованы.",
+        "uk": "Деякі пов’язані файли не було перейменовано."
       },
       "save_settings": {
         "en": "Could not save settings.",
-        "sv": "Det gick inte att spara inställningarna."
+        "es": "No se pudo guardar la configuración.",
+        "sv": "Det gick inte att spara inställningarna.",
+        "ru": "Не удалось сохранить параметры.",
+        "uk": "Не вдалося зберегти параметри."
       },
       "start_logging": {
         "en": "Could not start logging.",
-        "sv": "Det gick inte att starta loggningen."
+        "es": "No se pudo iniciar el registro.",
+        "sv": "Det gick inte att starta loggningen.",
+        "ru": "Не удалось запустить ведение журнала.",
+        "uk": "Не вдалося запустити ведення журналу."
       },
       "prepare_folders": {
         "en": "Could not prepare the Skrivli folders.",
-        "sv": "Det gick inte att förbereda Skrivlis mappar."
+        "es": "No se pudieron preparar las carpetas de Skrivli.",
+        "sv": "Det gick inte att förbereda Skrivlis mappar.",
+        "ru": "Не удалось подготовить папки Skrivli.",
+        "uk": "Не вдалося підготувати теки Skrivli."
       },
       "single_instance": {
         "en": "Could not check whether Skrivli is already running.",
-        "sv": "Det gick inte att kontrollera om Skrivli redan körs."
+        "es": "No se pudo comprobar si Skrivli ya se está ejecutando.",
+        "sv": "Det gick inte att kontrollera om Skrivli redan körs.",
+        "ru": "Не удалось проверить, запущен ли уже Skrivli.",
+        "uk": "Не вдалося перевірити, чи Skrivli вже запущено."
       },
       "app_paths": {
         "en": "Could not find the user profile folders.",
-        "sv": "Det gick inte att hitta användarprofilens mappar."
+        "es": "No se encontraron las carpetas del perfil de usuario.",
+        "sv": "Det gick inte att hitta användarprofilens mappar.",
+        "ru": "Не удалось найти папки профиля пользователя.",
+        "uk": "Не вдалося знайти теки профілю користувача."
       },
       "open_window": {
         "en": "Could not open the Skrivli window.",
-        "sv": "Det gick inte att öppna Skrivli-fönstret."
+        "es": "No se pudo abrir la ventana de Skrivli.",
+        "sv": "Det gick inte att öppna Skrivli-fönstret.",
+        "ru": "Не удалось открыть окно Skrivli.",
+        "uk": "Не вдалося відкрити вікно Skrivli."
       },
       "open_folder": {
         "en": "Could not open the recordings folder.",
-        "sv": "Det gick inte att öppna inspelningsmappen."
+        "es": "No se pudo abrir la carpeta de grabaciones.",
+        "sv": "Det gick inte att öppna inspelningsmappen.",
+        "ru": "Не удалось открыть папку с записями.",
+        "uk": "Не вдалося відкрити теку із записами."
       },
       "tray": {
         "en": "Could not show the Skrivli icon.",
-        "sv": "Det gick inte att visa Skrivli-ikonen."
+        "es": "No se pudo mostrar el icono de Skrivli.",
+        "sv": "Det gick inte att visa Skrivli-ikonen.",
+        "ru": "Не удалось показать значок Skrivli.",
+        "uk": "Не вдалося показати значок Skrivli."
       },
       "activation": {
         "en": "Could not ask the running Skrivli window to open.",
-        "sv": "Det gick inte att be det körande Skrivli-fönstret att öppnas."
+        "es": "No se pudo pedir a la ventana de Skrivli en ejecución que se abra.",
+        "sv": "Det gick inte att be det körande Skrivli-fönstret att öppnas.",
+        "ru": "Не удалось попросить запущенное окно Skrivli открыться.",
+        "uk": "Не вдалося попросити запущене вікно Skrivli відкритися."
       },
       "library": {
         "en": "Could not update the recordings library.",
-        "sv": "Det gick inte att uppdatera inspelningsbiblioteket."
+        "es": "No se pudo actualizar la biblioteca de grabaciones.",
+        "sv": "Det gick inte att uppdatera inspelningsbiblioteket.",
+        "ru": "Не удалось обновить библиотеку записей.",
+        "uk": "Не вдалося оновити бібліотеку записів."
       },
       "playback": {
         "en": "Could not play the recording.",
-        "sv": "Det gick inte att spela upp inspelningen."
+        "es": "No se pudo reproducir la grabación.",
+        "sv": "Det gick inte att spela upp inspelningen.",
+        "ru": "Не удалось воспроизвести запись.",
+        "uk": "Не вдалося відтворити запис."
       },
       "prepare_transcript": {
         "en": "Could not prepare the transcript.",
-        "sv": "Det gick inte att förbereda transkriptionen."
+        "es": "No se pudo preparar la transcripción.",
+        "sv": "Det gick inte att förbereda transkriptionen.",
+        "ru": "Не удалось подготовить расшифровку.",
+        "uk": "Не вдалося підготувати розшифровку."
       },
       "transcript_missing": {
         "en": "The transcript file is missing.",
-        "sv": "Transkriptionsfilen saknas."
+        "es": "Falta el archivo de la transcripción.",
+        "sv": "Transkriptionsfilen saknas.",
+        "ru": "Файл расшифровки отсутствует.",
+        "uk": "Файл розшифровки відсутній."
       },
       "transcript_unreadable": {
         "en": "The transcript file could not be read.",
-        "sv": "Transkriptionsfilen kunde inte läsas."
+        "es": "No se pudo leer el archivo de la transcripción.",
+        "sv": "Transkriptionsfilen kunde inte läsas.",
+        "ru": "Не удалось прочитать файл расшифровки.",
+        "uk": "Не вдалося прочитати файл розшифровки."
       },
       "choose_model": {
         "en": "Could not choose a transcription model file.",
-        "sv": "Det gick inte att välja en modellfil för transkription."
+        "es": "No se pudo elegir un archivo de modelo de transcripción.",
+        "sv": "Det gick inte att välja en modellfil för transkription.",
+        "ru": "Не удалось выбрать файл модели расшифровки.",
+        "uk": "Не вдалося вибрати файл моделі розшифрування."
       },
       "model_file_missing": {
         "en": "The transcription model file is missing.",
-        "sv": "Transkriptionsmodellens fil saknas."
+        "es": "Falta el archivo del modelo de transcripción.",
+        "sv": "Transkriptionsmodellens fil saknas.",
+        "ru": "Файл модели расшифровки отсутствует.",
+        "uk": "Файл моделі розшифрування відсутній."
       },
       "model_file_unreadable": {
         "en": "The transcription model file could not be read.",
-        "sv": "Transkriptionsmodellens fil kunde inte läsas."
+        "es": "No se pudo leer el archivo del modelo de transcripción.",
+        "sv": "Transkriptionsmodellens fil kunde inte läsas.",
+        "ru": "Не удалось прочитать файл модели расшифровки.",
+        "uk": "Не вдалося прочитати файл моделі розшифрування."
       },
       "model_file_unsupported": {
         "en": "The transcription model file is not supported.",
-        "sv": "Transkriptionsmodellens fil stöds inte."
+        "es": "El archivo del modelo de transcripción no es compatible.",
+        "sv": "Transkriptionsmodellens fil stöds inte.",
+        "ru": "Файл модели расшифровки не поддерживается.",
+        "uk": "Файл моделі розшифрування не підтримується."
       },
       "model_list_unreadable": {
         "en": "The transcription model list could not be read.",
-        "sv": "Listan över transkriptionsmodeller kunde inte läsas."
+        "es": "No se pudo leer la lista de modelos de transcripción.",
+        "sv": "Listan över transkriptionsmodeller kunde inte läsas.",
+        "ru": "Не удалось прочитать список моделей расшифровки.",
+        "uk": "Не вдалося прочитати список моделей розшифрування."
       },
       "download_failed": {
         "en": "Could not download the transcription model.",
-        "sv": "Det gick inte att ladda ned transkriptionsmodellen."
+        "es": "No se pudo descargar el modelo de transcripción.",
+        "sv": "Det gick inte att ladda ned transkriptionsmodellen.",
+        "ru": "Не удалось скачать модель расшифровки.",
+        "uk": "Не вдалося завантажити модель розшифрування."
       },
       "download_cancelled": {
         "en": "The model download was cancelled.",
-        "sv": "Nedladdningen av modellen avbröts."
+        "es": "Se canceló la descarga del modelo.",
+        "sv": "Nedladdningen av modellen avbröts.",
+        "ru": "Скачивание модели отменено.",
+        "uk": "Завантаження моделі скасовано."
       },
       "verify_failed": {
         "en": "The downloaded transcription model could not be verified.",
-        "sv": "Den nedladdade transkriptionsmodellen kunde inte verifieras."
+        "es": "No se pudo verificar el modelo de transcripción descargado.",
+        "sv": "Den nedladdade transkriptionsmodellen kunde inte verifieras.",
+        "ru": "Не удалось проверить скачанную модель расшифровки.",
+        "uk": "Не вдалося перевірити завантажену модель розшифрування."
       },
       "load_failed": {
         "en": "Could not load the transcription model.",
-        "sv": "Det gick inte att läsa in transkriptionsmodellen."
+        "es": "No se pudo cargar el modelo de transcripción.",
+        "sv": "Det gick inte att läsa in transkriptionsmodellen.",
+        "ru": "Не удалось загрузить модель расшифровки.",
+        "uk": "Не вдалося завантажити модель розшифрування."
       },
       "speech_recognition": {
         "en": "Could not run speech recognition.",
-        "sv": "Det gick inte att köra taligenkänningen."
+        "es": "No se pudo ejecutar el reconocimiento de voz.",
+        "sv": "Det gick inte att köra taligenkänningen.",
+        "ru": "Не удалось запустить распознавание речи.",
+        "uk": "Не вдалося запустити розпізнавання мовлення."
       },
       "transcription_was_cancelled": {
         "en": "Transcription was cancelled.",
-        "sv": "Transkriberingen avbröts."
+        "es": "Se canceló la transcripción.",
+        "sv": "Transkriberingen avbröts.",
+        "ru": "Расшифровка была отменена.",
+        "uk": "Розшифрування було скасовано."
       },
       "generic": {
         "en": "Something went wrong.",
-        "sv": "Något gick fel."
+        "es": "Algo salió mal.",
+        "sv": "Något gick fel.",
+        "ru": "Что-то пошло не так.",
+        "uk": "Щось пішло не так."
       }
     },
     "tray": {
       "show": {
         "en": "Show Skrivli",
-        "sv": "Visa Skrivli"
+        "es": "Mostrar Skrivli",
+        "sv": "Visa Skrivli",
+        "ru": "Показать Skrivli",
+        "uk": "Показати Skrivli"
       },
       "start_recording": {
         "en": "Start recording",
-        "sv": "Starta inspelning"
+        "es": "Iniciar grabación",
+        "sv": "Starta inspelning",
+        "ru": "Начать запись",
+        "uk": "Почати запис"
       },
       "stop_recording": {
         "en": "Stop recording",
-        "sv": "Stoppa inspelning"
+        "es": "Detener grabación",
+        "sv": "Stoppa inspelning",
+        "ru": "Остановить запись",
+        "uk": "Зупинити запис"
       },
       "open_recordings_folder": {
         "en": "Open recordings folder",
-        "sv": "Öppna inspelningsmappen"
+        "es": "Abrir la carpeta de grabaciones",
+        "sv": "Öppna inspelningsmappen",
+        "ru": "Открыть папку с записями",
+        "uk": "Відкрити теку із записами"
       },
       "settings": {
         "en": "Settings",
-        "sv": "Inställningar"
+        "es": "Configuración",
+        "sv": "Inställningar",
+        "ru": "Параметры",
+        "uk": "Параметри"
       },
       "exit": {
         "en": "Exit",
-        "sv": "Avsluta"
+        "es": "Salir",
+        "sv": "Avsluta",
+        "ru": "Выход",
+        "uk": "Вийти"
       },
       "balloon_title": {
         "en": "Transcript ready",
-        "sv": "Transkriptionen är klar"
+        "es": "Transcripción lista",
+        "sv": "Transkriptionen är klar",
+        "ru": "Расшифровка готова",
+        "uk": "Розшифровка готова"
       },
       "balloon_body": {
         "en": "A recording has a transcript.",
-        "sv": "En inspelning har fått en transkription."
+        "es": "Una grabación ya tiene transcripción.",
+        "sv": "En inspelning har fått en transkription.",
+        "ru": "Для записи готова расшифровка.",
+        "uk": "Для запису готова розшифровка."
       }
     },
     "window": {
       "record": {
         "en": "Record",
-        "sv": "Spela in"
+        "es": "Grabar",
+        "sv": "Spela in",
+        "ru": "Запись",
+        "uk": "Запис"
       },
       "recordings": {
         "en": "Recordings",
-        "sv": "Inspelningar"
+        "es": "Grabaciones",
+        "sv": "Inspelningar",
+        "ru": "Записи",
+        "uk": "Записи"
       },
       "settings": {
         "en": "Settings",
-        "sv": "Inställningar"
+        "es": "Configuración",
+        "sv": "Inställningar",
+        "ru": "Параметры",
+        "uk": "Параметри"
       },
       "theme_system": {
         "en": "System theme",
-        "sv": "Systemtema"
+        "es": "Tema del sistema",
+        "sv": "Systemtema",
+        "ru": "Системная тема",
+        "uk": "Системна тема"
       },
       "theme_light": {
         "en": "Light theme",
-        "sv": "Ljust tema"
+        "es": "Tema claro",
+        "sv": "Ljust tema",
+        "ru": "Светлая тема",
+        "uk": "Світла тема"
       },
       "theme_dark": {
         "en": "Dark theme",
-        "sv": "Mörkt tema"
+        "es": "Tema oscuro",
+        "sv": "Mörkt tema",
+        "ru": "Тёмная тема",
+        "uk": "Темна тема"
       }
     },
     "record": {
       "default_communications": {
         "en": "Default communications",
-        "sv": "Standard för kommunikation"
+        "es": "Predeterminado para comunicaciones",
+        "sv": "Standard för kommunikation",
+        "ru": "По умолчанию для связи",
+        "uk": "Типовий для зв’язку"
       },
       "default_output": {
         "en": "Default output device",
-        "sv": "Standardutgång"
+        "es": "Salida predeterminada",
+        "sv": "Standardutgång",
+        "ru": "Устройство вывода по умолчанию",
+        "uk": "Типовий пристрій виведення"
       },
       "disabled": {
         "en": "Disabled",
-        "sv": "Avstängd"
+        "es": "Desactivado",
+        "sv": "Avstängd",
+        "ru": "Отключено",
+        "uk": "Вимкнено"
       },
       "microphone_gain": {
         "en": "Microphone gain",
-        "sv": "Mikrofonförstärkning"
+        "es": "Ganancia del micrófono",
+        "sv": "Mikrofonförstärkning",
+        "ru": "Усиление микрофона",
+        "uk": "Підсилення мікрофона"
       },
       "system_gain": {
         "en": "System audio gain",
-        "sv": "Systemljudets förstärkning"
+        "es": "Ganancia del audio del sistema",
+        "sv": "Systemljudets förstärkning",
+        "ru": "Усиление системного звука",
+        "uk": "Підсилення системного звуку"
       },
       "microphone": {
         "en": "Microphone",
-        "sv": "Mikrofon"
+        "es": "Micrófono",
+        "sv": "Mikrofon",
+        "ru": "Микрофон",
+        "uk": "Мікрофон"
       },
       "system_audio": {
         "en": "System audio",
-        "sv": "Systemljud"
+        "es": "Audio del sistema",
+        "sv": "Systemljud",
+        "ru": "Системный звук",
+        "uk": "Системний звук"
       },
       "stop": {
         "en": "Stop recording",
-        "sv": "Stoppa inspelning"
+        "es": "Detener grabación",
+        "sv": "Stoppa inspelning",
+        "ru": "Остановить запись",
+        "uk": "Зупинити запис"
       },
       "start": {
         "en": "Start recording",
-        "sv": "Starta inspelning"
+        "es": "Iniciar grabación",
+        "sv": "Starta inspelning",
+        "ru": "Начать запись",
+        "uk": "Почати запис"
       },
       "locked_hint": {
         "en": "Device choices are locked while recording",
-        "sv": "Enhetsvalen är låsta under inspelning"
+        "es": "La elección de dispositivos está bloqueada durante la grabación",
+        "sv": "Enhetsvalen är låsta under inspelning",
+        "ru": "Выбор устройств заблокирован во время записи",
+        "uk": "Вибір пристроїв заблоковано під час запису"
       },
       "change": {
         "en": "Change",
-        "sv": "Ändra"
+        "es": "Cambiar",
+        "sv": "Ändra",
+        "ru": "Изменить",
+        "uk": "Змінити"
       },
       "change_device": {
         "en": "Change %{source} device",
-        "sv": "Ändra enhet för %{source}"
+        "es": "Cambiar el dispositivo de %{source}",
+        "sv": "Ändra enhet för %{source}",
+        "ru": "Изменить устройство: %{source}",
+        "uk": "Змінити пристрій: %{source}"
       },
       "gain": {
         "en": "Gain",
-        "sv": "Nivå"
+        "es": "Ganancia",
+        "sv": "Nivå",
+        "ru": "Усиление",
+        "uk": "Підсилення"
       },
       "phase_ready": {
         "en": "Ready",
-        "sv": "Redo"
+        "es": "Listo",
+        "sv": "Redo",
+        "ru": "Готово",
+        "uk": "Готово"
       },
       "phase_starting": {
         "en": "Starting",
-        "sv": "Startar"
+        "es": "Iniciando",
+        "sv": "Startar",
+        "ru": "Запуск",
+        "uk": "Запуск"
       },
       "phase_recording": {
         "en": "Recording",
-        "sv": "Spelar in"
+        "es": "Grabando",
+        "sv": "Spelar in",
+        "ru": "Идёт запись",
+        "uk": "Триває запис"
       },
       "phase_saving": {
         "en": "Saving",
-        "sv": "Sparar"
+        "es": "Guardando",
+        "sv": "Sparar",
+        "ru": "Сохранение",
+        "uk": "Збереження"
       },
       "phase_not_recording": {
         "en": "Not recording",
-        "sv": "Spelar inte in"
+        "es": "Sin grabar",
+        "sv": "Spelar inte in",
+        "ru": "Запись не идёт",
+        "uk": "Запис не триває"
       },
       "peak_hold": {
         "en": "Peak hold %{value}",
-        "sv": "Toppvärde %{value}"
+        "es": "Pico máximo %{value}",
+        "sv": "Toppvärde %{value}",
+        "ru": "Пик %{value}",
+        "uk": "Пік %{value}"
       }
     },
     "model": {
       "in_use": {
         "en": "In use",
-        "sv": "Används"
+        "es": "En uso",
+        "sv": "Används",
+        "ru": "Используется",
+        "uk": "Використовується"
       },
       "installed": {
         "en": "Installed",
-        "sv": "Installerad"
+        "es": "Instalado",
+        "sv": "Installerad",
+        "ru": "Установлена",
+        "uk": "Установлено"
       },
       "speed": {
         "en": "Speed",
-        "sv": "Hastighet"
+        "es": "Velocidad",
+        "sv": "Hastighet",
+        "ru": "Скорость",
+        "uk": "Швидкість"
       },
       "accuracy": {
         "en": "Accuracy",
-        "sv": "Noggrannhet"
+        "es": "Precisión",
+        "sv": "Noggrannhet",
+        "ru": "Точность",
+        "uk": "Точність"
       },
       "subtitle": {
         "en": "Runs on this PC. Your audio never leaves it.",
-        "sv": "Körs på den här datorn. Ditt ljud lämnar den aldrig."
+        "es": "Se ejecuta en este PC. Tu audio nunca sale de él.",
+        "sv": "Körs på den här datorn. Ditt ljud lämnar den aldrig.",
+        "ru": "Работает на этом компьютере. Ваше аудио никуда не передаётся.",
+        "uk": "Працює на цьому комп’ютері. Ваше аудіо нікуди не передається."
       },
       "title": {
         "en": "Transcription model",
-        "sv": "Transkriptionsmodell"
+        "es": "Modelo de transcripción",
+        "sv": "Transkriptionsmodell",
+        "ru": "Модель расшифровки",
+        "uk": "Модель розшифрування"
       },
       "close": {
         "en": "Close",
-        "sv": "Stäng"
+        "es": "Cerrar",
+        "sv": "Stäng",
+        "ru": "Закрыть",
+        "uk": "Закрити"
       },
       "cancel_download": {
         "en": "Cancel download",
-        "sv": "Avbryt nedladdningen"
+        "es": "Cancelar descarga",
+        "sv": "Avbryt nedladdningen",
+        "ru": "Отменить скачивание",
+        "uk": "Скасувати завантаження"
       },
       "retry_download": {
         "en": "Retry download",
-        "sv": "Försök ladda ned igen"
+        "es": "Reintentar descarga",
+        "sv": "Försök ladda ned igen",
+        "ru": "Повторить скачивание",
+        "uk": "Повторити завантаження"
       },
       "download": {
         "en": "Download %{size}",
-        "sv": "Ladda ned %{size}"
+        "es": "Descargar %{size}",
+        "sv": "Ladda ned %{size}",
+        "ru": "Скачать %{size}",
+        "uk": "Завантажити %{size}"
       },
       "use_selected": {
         "en": "Use selected model",
-        "sv": "Använd vald modell"
+        "es": "Usar el modelo seleccionado",
+        "sv": "Använd vald modell",
+        "ru": "Использовать выбранную модель",
+        "uk": "Використовувати вибрану модель"
       },
       "downloading": {
         "en": "Downloading %{percent}%",
-        "sv": "Laddar ned %{percent}%"
+        "es": "Descargando %{percent}%",
+        "sv": "Laddar ned %{percent}%",
+        "ru": "Скачивание: %{percent}%",
+        "uk": "Завантаження: %{percent}%"
       },
       "download_amount": {
         "en": "About %{done} of %{total}",
-        "sv": "Cirka %{done} av %{total}"
+        "es": "Unos %{done} de %{total}",
+        "sv": "Cirka %{done} av %{total}",
+        "ru": "Около %{done} из %{total}",
+        "uk": "Близько %{done} із %{total}"
       },
       "state_in_use": {
         "en": "in use",
-        "sv": "används"
+        "es": "en uso",
+        "sv": "används",
+        "ru": "используется",
+        "uk": "використовується"
       },
       "state_installed": {
         "en": "installed",
-        "sv": "installerad"
+        "es": "instalado",
+        "sv": "installerad",
+        "ru": "установлена",
+        "uk": "установлено"
       },
       "state_not_installed": {
         "en": "not installed",
-        "sv": "inte installerad"
+        "es": "no instalado",
+        "sv": "inte installerad",
+        "ru": "не установлена",
+        "uk": "не установлено"
       },
       "accessibility_rated": {
         "en": "%{name}, %{status}, speed %{speed} of 3, accuracy %{accuracy} of 3",
-        "sv": "%{name}, %{status}, hastighet %{speed} av 3, noggrannhet %{accuracy} av 3"
+        "es": "%{name}, %{status}, velocidad %{speed} de 3, precisión %{accuracy} de 3",
+        "sv": "%{name}, %{status}, hastighet %{speed} av 3, noggrannhet %{accuracy} av 3",
+        "ru": "%{name}, %{status}, скорость %{speed} из 3, точность %{accuracy} из 3",
+        "uk": "%{name}, %{status}, швидкість %{speed} із 3, точність %{accuracy} із 3"
       },
       "accessibility": {
         "en": "%{name}, %{status}",
-        "sv": "%{name}, %{status}"
+        "es": "%{name}, %{status}",
+        "sv": "%{name}, %{status}",
+        "ru": "%{name}, %{status}",
+        "uk": "%{name}, %{status}"
       },
       "status_in_use": {
         "en": "Model: %{name}",
-        "sv": "Modell: %{name}"
+        "es": "Modelo: %{name}",
+        "sv": "Modell: %{name}",
+        "ru": "Модель: %{name}",
+        "uk": "Модель: %{name}"
       },
       "status_missing": {
         "en": "No model installed · Choose…",
-        "sv": "Ingen modell installerad · Välj…"
+        "es": "Ningún modelo instalado · Elegir…",
+        "sv": "Ingen modell installerad · Välj…",
+        "ru": "Модель не установлена · Выбрать…",
+        "uk": "Модель не установлено · Вибрати…"
       },
       "status_downloading": {
         "en": "Downloading %{name} %{percent}%",
-        "sv": "Laddar ned %{name} %{percent}%"
+        "es": "Descargando %{name} %{percent}%",
+        "sv": "Laddar ned %{name} %{percent}%",
+        "ru": "Скачивание %{name}: %{percent}%",
+        "uk": "Завантаження %{name}: %{percent}%"
       },
       "status_tooltip": {
         "en": "Transcription model: %{name}. Click to change.",
-        "sv": "Transkriptionsmodell: %{name}. Klicka för att byta."
+        "es": "Modelo de transcripción: %{name}. Haz clic para cambiarlo.",
+        "sv": "Transkriptionsmodell: %{name}. Klicka för att byta.",
+        "ru": "Модель расшифровки: %{name}. Нажмите, чтобы изменить.",
+        "uk": "Модель розшифрування: %{name}. Натисніть, щоб змінити."
       },
       "status_tooltip_missing": {
         "en": "Choose a transcription model.",
-        "sv": "Välj en transkriptionsmodell."
+        "es": "Elige un modelo de transcripción.",
+        "sv": "Välj en transkriptionsmodell.",
+        "ru": "Выберите модель расшифровки.",
+        "uk": "Виберіть модель розшифрування."
       }
     },
     "status": {
       "starting": {
         "en": "Starting",
-        "sv": "Startar"
+        "es": "Iniciando",
+        "sv": "Startar",
+        "ru": "Запуск",
+        "uk": "Запуск"
       },
       "recording": {
         "en": "Recording %{elapsed}",
-        "sv": "Spelar in %{elapsed}"
+        "es": "Grabando %{elapsed}",
+        "sv": "Spelar in %{elapsed}",
+        "ru": "Запись %{elapsed}",
+        "uk": "Запис %{elapsed}"
       },
       "saving": {
         "en": "Saving",
-        "sv": "Sparar"
+        "es": "Guardando",
+        "sv": "Sparar",
+        "ru": "Сохранение",
+        "uk": "Збереження"
       },
       "transcribing": {
         "en": "Transcribing %{percent}%",
-        "sv": "Transkriberar %{percent}%"
+        "es": "Transcribiendo %{percent}%",
+        "sv": "Transkriberar %{percent}%",
+        "ru": "Расшифровка: %{percent}%",
+        "uk": "Розшифрування: %{percent}%"
       },
       "ready": {
         "en": "Ready",
-        "sv": "Redo"
+        "es": "Listo",
+        "sv": "Redo",
+        "ru": "Готово",
+        "uk": "Готово"
       },
       "queued": {
         "en": "Queued",
-        "sv": "Köad"
+        "es": "En cola",
+        "sv": "Köad",
+        "ru": "В очереди",
+        "uk": "У черзі"
       },
       "transcript_ready": {
         "en": "Ready",
-        "sv": "Klar"
+        "es": "Listo",
+        "sv": "Klar",
+        "ru": "Готово",
+        "uk": "Готово"
       },
       "failed": {
         "en": "Failed",
-        "sv": "Misslyckades"
+        "es": "Error",
+        "sv": "Misslyckades",
+        "ru": "Ошибка",
+        "uk": "Помилка"
       }
     },
     "settings": {
       "title": {
         "en": "Settings",
-        "sv": "Inställningar"
+        "es": "Configuración",
+        "sv": "Inställningar",
+        "ru": "Параметры",
+        "uk": "Параметри"
       },
       "section_transcription": {
         "en": "Transcription",
-        "sv": "Transkription"
+        "es": "Transcripción",
+        "sv": "Transkription",
+        "ru": "Расшифровка",
+        "uk": "Розшифрування"
       },
       "section_recording": {
         "en": "Recording",
-        "sv": "Inspelning"
+        "es": "Grabación",
+        "sv": "Inspelning",
+        "ru": "Запись",
+        "uk": "Запис"
       },
       "section_general": {
         "en": "General",
-        "sv": "Allmänt"
+        "es": "General",
+        "sv": "Allmänt",
+        "ru": "Общие",
+        "uk": "Загальні"
       },
       "change_model": {
         "en": "Change model…",
-        "sv": "Byt modell…"
+        "es": "Cambiar modelo…",
+        "sv": "Byt modell…",
+        "ru": "Сменить модель…",
+        "uk": "Змінити модель…"
       },
       "choose_model": {
         "en": "Choose model…",
-        "sv": "Välj modell…"
+        "es": "Elegir modelo…",
+        "sv": "Välj modell…",
+        "ru": "Выбрать модель…",
+        "uk": "Вибрати модель…"
       },
       "downloading": {
         "en": "Downloading %{percent}%",
-        "sv": "Laddar ned %{percent}%"
+        "es": "Descargando %{percent}%",
+        "sv": "Laddar ned %{percent}%",
+        "ru": "Скачивание: %{percent}%",
+        "uk": "Завантаження: %{percent}%"
       },
       "no_model": {
         "en": "No model installed",
-        "sv": "Ingen modell installerad"
+        "es": "Ningún modelo instalado",
+        "sv": "Ingen modell installerad",
+        "ru": "Модель не установлена",
+        "uk": "Модель не установлено"
       },
       "choose_model_hint": {
         "en": "Choose a model to create transcripts.",
-        "sv": "Välj en modell för att skapa transkriptioner."
+        "es": "Elige un modelo para crear transcripciones.",
+        "sv": "Välj en modell för att skapa transkriptioner.",
+        "ru": "Выберите модель, чтобы создавать расшифровки.",
+        "uk": "Виберіть модель, щоб створювати розшифровки."
       },
       "max_duration_title": {
         "en": "Maximum meeting duration",
-        "sv": "Längsta mötestid"
+        "es": "Duración máxima de la reunión",
+        "sv": "Längsta mötestid",
+        "ru": "Максимальная длительность встречи",
+        "uk": "Максимальна тривалість зустрічі"
       },
       "max_duration_description": {
         "en": "Stops a forgotten recording so it does not write a very long file.",
-        "sv": "Stoppar en bortglömd inspelning så att den inte skriver en mycket lång fil."
+        "es": "Detiene una grabación olvidada para que no genere un archivo larguísimo.",
+        "sv": "Stoppar en bortglömd inspelning så att den inte skriver en mycket lång fil.",
+        "ru": "Останавливает забытую запись, чтобы не создавался очень длинный файл.",
+        "uk": "Зупиняє забутий запис, щоб не створювався дуже довгий файл."
       },
       "hours_one": {
         "en": "%{count} hour",
-        "sv": "%{count} timme"
+        "es": "%{count} hora",
+        "sv": "%{count} timme",
+        "ru": "%{count} час",
+        "uk": "%{count} година"
+      },
+      "hours_few": {
+        "ru": "%{count} часа",
+        "uk": "%{count} години"
+      },
+      "hours_many": {
+        "ru": "%{count} часов",
+        "uk": "%{count} годин"
       },
       "hours_other": {
         "en": "%{count} hours",
-        "sv": "%{count} timmar"
+        "es": "%{count} horas",
+        "sv": "%{count} timmar",
+        "ru": "%{count} часа",
+        "uk": "%{count} години"
       },
       "language_title": {
         "en": "Language",
-        "sv": "Språk"
+        "es": "Idioma",
+        "sv": "Språk",
+        "ru": "Язык",
+        "uk": "Мова"
       },
       "language_system": {
         "en": "System default (%{language})",
-        "sv": "Systemstandard (%{language})"
+        "es": "Predeterminado del sistema (%{language})",
+        "sv": "Systemstandard (%{language})",
+        "ru": "Как в системе (%{language})",
+        "uk": "Як у системі (%{language})"
       },
       "language_description": {
         "en": "The language of menus, messages, dates and numbers.",
-        "sv": "Språket för menyer, meddelanden, datum och tal."
+        "es": "El idioma de los menús, los mensajes, las fechas y los números.",
+        "sv": "Språket för menyer, meddelanden, datum och tal.",
+        "ru": "Язык меню, сообщений, дат и чисел.",
+        "uk": "Мова меню, повідомлень, дат і чисел."
       },
       "close_to_tray_title": {
         "en": "Close to the notification area",
-        "sv": "Stäng till aviseringsfältet"
+        "es": "Cerrar en el área de notificaciones",
+        "sv": "Stäng till aviseringsfältet",
+        "ru": "Закрывать в область уведомлений",
+        "uk": "Закривати в область сповіщень"
       },
       "close_to_tray_description": {
         "en": "Skrivli keeps running when you close the window.",
-        "sv": "Skrivli fortsätter köra när du stänger fönstret."
+        "es": "Skrivli sigue ejecutándose al cerrar la ventana.",
+        "sv": "Skrivli fortsätter köra när du stänger fönstret.",
+        "ru": "Skrivli продолжает работать после закрытия окна.",
+        "uk": "Skrivli продовжує працювати після закриття вікна."
       },
       "version": {
         "en": "Version %{version}",
-        "sv": "Version %{version}"
+        "es": "Versión %{version}",
+        "sv": "Version %{version}",
+        "ru": "Версия %{version}",
+        "uk": "Версія %{version}"
       },
       "still_running_title": {
         "en": "Skrivli is still running",
-        "sv": "Skrivli körs fortfarande"
+        "es": "Skrivli sigue ejecutándose",
+        "sv": "Skrivli körs fortfarande",
+        "ru": "Skrivli продолжает работать",
+        "uk": "Skrivli досі працює"
       },
       "still_running_body": {
         "en": "Skrivli stays in the notification area. Use Exit to quit.",
-        "sv": "Skrivli finns kvar i aviseringsfältet. Använd Avsluta för att stänga programmet."
+        "es": "Skrivli permanece en el área de notificaciones. Usa Salir para cerrarlo.",
+        "sv": "Skrivli finns kvar i aviseringsfältet. Använd Avsluta för att stänga programmet.",
+        "ru": "Skrivli остаётся в области уведомлений. Чтобы закрыть программу, выберите «Выход».",
+        "uk": "Skrivli залишається в області сповіщень. Щоб закрити програму, виберіть «Вийти»."
       },
       "exit_title": {
         "en": "Stop and save?",
-        "sv": "Stoppa och spara?"
+        "es": "¿Detener y guardar?",
+        "sv": "Stoppa och spara?",
+        "ru": "Остановить и сохранить?",
+        "uk": "Зупинити й зберегти?"
       },
       "exit_body": {
         "en": "A recording is in progress. Exit will stop and save it first.",
-        "sv": "En inspelning pågår. Avsluta stoppar och sparar den först."
+        "es": "Hay una grabación en curso. Salir la detendrá y la guardará primero.",
+        "sv": "En inspelning pågår. Avsluta stoppar och sparar den först.",
+        "ru": "Идёт запись. При выходе она будет остановлена и сохранена.",
+        "uk": "Триває запис. Під час виходу його буде зупинено й збережено."
       },
       "exit_confirm": {
         "en": "Stop and exit",
-        "sv": "Stoppa och avsluta"
+        "es": "Detener y salir",
+        "sv": "Stoppa och avsluta",
+        "ru": "Остановить и выйти",
+        "uk": "Зупинити й вийти"
       }
     },
     "model_description": {
       "nemotron_3_5_streaming_0_6b_q8_0": {
         "en": "Accurate in 40 languages, including English and Swedish",
-        "sv": "Noggrann på 40 språk, bland annat engelska och svenska"
+        "es": "Preciso en 40 idiomas, entre ellos inglés y sueco",
+        "sv": "Noggrann på 40 språk, bland annat engelska och svenska",
+        "ru": "Точная работа на 40 языках, включая английский и шведский",
+        "uk": "Точна робота 40 мовами, зокрема англійською та шведською"
       },
       "parakeet_tdt_0_6b_v3_q8_0": {
         "en": "Fast and accurate in 25 European languages, including English and Swedish",
-        "sv": "Snabb och noggrann på 25 europeiska språk, bland annat engelska och svenska"
+        "es": "Rápido y preciso en 25 idiomas europeos, entre ellos inglés y sueco",
+        "sv": "Snabb och noggrann på 25 europeiska språk, bland annat engelska och svenska",
+        "ru": "Быстрая и точная работа на 25 европейских языках, включая английский и шведский",
+        "uk": "Швидка й точна робота 25 європейськими мовами, зокрема англійською та шведською"
       },
       "parakeet_tdt_0_6b_v3_q6_k": {
         "en": "Smaller download, 25 European languages, including English and Swedish",
-        "sv": "Mindre nedladdning, 25 europeiska språk, bland annat engelska och svenska"
+        "es": "Descarga más pequeña, 25 idiomas europeos, entre ellos inglés y sueco",
+        "sv": "Mindre nedladdning, 25 europeiska språk, bland annat engelska och svenska",
+        "ru": "Меньший размер загрузки, 25 европейских языков, включая английский и шведский",
+        "uk": "Менший обсяг завантаження, 25 європейських мов, зокрема англійська та шведська"
       },
       "parakeet_tdt_0_6b_v3_q4_k": {
         "en": "Smallest download, 25 European languages, including English and Swedish",
-        "sv": "Minsta nedladdningen, 25 europeiska språk, bland annat engelska och svenska"
+        "es": "La descarga más pequeña, 25 idiomas europeos, entre ellos inglés y sueco",
+        "sv": "Minsta nedladdningen, 25 europeiska språk, bland annat engelska och svenska",
+        "ru": "Наименьший размер загрузки, 25 европейских языков, включая английский и шведский",
+        "uk": "Найменший обсяг завантаження, 25 європейських мов, зокрема англійська та шведська"
       },
       "parakeet_tdt_0_6b_v2_q8_0": {
         "en": "Fast and accurate, English only",
-        "sv": "Snabb och noggrann, endast engelska"
+        "es": "Rápido y preciso, solo inglés",
+        "sv": "Snabb och noggrann, endast engelska",
+        "ru": "Быстрая и точная работа, только английский",
+        "uk": "Швидка й точна робота, лише англійська"
       },
       "parakeet_tdt_0_6b_v2_q6_k": {
         "en": "Smaller download, English only",
-        "sv": "Mindre nedladdning, endast engelska"
+        "es": "Descarga más pequeña, solo inglés",
+        "sv": "Mindre nedladdning, endast engelska",
+        "ru": "Меньший размер загрузки, только английский",
+        "uk": "Менший обсяг завантаження, лише англійська"
+      }
+    },
+    "units": {
+      "b": {
+        "en": "B",
+        "es": "B",
+        "sv": "B",
+        "ru": "Б",
+        "uk": "Б"
+      },
+      "kb": {
+        "en": "KB",
+        "es": "KB",
+        "sv": "KB",
+        "ru": "КБ",
+        "uk": "КБ"
+      },
+      "mb": {
+        "en": "MB",
+        "es": "MB",
+        "sv": "MB",
+        "ru": "МБ",
+        "uk": "МБ"
+      },
+      "gb": {
+        "en": "GB",
+        "es": "GB",
+        "sv": "GB",
+        "ru": "ГБ",
+        "uk": "ГБ"
       }
     }
   },
   "gpui_component": {
     "Dialog": {
       "ok": {
-        "sv": "OK"
+        "es": "Aceptar",
+        "sv": "OK",
+        "ru": "ОК",
+        "uk": "OK"
       },
       "cancel": {
-        "sv": "Avbryt"
+        "es": "Cancelar",
+        "sv": "Avbryt",
+        "ru": "Отмена",
+        "uk": "Скасувати"
       }
     },
     "Input": {
       "Cut": {
-        "sv": "Klipp ut"
+        "es": "Cortar",
+        "sv": "Klipp ut",
+        "ru": "Вырезать",
+        "uk": "Вирізати"
       },
       "Copy": {
-        "sv": "Kopiera"
+        "es": "Copiar",
+        "sv": "Kopiera",
+        "ru": "Скопировать",
+        "uk": "Копіювати"
       },
       "Paste": {
-        "sv": "Klistra in"
+        "es": "Pegar",
+        "sv": "Klistra in",
+        "ru": "Вставить",
+        "uk": "Вставити"
       },
       "Select All": {
-        "sv": "Markera allt"
+        "es": "Seleccionar todo",
+        "sv": "Markera allt",
+        "ru": "Выбрать все",
+        "uk": "Вибрати все"
       },
       "Clear": {
-        "sv": "Rensa"
+        "es": "Borrar",
+        "sv": "Rensa",
+        "ru": "Очистить",
+        "uk": "Очистити"
       }
     }
   }

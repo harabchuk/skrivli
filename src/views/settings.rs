@@ -15,7 +15,7 @@ use crate::ui::components::dialog_style::DIALOG_WIDTH;
 use crate::ui::components::model_card::{model_tag, ModelCardTag};
 use crate::ui::components::settings_rows::{settings_row, settings_section};
 
-use super::format::size_text;
+use super::format::{plural_suffix, size_text};
 use super::model_prompt::model_copy;
 use super::state::ModelStatus;
 
@@ -70,12 +70,20 @@ pub(crate) fn settings_model_row(
 
 /// "1 hour", "3 hours" and the like, with the plural the language needs.
 pub(crate) fn duration_label(duration: MaxMeetingDuration, language: Language) -> String {
-    let key = if duration.hours() == 1 {
-        "app.settings.hours_one"
-    } else {
-        "app.settings.hours_other"
+    let hours = duration.hours();
+    let locale = language.code();
+    let plural = match plural_suffix(hours, language) {
+        "one" => t!("app.settings.hours_one", locale = locale, count = hours),
+        "few" => t!("app.settings.hours_few", locale = locale, count = hours),
+        "many" => t!("app.settings.hours_many", locale = locale, count = hours),
+        _ => t!("app.settings.hours_other", locale = locale, count = hours),
     };
-    t!(key, locale = language.code(), count = duration.hours()).into_owned()
+    // A language without a text for its form (the catalog has no `hours_few`
+    // for English, say) falls back to the "other" text.
+    if plural.contains("settings.hours_") {
+        return t!("app.settings.hours_other", locale = locale, count = hours).into_owned();
+    }
+    plural.into_owned()
 }
 
 /// One entry of the Maximum meeting duration menu.
@@ -484,6 +492,28 @@ mod tests {
         // Assert
         assert_eq!(english, ("1 hour".to_string(), "3 hours".to_string()));
         assert_eq!(swedish, ("1 timme".to_string(), "3 timmar".to_string()));
+        assert_eq!(duration_label(one, Language::Spanish), "1 hora");
+        assert_eq!(duration_label(three, Language::Spanish), "3 horas");
+    }
+
+    #[test]
+    fn duration_labels_use_slavic_plurals() {
+        // Arrange
+        let hours = |n| MaxMeetingDuration::from_hours(n).expect("choice");
+
+        // Act
+        let russian: Vec<_> = [1, 3, 6]
+            .into_iter()
+            .map(|n| duration_label(hours(n), Language::Russian))
+            .collect();
+
+        // Assert
+        assert_eq!(russian, ["1 час", "3 часа", "6 часов"]);
+        let ukrainian: Vec<_> = [1, 3, 12]
+            .into_iter()
+            .map(|n| duration_label(hours(n), Language::Ukrainian))
+            .collect();
+        assert_eq!(ukrainian, ["1 година", "3 години", "12 годин"]);
     }
 
     #[test]
@@ -509,9 +539,24 @@ mod tests {
                     false
                 ),
                 (
+                    "Español",
+                    LanguagePreference::Fixed(Language::Spanish),
+                    false
+                ),
+                (
                     "Svenska",
                     LanguagePreference::Fixed(Language::Swedish),
                     true
+                ),
+                (
+                    "Русский",
+                    LanguagePreference::Fixed(Language::Russian),
+                    false
+                ),
+                (
+                    "Українська",
+                    LanguagePreference::Fixed(Language::Ukrainian),
+                    false
                 ),
             ]
         );

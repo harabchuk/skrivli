@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-const LANGUAGES: [&str; 2] = ["en", "sv"];
+const LANGUAGES: [&str; 5] = ["en", "es", "sv", "ru", "uk"];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -82,6 +82,8 @@ fn every_app_key_has_every_language() {
     let missing: Vec<String> = leaves
         .iter()
         .filter(|(key, _)| key.starts_with("app."))
+        // Plural forms exist only for the languages that use them.
+        .filter(|(key, _)| !key.ends_with("_few") && !key.ends_with("_many"))
         .flat_map(|(key, texts)| {
             LANGUAGES
                 .iter()
@@ -183,7 +185,7 @@ fn every_key_the_code_asks_for_exists() {
 }
 
 #[test]
-fn swedish_overrides_for_kit_controls_are_present() {
+fn kit_control_overrides_exist_for_every_language() {
     // Arrange
     let leaves = all_leaves();
     let wanted = [
@@ -196,15 +198,20 @@ fn swedish_overrides_for_kit_controls_are_present() {
     ];
 
     // Act
-    let missing: Vec<&str> = wanted
-        .into_iter()
-        .filter(|key| {
-            !leaves
-                .iter()
-                .any(|(name, texts)| name == key && texts.contains_key("sv"))
+    let missing: Vec<String> = LANGUAGES
+        .iter()
+        .filter(|language| **language != "en")
+        .flat_map(|language| {
+            let leaves = &leaves;
+            wanted.iter().filter_map(move |key| {
+                let found = leaves
+                    .iter()
+                    .any(|(name, texts)| name == key && texts.contains_key(*language));
+                (!found).then(|| format!("{key} [{language}]"))
+            })
         })
         .collect();
 
     // Assert
-    assert!(missing.is_empty(), "no Swedish text for {missing:?}");
+    assert!(missing.is_empty(), "no Kit override for {missing:?}");
 }

@@ -3,23 +3,35 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Languages the interface is translated into.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Language {
     #[default]
     English,
+    Spanish,
     Swedish,
+    Russian,
+    Ukrainian,
 }
 
 impl Language {
     /// Every language, in the order Settings lists them.
-    pub(crate) const ALL: [Language; 2] = [Language::English, Language::Swedish];
+    pub(crate) const ALL: [Language; 5] = [
+        Language::English,
+        Language::Spanish,
+        Language::Swedish,
+        Language::Russian,
+        Language::Ukrainian,
+    ];
 
     /// BCP 47 code used for the translation catalog and for ICU4X.
     pub(crate) fn code(self) -> &'static str {
         match self {
             Self::English => "en",
+            Self::Spanish => "es",
             Self::Swedish => "sv",
+            Self::Russian => "ru",
+            Self::Ukrainian => "uk",
         }
     }
 
@@ -28,12 +40,33 @@ impl Language {
     pub(crate) fn native_name(self) -> &'static str {
         match self {
             Self::English => "English",
+            Self::Spanish => "Español",
             Self::Swedish => "Svenska",
+            Self::Russian => "Русский",
+            Self::Ukrainian => "Українська",
         }
     }
 }
 
 impl Language {
+    /// The name stored in settings. It matches the serde `snake_case` name.
+    fn storage_name(self) -> &'static str {
+        match self {
+            Self::English => "english",
+            Self::Spanish => "spanish",
+            Self::Swedish => "swedish",
+            Self::Russian => "russian",
+            Self::Ukrainian => "ukrainian",
+        }
+    }
+
+    /// The language stored under `name`, if this build knows it.
+    fn from_storage_name(name: &str) -> Option<Language> {
+        Self::ALL
+            .into_iter()
+            .find(|language| language.storage_name() == name)
+    }
+
     /// The supported language for a locale tag such as `sv-SE`, `sv_FI` or `SV`.
     /// Only the primary subtag counts.
     pub(crate) fn from_tag(tag: &str) -> Option<Language> {
@@ -88,8 +121,7 @@ impl<'de> Deserialize<'de> for LanguagePreference {
         let text = String::deserialize(deserializer)?;
         Ok(match text.as_str() {
             "system" => Self::System,
-            "swedish" => Self::Fixed(Language::Swedish),
-            _ => Self::Fixed(Language::English),
+            name => Self::Fixed(Language::from_storage_name(name).unwrap_or_default()),
         })
     }
 }
@@ -99,10 +131,7 @@ impl<'de> Deserialize<'de> for LanguagePreference {
 impl<'de> Deserialize<'de> for Language {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        Ok(match text.as_str() {
-            "swedish" => Self::Swedish,
-            _ => Self::English,
-        })
+        Ok(Self::from_storage_name(&text).unwrap_or_default())
     }
 }
 
@@ -210,9 +239,48 @@ mod tests {
         let names: Vec<_> = languages.iter().map(|l| l.native_name()).collect();
 
         // Assert
-        assert_eq!(codes, ["en", "sv"]);
-        assert_eq!(names, ["English", "Svenska"]);
+        assert_eq!(codes, ["en", "es", "sv", "ru", "uk"]);
+        assert_eq!(
+            names,
+            ["English", "Español", "Svenska", "Русский", "Українська"]
+        );
         assert_eq!(Language::default(), Language::English);
+    }
+
+    #[test]
+    fn new_languages_round_trip_in_settings() {
+        // Arrange
+        let cases = [
+            ("\"spanish\"", Language::Spanish),
+            ("\"russian\"", Language::Russian),
+            ("\"ukrainian\"", Language::Ukrainian),
+        ];
+
+        // Act / Assert
+        for (text, language) in cases {
+            let read: Language = serde_json::from_str(text).expect("read language");
+            let preference: LanguagePreference = serde_json::from_str(text).expect("read choice");
+            assert_eq!(read, language);
+            assert_eq!(preference, LanguagePreference::Fixed(language));
+            assert_eq!(serde_json::to_string(&language).expect("write"), text);
+            assert_eq!(serde_json::to_string(&preference).expect("write"), text);
+        }
+    }
+
+    #[test]
+    fn system_tags_pick_the_new_languages() {
+        // Arrange
+        let cases = [
+            ("es-419", Language::Spanish),
+            ("ru-RU", Language::Russian),
+            ("uk_UA", Language::Ukrainian),
+        ];
+
+        // Act / Assert
+        for (tag, language) in cases {
+            let resolved = LanguagePreference::System.resolve(&tags(&[tag]));
+            assert_eq!(resolved, language);
+        }
     }
 
     #[test]

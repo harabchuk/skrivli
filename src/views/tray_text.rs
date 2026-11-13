@@ -51,6 +51,20 @@ mod tests {
     }
 
     #[test]
+    fn tray_text_for_russian_keeps_non_ascii_text() {
+        // Arrange
+        let language = Language::Russian;
+
+        // Act
+        let text = tray_text(language);
+
+        // Assert
+        assert_eq!(text.show, "Показать Skrivli");
+        assert_eq!(text.balloon_title, "Расшифровка готова");
+        assert_ne!(text, tray_text(Language::English));
+    }
+
+    #[test]
     fn tray_text_for_swedish() {
         // Arrange
         let language = Language::Swedish;
