@@ -237,13 +237,14 @@ skrivli/
 │   │   ├── mod.rs
 │   │   ├── audio.rs                # formats, AudioBlock, endpoints
 │   │   ├── chunk_plan.rs           # QPC session timeline (48 kHz); transcript windows live in transcript.rs
-│   │   ├── language.rs             # Language (interface language), codes and native names
+│   │   ├── language.rs             # Language, LanguagePreference (system or pinned), tag matching
 │   │   ├── recording.rs            # metadata + RecordPhase
 │   │   ├── theme.rs                # ThemePreference
 │   │   └── transcript.rs           # segments, text formatting
 │   ├── services/
 │   │   ├── mod.rs
 │   │   ├── recording.rs            # one recording lifecycle
+│   │   ├── language.rs             # system_language over the SystemLocale port
 │   │   ├── audio_pipeline/         # Pipeline, aligner, chains
 │   │   ├── recording_harness.rs    # fake capture for tests
 │   │   ├── playback.rs             # PlayerHost command loop
@@ -270,6 +271,7 @@ skrivli/
 │   │   │   ├── settings.rs
 │   │   │   ├── library.rs
 │   │   │   └── sidecar.rs
+│   │   ├── locale.rs               # SysLocale: sys-locale adapter for the SystemLocale port
 │   │   ├── files/
 │   │   │   ├── mod.rs
 │   │   │   ├── flac.rs             # FlacWriter
@@ -335,6 +337,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `infrastructure/ai/` | Speech engine adapter (parakeet.cpp) and local model management |
 | `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
 | `infrastructure/files/` | FLAC writer, Rodio output session with FLAC source, transcript reader, writability probe |
+| `infrastructure/locale.rs` | `SysLocale`, the `sys-locale` adapter that lists the Windows display languages for the `SystemLocale` port (no per-OS code) |
 | `infrastructure/platform/` | Sole home for direct OS API calls (`windows` crate, FFI, per-OS `cfg`): shell, tray, trash, watch, replace, clocks, disk, device wake. Cross-platform crates that hide the OS (flexaudio, `sys-locale`) are wrapped once in their own `infrastructure/` area, not here |
 | `ui/` | Reusable GPUI Kit compositions and custom GPUI elements such as level meters |
 | `views/` | GPUI screens, shell reducer (`Presentation` / commands), window composition |
@@ -538,7 +541,7 @@ Queued → Preparing → Transcribing { percent } → Done | Failed | Cancelled
 
 **Settings:** recording directory, default endpoints, microphone gain, system audio gain, optional stems; transcription model, CPU threads, VAD, auto-transcribe; interface language, close-to-tray, Windows autostart, start hidden and global hotkey. Validate choices before persisting, and apply mutable settings without restarting where safe.
 
-**Language row (Settings → General):** a dropdown like `max_duration_menu`, listing `Language::native_name()` with the current one checked. `SettingsView` carries `language` and `SettingsHandlers` has `on_language`. `MainWindow::set_language` updates `Settings` (schema 5, field `language`, unknown values read as English), saves through the hooks, calls `gpui_kit::component::set_locale`, replaces the tray text through `ShellHooks::set_tray_text`, relabels the device menus, rebuilds the library rows (they hold text already written in the language) and calls `cx.refresh_windows()`. All of this is cheap and runs on the GPUI thread.
+**Language row (Settings → General):** a dropdown like `max_duration_menu`. `language_choices` lists "System default (<native name>)" first, then `Language::native_name()` for each language, with the current choice checked. The stored value is a `LanguagePreference` (`System` or `Fixed(Language)`), written in the same `language` field as `"system"`, `"english"` or `"swedish"` (schema stays 5; a missing field reads as `System`, an unknown value as `Fixed(English)`). `app::bootstrap` asks the `SystemLocale` port (`services/ports.rs`, adapter `infrastructure/locale.rs` over `sys-locale`) once, through `services::language::system_language`, which matches the primary subtag of each tag in order against `Language::from_tag` and falls back to English. The result is passed to `MainWindow`, whose private `language()` resolves the preference (`System` gives that startup value, so Windows is not read again). `SettingsView` carries `language`, `language_preference` and `system_language`, and `SettingsHandlers::on_language` takes a `LanguagePreference`. `MainWindow::set_language_preference` updates `Settings`, saves through the hooks, calls `gpui_kit::component::set_locale`, replaces the tray text through `ShellHooks::set_tray_text`, relabels the device menus, rebuilds the library rows (they hold text already written in the language) and calls `cx.refresh_windows()`. All of this is cheap and runs on the GPUI thread.
 
 **Localization:** `rust_i18n::i18n!("locales", fallback = "en")` sits at the crate root (`lib.rs`), with a `ts!` helper that returns a `SharedString`. `app::bootstrap` calls `rust_i18n::extend!(gpui_component)` and `set_locale` once, before the window opens. Catalog keys are `app.<area>.<name>`; each value is a whole message with named arguments, never sentences glued together, and counts that need a plural have separate `_one` and `_other` keys. Pure functions that must be tested in both languages take a `Language` and pass `locale = language.code()` to `t!`, so tests do not change the process-wide locale. Services and `AppError` keep their English sentences, which several places compare; `views/notices.rs` maps the known sentences to `app.notice.*` keys where they are shown, and passes anything else through unchanged. `domain/` carries no user text. `tests/locales.rs` checks that every `app.` key has every language with the same placeholders, that every key used in `src/` exists, and that every manifest model has a description key.
 
