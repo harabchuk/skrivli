@@ -335,7 +335,7 @@ Rust conventions: snake_case modules; types group by cohesive responsibility rat
 | `infrastructure/ai/` | Speech engine adapter (parakeet.cpp) and local model management |
 | `infrastructure/storage/` | JSON settings, recording library and sidecars (calls `platform::replace_file`) |
 | `infrastructure/files/` | FLAC writer, Rodio output session with FLAC source, transcript reader, writability probe |
-| `infrastructure/platform/` | Sole home for OS APIs: shell, tray, trash, watch, replace, clocks, disk, device wake |
+| `infrastructure/platform/` | Sole home for direct OS API calls (`windows` crate, FFI, per-OS `cfg`): shell, tray, trash, watch, replace, clocks, disk, device wake. Cross-platform crates that hide the OS (flexaudio, `sys-locale`) are wrapped once in their own `infrastructure/` area, not here |
 | `ui/` | Reusable GPUI Kit compositions and custom GPUI elements such as level meters |
 | `views/` | GPUI screens, shell reducer (`Presentation` / commands), window composition |
 | `tests/` | End-to-end application integration tests and reusable test support |
