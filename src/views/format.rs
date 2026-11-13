@@ -11,6 +11,7 @@ use icu::datetime::FixedCalendarDateTimeFormatter;
 use icu::decimal::input::Decimal;
 use icu::decimal::DecimalFormatter;
 use icu::locale::Locale;
+use icu::plurals::{PluralCategory, PluralRules};
 use icu::time::Time;
 
 use crate::domain::audio::CivilTime;
@@ -21,6 +22,7 @@ struct Formatters {
     clock: Option<FixedCalendarDateTimeFormatter<Gregorian, T>>,
     month_day: Option<FixedCalendarDateTimeFormatter<Gregorian, MD>>,
     number: Option<DecimalFormatter>,
+    plurals: Option<PluralRules>,
 }
 
 impl Formatters {
@@ -29,12 +31,14 @@ impl Formatters {
         let tag = match language {
             Language::English => "en-u-hc-h23",
             Language::Swedish => "sv",
+            Language::Russian => "ru",
         };
         let locale: Locale = tag.parse().unwrap_or(Locale::UNKNOWN);
         Self {
             clock: FixedCalendarDateTimeFormatter::try_new((&locale).into(), T::hm()).ok(),
             month_day: FixedCalendarDateTimeFormatter::try_new((&locale).into(), MD::medium()).ok(),
             number: DecimalFormatter::try_new((&locale).into(), Default::default()).ok(),
+            plurals: PluralRules::try_new_cardinal((&locale).into()).ok(),
         }
     }
 }
@@ -44,13 +48,26 @@ impl Formatters {
 thread_local! {
     static ENGLISH: Rc<Formatters> = Rc::new(Formatters::new(Language::English));
     static SWEDISH: Rc<Formatters> = Rc::new(Formatters::new(Language::Swedish));
+    static RUSSIAN: Rc<Formatters> = Rc::new(Formatters::new(Language::Russian));
 }
 
 fn with_formatters<R>(language: Language, use_formatters: impl FnOnce(&Formatters) -> R) -> R {
     match language {
         Language::English => ENGLISH.with(|formatters| use_formatters(formatters)),
         Language::Swedish => SWEDISH.with(|formatters| use_formatters(formatters)),
+        Language::Russian => RUSSIAN.with(|formatters| use_formatters(formatters)),
     }
+}
+
+/// The plural form `count` takes in `language` (CLDR: one, few, many, other).
+/// Falls back to `other`, which every language's text defines.
+pub(crate) fn plural_category(count: u32, language: Language) -> PluralCategory {
+    with_formatters(language, |formatters| {
+        formatters
+            .plurals
+            .as_ref()
+            .map_or(PluralCategory::Other, |rules| rules.category_for(count))
+    })
 }
 
 /// Hour and minute, for example `14:32`.
@@ -202,6 +219,44 @@ mod tests {
         assert_eq!(text, "38,0 MB");
         assert_eq!(size_text(500, Language::Swedish), "500 B");
         assert_eq!(size_text(983_696_512, Language::Swedish), "938,1 MB");
+    }
+
+    #[test]
+    fn russian_clock_is_24_hour() {
+        // Arrange
+        let time = nov_12();
+
+        // Act
+        let text = clock_text(time, Language::Russian);
+
+        // Assert
+        assert_eq!(text, "14:32");
+    }
+
+    #[test]
+    fn russian_month_day() {
+        // Arrange
+        let time = nov_12();
+
+        // Act
+        let text = month_day_text(time, Language::Russian);
+
+        // Assert
+        assert_eq!(text, "12 нояб.");
+    }
+
+    #[test]
+    fn russian_size_uses_decimal_comma() {
+        // Arrange
+        let bytes = 39_845_888;
+
+        // Act
+        let text = size_text(bytes, Language::Russian);
+        let gain = gain_text(1.7, Language::Russian);
+
+        // Assert
+        assert_eq!(text, "38,0 MB");
+        assert_eq!(gain, "1,7×");
     }
 
     #[test]
