@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-14] # macos-14 is the Apple Silicon runner
+        os: [windows-latest, macos-15] # macos-15 is an Apple Silicon runner
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
