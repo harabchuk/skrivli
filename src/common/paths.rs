@@ -37,7 +37,8 @@ impl AppPaths {
     }
 }
 
-#[cfg(test)]
+// Drive-letter bases only make sense as Windows paths.
+#[cfg(all(test, windows))]
 mod tests {
     use std::path::Path;
 

@@ -1,5 +1,10 @@
 //! Skrivli application library. The GPUI thread must not block on audio, disk, or inference.
 
+// The macOS host is stubs until its real adapters land, so the code only they call
+// (device catalog, directory watch events, path layout) looks unused there. Remove this
+// line once `platform/macos/` uses all of it; Windows keeps the full dead-code check.
+#![cfg_attr(target_os = "macos", allow(dead_code))]
+
 // Translations live in `locales/ui.json`. App text is under `app.`; Swedish text for
 // Kit's own controls is under `gpui_component.` (see `app::bootstrap`).
 rust_i18n::i18n!("locales", fallback = "en");

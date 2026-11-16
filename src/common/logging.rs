@@ -102,7 +102,8 @@ impl SizeRotatingFile {
         self.file.flush()?;
         // Close the active file before renaming it. Windows denies the rename
         // while this process still has the log open.
-        let sink = OpenOptions::new().write(true).open("NUL")?;
+        let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        let sink = OpenOptions::new().write(true).open(null_device)?;
         drop(std::mem::replace(&mut self.file, sink));
         shift_archives(&self.path, self.archive_count)?;
         self.file = OpenOptions::new()
