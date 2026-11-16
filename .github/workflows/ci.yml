@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  windows:
+  build:
     # A cargo-release commit ("Release vX.Y.Z") is pushed together with its tag,
     # and release.yml runs this workflow for that tag. Skip the duplicate branch run.
     # When called from release.yml the ref is the tag, so that run is kept.
@@ -24,7 +24,11 @@ jobs:
       github.event_name != 'push' ||
       github.ref_type == 'tag' ||
       !startsWith(github.event.head_commit.message, 'Release v')
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14] # macos-14 is the Apple Silicon runner
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,7 +37,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
       - name: format
+        # Formatting does not depend on the OS, so once is enough.
+        if: runner.os == 'Windows'
         run: cargo fmt --all -- --check
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
