@@ -9,5 +9,14 @@ pub(crate) use windows::{
     user_paths, PlatformHost,
 };
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+mod macos;
+
+#[cfg(target_os = "macos")]
+pub(crate) use macos::{
+    clock, completion_notifier, disk, host, performance_counter, replace_file, spawn_device_watch,
+    user_paths, PlatformHost,
+};
+
+#[cfg(not(any(windows, target_os = "macos")))]
 compile_error!("add infrastructure/platform/<os> and select it in platform/mod.rs");

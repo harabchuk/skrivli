@@ -1,6 +1,6 @@
 # Skrivli — Application Design and Implementation Plan
 
-**Platform:** Windows desktop (initially Windows 10/11, x86_64 MSVC)  
+**Platform:** Windows desktop (Windows 10/11, x86_64 MSVC) and macOS 14.4+ on Apple Silicon (arm64, in progress; see section 4.4)  
 **Language:** Rust (stable; repository-pinned toolchain)  
 **UI:** **GPUI Kit** (`gpui-kit`) on GPUI, with its styled component library; pin a Windows-tested version  
 **Status:** Greenfield application design and phased implementation plan.
@@ -170,7 +170,14 @@ These are illustrative types, not ready-to-compile declarations; IDs and state t
 
 ### 4.4 Adding a platform
 
-Ship another OS only when that target is committed. v1 is Windows only. The compiler target selects the host. `infrastructure/platform/mod.rs` is the only `target_os` branch in the app. `#[cfg(windows)]` compiles `platform/windows/`. A Linux port adds `platform/linux/` and a `#[cfg(target_os = "linux")]` re-export of the same function names. Use `target_os`, not `cfg(unix)`, because macOS is also Unix. Do not use a Cargo feature as the OS switch.
+Ship another OS only when that target is committed. The committed targets are Windows (x86_64 MSVC) and macOS 14.4+ on Apple Silicon (aarch64). The compiler target selects the host. `infrastructure/platform/mod.rs` is the only `target_os` branch in the app. `#[cfg(windows)]` compiles `platform/windows/` and `#[cfg(target_os = "macos")]` compiles `platform/macos/`.
+
+macOS port status (issue #31, phased):
+
+- **Phase 1 (done): compiles and tests on macOS.** `platform/macos/mod.rs` mirrors the Windows module's public surface with stubs: shell, trash, free space and `user_paths` return an "unsupported on macOS" `AppError`; single instance always reports primary; tray, device watch and the directory watch only wait for `stop` (the watch sends `Poll` every 2 s); `replace_file` is already real (`rename(2)`, atomic on APFS) because settings, sidecars and recordings all depend on it. `build.rs` branches on `CARGO_CFG_TARGET_OS`: Windows is unchanged; macOS builds parakeet.cpp with `-O3`, `CMAKE_OSX_DEPLOYMENT_TARGET=14.4`, arm64, `GGML_METAL=OFF`, `GGML_BLAS=OFF`, and links `c++` plus the Accelerate framework. `.cargo/config.toml` sets `MACOSX_DEPLOYMENT_TARGET=14.4`. `ci.yml` runs fmt (Windows only), clippy, tests and a release build on `windows-latest` and `macos-15`. While the adapters are stubs, `lib.rs` allows `dead_code` on macOS only.
+- **Later phases:** real adapters (paths, disk, clocks, trash, shell, watcher, single instance, device wake), the `.app` bundle with microphone and audio-capture permissions, the Dock app with a status item and notifications, and the ad-hoc-signed preview `.dmg`.
+
+A Linux port adds `platform/linux/` and a `#[cfg(target_os = "linux")]` re-export of the same function names. Use `target_os`, not `cfg(unix)`, because macOS is also Unix. Do not use a Cargo feature as the OS switch.
 
 One binary contains one host. `cargo build` on Windows compiles only the Windows module. `cargo build --target x86_64-unknown-linux-gnu` (or a native `cargo build` on Linux) sets `target_os = "linux"`, type-checks `platform/linux/`, and does not type-check `platform/windows/`. OS-only crates follow that: `[target.'cfg(windows)'.dependencies]` for the `windows` crate, and `[target.'cfg(target_os = "linux")'.dependencies]` for Linux crates. `build.rs` already keys off `CARGO_CFG_TARGET_OS`, which matches the target triple during a cross compile.
 

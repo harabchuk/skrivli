@@ -437,3 +437,12 @@ The default recordings folder is now `%LOCALAPPDATA%\Skrivli\recordings`, next t
 - **Lazy formatters:** `views/format.rs` builds a language's ICU4X formatters on first use and keeps them in one per-thread cache, so startup does not load every language.
 - **Kit texts:** Kit 0.9.0 has `ru` for Dialog OK/Cancel and Input Cut/Copy/Paste/Select All/Clear but no `es` or `uk`. Its `ru` text is copied into our catalog so the catalog is the single source and `tests/locales.rs` checks every non-English language the same way.
 - **Copy:** the Spanish, Russian and Ukrainian text was drafted by the agent and still needs a native speaker's review.
+
+## D-39 — macOS port: targets and phase 1 scaffold (issue #31)
+
+**Outcome:** Skrivli gets a macOS build for Apple Silicon next to Windows. Phase 1 (this change) makes the crate compile, lint and test on macOS with a stub host; nothing user-visible works there yet.
+
+- **Decided with the maintainer:** macOS 14.4+ (flexaudio's Core Audio process taps need it), arm64 only (no Intel or universal build), bundle ID `io.github.harabchuk.skrivli`, a normal Dock app with a menu-bar status item (no `LSUIElement`), and ad-hoc-signed "preview" releases until a Developer ID exists (no notarization yet).
+- **parakeet.cpp on macOS:** CPU-only like Windows (`GGML_METAL=OFF`, `GGML_BLAS=OFF`); Metal or Accelerate acceleration is a later speed-up. `PARAKEET_WITH_VOICEDETECT=OFF`, so the `voice-detect.cpp` nested submodule is not needed.
+- **Portability fixes found by running the tests on macOS:** the log rotation opened `NUL` (now `/dev/null` off Windows), and the drive-letter path-layout test is Windows-only.
+- **Still to verify at runtime on a real Mac (record here when done):** the microphone and system-audio permission prompts, capture when the output device changes, transcription speed against Windows.

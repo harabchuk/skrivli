@@ -2,7 +2,7 @@
 
 **Audience:** product, design, and anyone describing what Skrivli does for users.  
 **Perspective:** user-facing behavior only. Implementation details live in `skrivli-app-design.md` and `skrivli-implementation-plan.md`.  
-**Platform:** Windows 10 and 11 desktop.  
+**Platform:** Windows 10 and 11 desktop. macOS 14.4 or later on Apple Silicon is in progress and will be released as a preview; until its phases land, only the Windows build records and transcribes.  
 **Status:** v1 product definition derived from the implementation plan and app design.
 
 When a feature is added, changed, deferred, or removed, update this document so it stays the accurate description of what users can do.
@@ -303,7 +303,7 @@ A new user can: unzip → launch → record microphone and system audio → stop
 - Summaries or action-item generation
 - Video or screen capture
 - GPU-accelerated transcription as a required path
-- Non-Windows platforms
+- Linux, and Intel or universal macOS builds (macOS support is Apple Silicon only)
 
 ### Later directions (not commitments)
 
