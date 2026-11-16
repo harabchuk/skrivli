@@ -2,7 +2,7 @@
 name = "skrivli"
 version = "1.0.0"
 edition = "2021"
-description = "Local Windows meeting recorder"
+description = "Local meeting recorder"
 publish = false
 license = "MIT OR Apache-2.0"
 build = "build.rs"
@@ -23,7 +23,6 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ureq = "2"
-windows-core = "0.58"
 jiff = "0.2.39"
 icu = "2.4"
 rust-i18n = "4.2"
@@ -34,6 +33,7 @@ cmake = "0.1"
 winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
+windows-core = "0.58"
 windows = { version = "0.58", features = [
     "Win32_Devices_FunctionDiscovery",
     "Win32_Foundation",

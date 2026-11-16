@@ -1,5 +1,10 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
 
+# flexaudio's Core Audio process taps need macOS 14.4. build.rs (cmake crate) and rustc
+# both read this, so every object targets the same minimum.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "14.4"
+
 # parakeet.cpp/ggml are built from build.rs (cmake crate) with the matching static
 # MSVC runtime (/MT); see build.rs for the CMake flags.

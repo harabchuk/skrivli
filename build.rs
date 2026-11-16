@@ -10,11 +10,15 @@ fn main() {
     println!("cargo:rerun-if-changed=third_party/parakeet.cpp/CMakeLists.txt");
     println!("cargo:rerun-if-changed=third_party/parakeet.cpp/include/parakeet_capi.h");
     println!("cargo:rerun-if-changed=third_party/parakeet.cpp/src/parakeet_capi.cpp");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
-        return;
+    match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("windows") => build_windows(),
+        Ok("macos") => build_parakeet_macos(),
+        _ => {}
     }
+}
 
-    build_parakeet();
+fn build_windows() {
+    build_parakeet_windows();
 
     // PerMonitorV2 has to be in the process manifest before GPUI creates a
     // window. Calling SetProcessDpiAwareness afterwards is ignored.
@@ -35,7 +39,7 @@ fn main() {
 
 /// Builds parakeet.cpp (pinned submodule, see .specs/decisions.md D-33) as static,
 /// CPU-only libraries that use the static MSVC runtime, matching `+crt-static`.
-fn build_parakeet() {
+fn build_parakeet_windows() {
     let mut config = cmake::Config::new("third_party/parakeet.cpp");
     config
         // Rust always links the release CRT, so a Debug build must not use /MTd.
@@ -62,9 +66,43 @@ fn build_parakeet() {
         .define("GGML_BUILD_TESTS", "OFF")
         .define("GGML_BUILD_EXAMPLES", "OFF");
     let out = config.build();
+    link_native_libs(&out, "lib");
+}
 
+/// Builds parakeet.cpp for macOS (Apple Silicon, 14.4+): static, CPU-only, no Metal
+/// and no BLAS, so the engine behaves like the Windows build.
+fn build_parakeet_macos() {
+    let mut config = cmake::Config::new("third_party/parakeet.cpp");
+    config
+        .profile("Release")
+        // Same reason as on Windows: a dev build must not compile the engine unoptimised.
+        .define("CMAKE_C_FLAGS_RELEASE", "-O3 -DNDEBUG")
+        .define("CMAKE_CXX_FLAGS_RELEASE", "-O3 -DNDEBUG")
+        .define("CMAKE_OSX_DEPLOYMENT_TARGET", "14.4")
+        .define("CMAKE_OSX_ARCHITECTURES", "arm64")
+        .define("CMAKE_POLICY_VERSION_MINIMUM", "3.5")
+        .define("BUILD_SHARED_LIBS", "OFF")
+        .define("PARAKEET_SHARED", "OFF")
+        .define("PARAKEET_BUILD_CLI", "OFF")
+        .define("PARAKEET_BUILD_SERVER", "OFF")
+        .define("PARAKEET_BUILD_TESTS", "OFF")
+        .define("PARAKEET_WITH_CED", "OFF")
+        .define("PARAKEET_WITH_VOICEDETECT", "OFF")
+        .define("GGML_NATIVE", "OFF")
+        .define("GGML_OPENMP", "OFF")
+        .define("GGML_METAL", "OFF")
+        .define("GGML_BLAS", "OFF")
+        .define("GGML_BUILD_TESTS", "OFF")
+        .define("GGML_BUILD_EXAMPLES", "OFF");
+    let out = config.build();
+    link_native_libs(&out, "a");
+    println!("cargo:rustc-link-lib=c++");
+    println!("cargo:rustc-link-lib=framework=Accelerate");
+}
+
+fn link_native_libs(out: &Path, extension: &str) {
     let mut dirs = Vec::new();
-    collect_lib_dirs(&out.join("build"), &mut dirs);
+    collect_lib_dirs(&out.join("build"), extension, &mut dirs);
     for dir in &dirs {
         println!("cargo:rustc-link-search=native={}", dir.display());
     }
@@ -73,8 +111,8 @@ fn build_parakeet() {
     }
 }
 
-/// Directories under the CMake build tree that hold `.lib` files.
-fn collect_lib_dirs(dir: &Path, found: &mut Vec<PathBuf>) {
+/// Directories under the CMake build tree that hold static libraries with `extension`.
+fn collect_lib_dirs(dir: &Path, extension: &str, found: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -82,8 +120,8 @@ fn collect_lib_dirs(dir: &Path, found: &mut Vec<PathBuf>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_lib_dirs(&path, found);
-        } else if path.extension().is_some_and(|ext| ext == "lib") {
+            collect_lib_dirs(&path, extension, found);
+        } else if path.extension().is_some_and(|ext| ext == extension) {
             has_lib = true;
         }
     }
